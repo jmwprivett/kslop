@@ -21,7 +21,7 @@ kslop also includes a system Font Changer adapted from Lara's font-replacement
 approach, with local font importing, size validation, stock backups,
 restoration, and Regular/Italic/Mono family support.
 
-Development and integration: [`rooootdev`](https://github.com/rooootdev) /
+Original Development and integration credits: [`rooootdev`](https://github.com/rooootdev) /
 [`zeroxjf`](https://github.com/zeroxjf). The upstream contributors and license
 are credited below.
 
