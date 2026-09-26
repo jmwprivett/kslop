@@ -14,12 +14,16 @@ iOS 26 support.
 Most development time has gone into rebuilding SnowBoard support as a persistent
 IconServices-backed theme engine. Using this, we achieve complete coverage across Home
 Screen icons, folders, App Library, notifications, the app switcher, Spotlight,
-and launch/return transitions. Spotlight is the only slight hiccup currently requiring a 
-manual reapply if the process restarts, which it does sometimes.
+and launch/return transitions. Icon theme is persistent through reboot everywhere! 
+For transparent themes springboard and spotlight are manually repaired which is
+respring persistent for springboard, and mostly respring persistent for spotlight, 
+sometimes it restarts :D but with only KRW its the best we got.
 
-kslop also includes a system Font Changer adapted from Lara's font-replacement
+kslop also includes system Font Changer adapted from Lara's font-replacement
 approach, with local font importing, size validation, stock backups,
 restoration, and Regular/Italic/Mono family support.
+
+Gonna also port the KRW tweaks from iOS 16 in misaka and PureKFD, stay tuned.
 
 Original Development and integration credits: [`rooootdev`](https://github.com/rooootdev) /
 [`zeroxjf`](https://github.com/zeroxjf). The upstream contributors and license
