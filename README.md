@@ -12,10 +12,10 @@ substantially reworking the application, tweak runner, recovery behavior, and
 iOS 26 support.
 
 Most development time has gone into rebuilding SnowBoard support as a persistent
-IconServices-backed theme engine. The goal is complete coverage across Home
+IconServices-backed theme engine. Using this, we achieve complete coverage across Home
 Screen icons, folders, App Library, notifications, the app switcher, Spotlight,
-and launch/return transitions, with recoverable Apply and Restore operations.
-Some materialized SpringBoard surfaces still need a verified refresh path.
+and launch/return transitions. Spotlight is the only slight hiccup currently requiring a 
+manual reapply if the process restarts, which it does sometimes.
 
 kslop also includes a system Font Changer adapted from Lara's font-replacement
 approach, with local font importing, size validation, stock backups,
