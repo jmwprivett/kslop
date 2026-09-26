@@ -1,6 +1,6 @@
 //
 //  statbar.h
-//  StatBar port: reads battery temp + free RAM in our app process, then
+//  StatBar port: reads battery current + free RAM in our app process, then
 //  installs/updates a dedicated SpringBoard overlay UIWindow via the
 //  remote-call bridge.
 //

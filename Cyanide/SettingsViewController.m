@@ -5,6 +5,7 @@
 
 #import "SettingsViewController.h"
 #import "kexploit/kexploit_opa334.h"
+#import "kexploit/CNDLabKernelProvider.h"
 #import "tweaks/sbcustomizer.h"
 #import "tweaks/powercuff.h"
 #import "tweaks/statbar.h"
@@ -20,27 +21,43 @@
 #import "tweaks/killallapps.h"
 #import "tweaks/themer.h"
 #import "tweaks/snowboardlite.h"
+#import "tweaks/remote_objc.h"
 #import "tweaks/livewp.h"
 #import "tweaks/gravitylite.h"
 #import "tweaks/appswitchergrid.h"
 #import "tweaks/hide_home_bar.h"
+#import "tweaks/font_changer.h"
 #import <CoreMotion/CoreMotion.h>
 
 #import <objc/runtime.h>
 #import <sys/time.h>
 #import "DSKeepAlive.h"
 #import "TaskRop/RemoteCall.h"
+#import "TaskRop/CNDLabRemoteCallClient.h"
 #import "kexploit/kutils.h"
 #import "kexploit/persistence.h"
+#import "utils/sandbox.h"
 #import "installer/InstallProgressViewController.h"
+#import "installer/CNDIconDeclarationRedirect.h"
+#import "installer/CNDIconServicesInterceptProof.h"
+#import "installer/CNDIconServicesConsumerLifecycleCoordinator.h"
+#import "installer/CNDLaunchServicesRegistration.h"
+#import "installer/CNDLaunchServicesRegistrationDictionary.h"
 #import "installer/Package.h"
 #import "installer/PackageCatalog.h"
 #import "installer/PackageQueue.h"
+#import "installer/CNDDockAppPickerViewController.h"
+#import "installer/CNDDockAppCatalog.h"
+#import "installer/CNDSnowBoardRemix.h"
 #import "docs/DocsViewController.h"
 #import "PatreonAuth.h"
 #import "UpdateChecker.h"
 #import "SBLArchiveExtractor.h"
 #import "NiceBarSettingsSupport.h"
+#import "CyanideLabBridge.h"
+#import "CyanideLabProbe.h"
+#import "CNDPhysicalCSAllowInvalidProbe.h"
+#import "LogTextView.h"
 #import <WebKit/WebKit.h>
 #import <MessageUI/MessageUI.h>
 #import <PhotosUI/PhotosUI.h>
@@ -52,6 +69,8 @@
 #import <sys/utsname.h>
 #import <time.h>
 #import <unistd.h>
+#import <errno.h>
+#import <signal.h>
 
 @interface DSRespringOverlayView : UIView
 @property (nonatomic, strong) WKWebView *webView;
@@ -143,6 +162,7 @@ NSString * const kSettingsKeepAlive          = @"KeepAlive";
 
 NSString * const kSettingsSBCEnabled    = @"SBCEnabled";
 NSString * const kSettingsSBCDockIcons  = @"SBCDockIcons";
+NSString * const kSettingsSBCDockAutofillBundleIDs = @"SBCDockAutofillBundleIDs";
 NSString * const kSettingsSBCCols       = @"SBCCols";
 NSString * const kSettingsSBCRows       = @"SBCRows";
 NSString * const kSettingsSBCHideLabels = @"SBCHideLabels";
@@ -307,6 +327,38 @@ NSString * const kSettingsThemerCustomThemeName = @"ThemerCustomThemeName";
 
 NSString * const kSettingsSnowBoardLiteEnabled = @"SnowBoardLiteEnabled";
 NSString * const kSettingsSnowBoardLiteSelectedThemeID = @"SnowBoardLiteSelectedThemeID";
+NSString * const kSettingsSnowBoardRemixSelectedThemeID = @"SnowBoardRemixSelectedThemeID.v1";
+static NSString * const kSettingsSnowBoardRemixMigrationVersionKey =
+    @"SnowBoardRemixSelectedThemeID.migrationVersion";
+static const NSInteger kSettingsSnowBoardRemixMigrationVersion = 1;
+
+static void settings_migrate_snowboard_remix_preferences(NSUserDefaults *defaults)
+{
+    if (!defaults) return;
+
+    NSInteger migrationVersion =
+        [defaults integerForKey:kSettingsSnowBoardRemixMigrationVersionKey];
+    NSString *selected = [defaults stringForKey:kSettingsSnowBoardRemixSelectedThemeID];
+    NSString *legacy = [defaults stringForKey:kSettingsSnowBoardLiteSelectedThemeID];
+    if (migrationVersion < kSettingsSnowBoardRemixMigrationVersion &&
+        selected.length == 0 && legacy.length > 0) {
+        [defaults setObject:legacy forKey:kSettingsSnowBoardRemixSelectedThemeID];
+        selected = legacy;
+    }
+
+    if (migrationVersion < kSettingsSnowBoardRemixMigrationVersion) {
+        [defaults setInteger:kSettingsSnowBoardRemixMigrationVersion
+                      forKey:kSettingsSnowBoardRemixMigrationVersionKey];
+    }
+
+    // SnowBoard Remix is transaction-driven. The old live-loop master flag is
+    // retained as a compatibility read for old code, but must not be allowed
+    // to queue a second, implicit apply after migration.
+    if ([defaults boolForKey:kSettingsSnowBoardLiteEnabled]) {
+        [defaults setBool:NO forKey:kSettingsSnowBoardLiteEnabled];
+    }
+    (void)selected;
+}
 
 NSString * const kSettingsLiveWPEnabled = @"LiveWPEnabled";
 NSString * const kSettingsLiveWPVideoPath = @"LiveWPVideoPath";
@@ -339,6 +391,13 @@ static BOOL settings_cleanup_in_progress(void);
 static BOOL settings_screen_awake_cached(void);
 static BOOL settings_screen_locked_cached(void);
 static void settings_restart_gravity_motion_if_active(const char *reason);
+static void settings_reset_springboard_remote_call_health_locked(void);
+static BOOL settings_validate_springboard_remote_call_locked(const char *reason, BOOL force);
+static BOOL settings_validate_springboard_remote_call_reuse_only_locked(const char *reason);
+static void settings_note_springboard_remote_call_result_locked(const char *source, bool ok);
+static void settings_abandon_springboard_remote_call_locked(const char *reason,
+                                                            BOOL notifyState,
+                                                            BOOL preserveApplied);
 
 extern int  escape_sbx_demo2(void);
 extern int  escape_sbx_demo2_in_session(void);
@@ -350,10 +409,66 @@ static volatile int g_settings_respring_cleanup_running = 0;
 static volatile int g_settings_actions_rerun_requested = 0;
 static volatile int g_springboard_rc_ready = 0;
 static volatile int g_springboard_sandbox_escaped = 0;
+static volatile int g_spotlight_trace_stop_requested = 0;
+static volatile int g_spotlight_last_applied_pid = 0;
+static volatile uint64_t g_spotlight_last_applied_proc = 0;
+static volatile uint64_t g_spotlight_last_applied_task = 0;
+static volatile int g_spotlight_opportunistic_apply_running = 0;
+static volatile int g_spotlight_cache_proof_armed = 0;
+static volatile int g_spotlight_cache_proof_target_pid = 0;
+static volatile uint64_t g_spotlight_cache_proof_target_proc = 0;
+static volatile uint64_t g_spotlight_cache_proof_target_task = 0;
+static volatile int g_spotlight_cache_proof_channel_clean = 0;
+
+static NSString * const kSettingsSpotlightIconServicesCandidate =
+    @"SpotlightIconServicesLabCandidate";
+static NSString * const kSettingsSpotlightIconServicesSupportedMask =
+    @"SpotlightIconServicesLabSupportedMask";
+static NSString * const kSettingsSpotlightIconServicesProbePID =
+    @"SpotlightIconServicesLabProbePID";
+static NSString * const kSettingsSpotlightIconServicesProbeProc =
+    @"SpotlightIconServicesLabProbeProc";
+static NSString * const kSettingsSpotlightIconServicesProbeTask =
+    @"SpotlightIconServicesLabProbeTask";
+static NSString * const kSettingsSpotlightIconServicesArmed =
+    @"SpotlightIconServicesLabArmed";
+static NSString * const kSettingsSpotlightIconServicesTargetPID =
+    @"SpotlightIconServicesLabTargetPID";
+static NSString * const kSettingsSpotlightIconServicesTargetProc =
+    @"SpotlightIconServicesLabTargetProc";
+static NSString * const kSettingsSpotlightIconServicesTargetTask =
+    @"SpotlightIconServicesLabTargetTask";
+static NSString * const kSettingsSpotlightIconServicesTargetHost =
+    @"SpotlightIconServicesLabTargetHost";
+static NSString * const kSettingsSpotlightIconServicesChannelClean =
+    @"SpotlightIconServicesLabChannelClean";
+static NSString * const kSettingsSpotlightStock68Target =
+    @"SpotlightStock68MaterializationTarget";
+static NSString * const kSettingsSpotlightStock68Control =
+    @"SpotlightStock68MaterializationControl";
+static NSString * const kSettingsSpotlightStock68Fingerprint =
+    @"SpotlightStock68MaterializationFingerprint";
+static NSString * const kSettingsSpotlightStock68Status =
+    @"SpotlightStock68MaterializationStatus";
+static NSString * const kSettingsSpotlightStock68PID =
+    @"SpotlightStock68MaterializationPID";
+static NSString * const kSettingsSpotlightStock68Proc =
+    @"SpotlightStock68MaterializationProc";
+static NSString * const kSettingsSpotlightStock68Task =
+    @"SpotlightStock68MaterializationTask";
+static NSString * const kSettingsSpotlightStock68Host =
+    @"SpotlightStock68MaterializationHost";
+static volatile int g_spotlight_recovery_host_retired = 0;
+static uint64_t g_springboard_rc_last_health_us = 0;
+static uint64_t g_springboard_rc_last_cache_trim_us = 0;
+static NSUInteger g_springboard_rc_consecutive_failures = 0;
+static uint64_t g_springboard_rc_seen_stable_failures = 0;
 static volatile int g_statbar_live_running = 0;
 static volatile int g_statbar_live_stop_requested = 0;
+static volatile uint64_t g_statbar_app_churn_pause_until_us = 0;
 static volatile int g_nsbar_live_running = 0;
 static volatile int g_nsbar_live_stop_requested = 0;
+static volatile uint64_t g_nsbar_app_churn_pause_until_us = 0;
 static volatile int g_nicebarlite_live_running = 0;
 static volatile int g_nicebarlite_live_stop_requested = 0;
 static volatile int g_rssi_live_running = 0;
@@ -374,11 +489,18 @@ static volatile int g_themer_live_stop_requested = 0;
 static volatile int g_themer_repair_running = 0;
 static volatile uint64_t g_themer_repair_generation = 0;
 static volatile int g_themer_stage_suppression_logged = 0;
+static NSString * const kSettingsSnowBoardLiteAppSnapshotKey = @"SnowBoardLiteAppSnapshot";
 static volatile int g_livewp_live_running = 0;
 static volatile int g_livewp_live_stop_requested = 0;
 
 static void settings_mark_tweak_applied(NSString *key, BOOL applied);
 static void settings_notify_package_queue_changed_async(void);
+static void settings_schedule_snowboardlite_spotlight_opportunistic_reapply(
+    NSString *reason);
+static BOOL settings_apply_snowboardlite_spotlight_data(
+    NSDictionary<NSString *, NSData *> *themeData,
+    BOOL includeVisibleRowRepair);
+static BOOL settings_restore_snowboardlite_spotlight(void);
 
 static BOOL settings_gravity_motion_can_remote_call(uint64_t generation,
                                                     CMMotionManager *manager)
@@ -471,8 +593,16 @@ typedef struct {
     BOOL keepsSpringBoardSession;
 } SettingsSpringBoardTweakCleanupEntry;
 
-static void settings_request_statbar_stop(void) { g_statbar_live_stop_requested = 1; }
-static void settings_request_nsbar_stop(void) { g_nsbar_live_stop_requested = 1; }
+static void settings_request_statbar_stop(void)
+{
+    g_statbar_live_stop_requested = 1;
+    g_statbar_app_churn_pause_until_us = 0;
+}
+static void settings_request_nsbar_stop(void)
+{
+    g_nsbar_live_stop_requested = 1;
+    g_nsbar_app_churn_pause_until_us = 0;
+}
 static void settings_request_nicebarlite_stop(void) { g_nicebarlite_live_stop_requested = 1; }
 static void settings_request_rssi_stop(void) { g_rssi_live_stop_requested = 1; }
 static void settings_request_axonlite_stop(void) { g_axonlite_live_stop_requested = 1; }
@@ -501,6 +631,15 @@ static bool settings_stop_statbar_registered(BOOL springboardWillDie)
 {
     (void)springboardWillDie;
     return statbar_stop_in_session();
+}
+
+static bool settings_stop_sbcustomizer_registered(BOOL springboardWillDie)
+{
+    if (springboardWillDie) {
+        sbcustomizer_forget_session_state();
+        return true;
+    }
+    return sbcustomizer_stop_in_session();
 }
 
 static bool settings_stop_nsbar_registered(BOOL springboardWillDie)
@@ -591,6 +730,9 @@ static void settings_each_springboard_cleanup_entry(void (^block)(const Settings
     // Add new SpringBoard-backed tweaks here so Clean Up, Respring cleanup,
     // termination cleanup, live-loop waits, and applied-state reset stay in sync.
     const SettingsSpringBoardTweakCleanupEntry entries[] = {
+        // SBCustomizer commits its dock edits before returning, so an applied
+        // SBC marker must not keep the shared RemoteCall channel alive.
+        { kSettingsSBCEnabled, "SBCustomizer", NULL, settings_stop_sbcustomizer_registered, sbcustomizer_forget_session_state, NULL, NO, NO },
         { kSettingsStatBarEnabled, "StatBar", settings_request_statbar_stop, settings_stop_statbar_registered, statbar_forget_remote_state, settings_statbar_running, YES, YES },
         { kSettingsNSBarEnabled, "NSBar", settings_request_nsbar_stop, settings_stop_nsbar_registered, nsbar_forget_remote_state, settings_nsbar_running, YES, YES },
         { kSettingsNiceBarLiteEnabled, "NiceBar Lite", settings_request_nicebarlite_stop, settings_stop_nicebarlite_registered, nicebarlite_forget_remote_state, settings_nicebarlite_running, YES, YES },
@@ -600,8 +742,7 @@ static void settings_each_springboard_cleanup_entry(void (^block)(const Settings
         { kSettingsNotificationIslandEnabled, "Notification Island", settings_request_notificationisland_stop, settings_stop_notificationisland_registered, notificationisland_forget_remote_state, settings_notificationisland_running, YES, YES },
         { kSettingsAppSwitcherGridEnabled, "App Switcher Grid", NULL, settings_stop_appswitchergrid_registered, appswitchergrid_forget_remote_state, NULL, YES, YES },
         { kSettingsGravityLiteEnabled, "Gravity Lite", settings_request_gravitylite_stop, settings_stop_gravitylite_registered, gravitylite_forget_remote_state, NULL, YES, YES },
-        { kSettingsThemerEnabled, "Themer", settings_request_themer_stop, settings_stop_themer_registered, themer_forget_remote_state, settings_themer_running, YES, YES },
-        { kSettingsSnowBoardLiteEnabled, "SnowBoard Lite", settings_request_themer_stop, settings_stop_themer_registered, themer_forget_remote_state, settings_themer_running, YES, YES },
+        { kSettingsThemerEnabled, "Themer", settings_request_themer_stop, settings_stop_themer_registered, themer_forget_remote_state, settings_themer_running, YES, NO },
         { kSettingsLiveWPEnabled, "LiveWP", settings_request_livewp_stop, settings_stop_livewp_registered, livewp_forget_remote_state, settings_livewp_running, YES, YES },
         { kSettingsStageStripEnabled, "Stage Strip", settings_request_stagestrip_stop, settings_stop_stagestrip_registered, stagestrip_forget_remote_state, NULL, YES, YES },
         { kSettingsFastLockXLiteEnabled, "FastLockX Lite", NULL, settings_stop_fastlockx_lite_registered, fastlockx_lite_forget_remote_state, NULL, YES, YES },
@@ -633,6 +774,47 @@ static NSString *settings_registered_live_loop_status_string(void)
     });
     return [parts componentsJoinedByString:@" "];
 }
+
+static BOOL settings_cleanup_entry_is_js_runner(const SettingsSpringBoardTweakCleanupEntry *entry)
+{
+    (void)entry;
+    return NO;
+}
+
+static BOOL settings_cleanup_entry_has_runtime_state(NSUserDefaults *d,
+                                                     const SettingsSpringBoardTweakCleanupEntry *entry)
+{
+    if (!entry) return NO;
+    if (entry->isRunning && entry->isRunning()) return YES;
+    if (entry->key && settings_tweak_is_applied(entry->key)) return YES;
+    if ([entry->key isEqualToString:kSettingsSBCEnabled] &&
+        sbcustomizer_has_remote_state()) {
+        return YES;
+    }
+    (void)d;
+    return NO;
+}
+
+static BOOL settings_cleanup_entry_should_stop(NSUserDefaults *d,
+                                               const SettingsSpringBoardTweakCleanupEntry *entry,
+                                               BOOL springboardWillDie,
+                                               BOOL ordinaryTermination)
+{
+    if (!entry || !entry->stop) return NO;
+    if (ordinaryTermination &&
+        !entry->cleanupOnTermination) {
+        return NO;
+    }
+    if (!settings_cleanup_entry_has_runtime_state(d, entry)) return NO;
+
+    BOOL running = entry->isRunning && entry->isRunning();
+    if (springboardWillDie) {
+        return running || settings_cleanup_entry_is_js_runner(entry);
+    }
+
+    return YES;
+}
+
 static volatile int g_app_in_background = 0;
 static volatile int g_screen_awake = 1;
 static volatile int g_screen_locked = 0;
@@ -647,6 +829,15 @@ static int g_springboard_lockstate_notify_token = NOTIFY_TOKEN_INVALID;
 static int g_springboard_finished_startup_notify_token = NOTIFY_TOKEN_INVALID;
 static int g_springboard_app_state_notify_token = NOTIFY_TOKEN_INVALID;
 static int g_springboard_frontmost_notify_token = NOTIFY_TOKEN_INVALID;
+static int g_sbl_app_installed_notify_token = NOTIFY_TOKEN_INVALID;
+static int g_sbl_app_updated_notify_token = NOTIFY_TOKEN_INVALID;
+static int g_sbl_ls_registered_notify_token = NOTIFY_TOKEN_INVALID;
+static int g_sbl_ls_apps_changed_notify_token = NOTIFY_TOKEN_INVALID;
+static int g_sbl_mobile_installation_notify_token = NOTIFY_TOKEN_INVALID;
+static NSMutableDictionary<NSString *, NSString *> *g_sbl_app_snapshot = nil;
+static NSMutableSet<NSString *> *g_sbl_pending_app_bundles = nil;
+static uint64_t g_sbl_app_reapply_generation = 0;
+static volatile uint64_t g_sbl_app_snapshot_event_generation = 0;
 static const NSInteger kSBCDefaultDockIcons = 4;
 static const NSInteger kSBCDefaultCols = 4;
 static const NSInteger kSBCDefaultRows = 6;
@@ -672,9 +863,11 @@ static const NSInteger kNanoUIRowMax = 999;
 static const useconds_t kStatBarLiveIntervalUS = 1000000;
 static const NSInteger kStatBarDefaultRefreshRateSec = 1;
 static const NSUInteger kStatBarLiveMaxTicks = 43200;
+static const uint64_t kStatBarAppChurnPauseUS = 30000000ULL;
 static const useconds_t kNSBarLiveIntervalUS = 1000000;
 static const useconds_t kNSBarLiveBackgroundIntervalUS = 1500000;
 static const NSUInteger kNSBarLiveMaxTicks = 43200;
+static const uint64_t kNSBarAppChurnPauseUS = 30000000ULL;
 static const useconds_t kNiceBarLiteLiveIntervalUS = 1000000;
 static const useconds_t kNiceBarLiteLiveBackgroundIntervalUS = 1500000;
 static const NSUInteger kNiceBarLiteLiveMaxTicks = 43200;
@@ -690,6 +883,13 @@ static const useconds_t kAxonLiteLiveIntervalUS = 500000;
 static const useconds_t kAxonLiteLiveBackgroundIntervalUS = 1500000;
 static const NSUInteger kAxonLiteLiveMaxTicks = 43200;
 static const int kSettingsSpringBoardRCFirstExceptionTimeoutMS = 3000;
+// Do not classify a busy SpringBoard as a dead transport too aggressively.
+// A timed-out synthetic call may still reach its fake return exception; tearing
+// down its exception port before then can turn a slow call into a process crash.
+static const int kSettingsSpringBoardRCSafeTimeoutFloorMS = 10000;
+static const int kSettingsSpringBoardRCHealthTimeoutFloorMS = 10000;
+static const uint64_t kSettingsSpringBoardRCHealthIntervalUS = 10ULL * 60ULL * 1000000ULL;
+static const uint64_t kSettingsSpringBoardRCCacheTrimIntervalUS = 30ULL * 60ULL * 1000000ULL;
 // TypeBanner polls imagent for typing indicators with original-thread-only
 // RemoteCall probes and opens SpringBoard only when the banner state changes.
 static const useconds_t kTypeBannerLiveIntervalUS = 1000000;
@@ -699,8 +899,8 @@ static const NSUInteger kTypeBannerLiveMaxTicks = 28800;
 static const useconds_t kNotificationIslandLiveIntervalUS = 750000;
 static const useconds_t kNotificationIslandLiveBackgroundIntervalUS = 1500000;
 static const NSUInteger kNotificationIslandLiveMaxTicks = 43200;
-// Only Clock/Calendar need periodic repair; normal icons persist through the
-// model graft and should not be repainted during SpringBoard animations.
+// Only Clock/Calendar need periodic repair; normal SnowBoard Lite icons are
+// being diagnosed as an initial-paint problem rather than live repaint state.
 static const useconds_t kThemerLiveIntervalUS = 2000000;
 static const useconds_t kThemerLiveBackgroundIntervalUS = 10000000;
 static const NSUInteger kThemerLiveMaxTicks = 86400;
@@ -736,12 +936,222 @@ static void settings_post_actions_complete_async(BOOL success, NSString *message
     });
 }
 
+static NSString *settings_lsreg_text(id value)
+{
+    if ([value isKindOfClass:NSString.class]) return value;
+    return value ? [value description] : @"";
+}
+
+static void settings_log_lsreg_result(NSString *label,
+                                      NSDictionary<NSString *, id> *result)
+{
+    NSString *safeLabel = label.length > 0 ? label : @"Result";
+    NSString *stage = settings_lsreg_text(result[@"stage"]);
+    NSString *message = settings_lsreg_text(result[@"message"]);
+    log_user("[LSREG] %s: ok=%s stage=%s message=%s\n",
+             safeLabel.UTF8String ?: "Result",
+             [result[@"ok"] boolValue] ? "yes" : "no",
+             stage.UTF8String ?: "",
+             message.UTF8String ?: "");
+
+    if (result[@"pid"] || result[@"transport"] || result[@"teardown"] ||
+        result[@"teardownMode"] || result[@"localStateRemaining"]) {
+        NSString *transport = settings_lsreg_text(result[@"transport"]);
+        NSString *teardownMode = settings_lsreg_text(result[@"teardownMode"]);
+        log_user("[LSREG] %s transport: pid=%d state=%s teardown=%d mode=%s local-state=%s\n",
+                 safeLabel.UTF8String ?: "Result",
+                 [result[@"pid"] intValue],
+                 transport.UTF8String ?: "",
+                 [result[@"teardown"] intValue],
+                 teardownMode.UTF8String ?: "",
+                 [result[@"localStateRemaining"] boolValue] ? "remaining" : "clear");
+    }
+
+    if (result[@"registrationAccepted"] || result[@"plistBytes"]) {
+        log_user("[LSREG] %s registration: accepted=%s plist-bytes=%llu\n",
+                 safeLabel.UTF8String ?: "Result",
+                 [result[@"registrationAccepted"] boolValue] ? "yes" : "no",
+                 [result[@"plistBytes"] unsignedLongLongValue]);
+    }
+
+    if (result[@"proc"] || result[@"wakeMethod"] || result[@"tokenConsumed"] ||
+        result[@"rootFileTokenConsumed"] ||
+        result[@"installdRootFileTokenIssued"] ||
+        result[@"installdRootFileTokenConsumed"]) {
+        NSString *wakeMethod = settings_lsreg_text(result[@"wakeMethod"]);
+        log_user("[LSREG] %s process: proc=0x%llx wake=%s lookup-token-consumed=%s root-file-token-consumed=%s installd-file-token-issued=%s installd-file-token-consumed=%s\n",
+                 safeLabel.UTF8String ?: "Result",
+                 [result[@"proc"] unsignedLongLongValue],
+                 wakeMethod.UTF8String ?: "",
+                 [result[@"tokenConsumed"] boolValue] ? "yes" : "no",
+                 [result[@"rootFileTokenConsumed"] boolValue] ? "yes" : "no",
+                 [result[@"installdRootFileTokenIssued"] boolValue] ? "yes" : "no",
+                 [result[@"installdRootFileTokenConsumed"] boolValue] ? "yes" : "no");
+    }
+
+    if (result[@"bytes"] && !result[@"plistBytes"]) {
+        log_user("[LSREG] %s serialized-bytes=%llu\n",
+                 safeLabel.UTF8String ?: "Result",
+                 [result[@"bytes"] unsignedLongLongValue]);
+    }
+
+    if (result[@"promptMessages"] || result[@"promptLastEvent"]) {
+        NSString *promptEvent = settings_lsreg_text(result[@"promptLastEvent"]);
+        log_user("[LSREG] %s prompt: messages=%llu last-event=%s\n",
+                 safeLabel.UTF8String ?: "Result",
+                 [result[@"promptMessages"] unsignedLongLongValue],
+                 promptEvent.UTF8String ?: "");
+    }
+
+    NSDictionary<NSString *, id> *wake = result[@"wake"];
+    if ([wake isKindOfClass:NSDictionary.class]) {
+        settings_log_lsreg_result(@"Wake", wake);
+    }
+    NSDictionary<NSString *, id> *lookup = result[@"lookup"];
+    if ([lookup isKindOfClass:NSDictionary.class]) {
+        settings_log_lsreg_result(@"Mach lookup", lookup);
+    }
+    NSDictionary<NSString *, id> *fileGrant = result[@"installdFileGrant"] ?:
+        result[@"fileGrant"];
+    if ([fileGrant isKindOfClass:NSDictionary.class]) {
+        settings_log_lsreg_result(@"installd file grant", fileGrant);
+    }
+}
+
+static void settings_log_icon_redirect_result(
+    NSString *label,
+    NSDictionary<NSString *, id> *result)
+{
+    NSString *safeLabel = label.length > 0 ? label : @"Result";
+    NSString *stage = settings_lsreg_text(result[@"stage"]);
+    NSString *message = settings_lsreg_text(result[@"message"]);
+    log_user("[ICONREDIRECT] %s: ok=%s active=%s stage=%s message=%s\n",
+             safeLabel.UTF8String ?: "Result",
+             [result[@"ok"] boolValue] ? "yes" : "no",
+             [result[@"active"] boolValue] ? "yes" : "no",
+             stage.UTF8String ?: "",
+             message.UTF8String ?: "");
+
+    NSDictionary<NSString *, id> *identity = result[@"identity"];
+    if ([identity isKindOfClass:NSDictionary.class]) {
+        log_user("[ICONREDIRECT] Identity: ok=%s stage=%s bundle=%s path=%s container=%s entitlements=%llu groups=%llu plugins=%llu\n",
+                 [identity[@"ok"] boolValue] ? "yes" : "no",
+                 settings_lsreg_text(identity[@"stage"]).UTF8String ?: "",
+                 settings_lsreg_text(identity[@"bundleIdentifier"]).UTF8String ?: "",
+                 settings_lsreg_text(identity[@"bundlePath"]).UTF8String ?: "",
+                 settings_lsreg_text(identity[@"containerPath"]).UTF8String ?: "",
+                 [identity[@"entitlementCount"] unsignedLongLongValue],
+                 [identity[@"applicationGroupCount"] unsignedLongLongValue],
+                 [identity[@"pluginCount"] unsignedLongLongValue]);
+        NSDictionary *installdCapture = identity[@"installdCapture"];
+        if ([installdCapture isKindOfClass:NSDictionary.class]) {
+            settings_log_lsreg_result(@"installd identity capture",
+                                      installdCapture);
+            log_user("[ICONREDIRECT] installd proxy archive bytes=%llu\n",
+                     [installdCapture[@"archiveBytes"] unsignedLongLongValue]);
+        }
+    }
+    NSDictionary<NSString *, id> *registration = result[@"registration"];
+    if ([registration isKindOfClass:NSDictionary.class]) {
+        settings_log_lsreg_result(@"Icon registration", registration);
+    }
+    NSDictionary<NSString *, id> *effectiveRegistration =
+        result[@"effectiveRegistration"];
+    if ([effectiveRegistration isKindOfClass:NSDictionary.class]) {
+        settings_log_lsreg_result(@"Effective LaunchServices readback",
+                                  effectiveRegistration);
+    }
+    if (result[@"effectiveRegistrationVerified"]) {
+        log_user("[ICONREDIRECT] Effective LaunchServices record verified=%s failure=%s\n",
+                 [result[@"effectiveRegistrationVerified"] boolValue]
+                    ? "yes" : "no",
+                 settings_lsreg_text(result[@"effectiveRegistrationFailure"]).UTF8String ?: "");
+    }
+    NSDictionary<NSString *, id> *rollback = result[@"rollback"];
+    if ([rollback isKindOfClass:NSDictionary.class]) {
+        settings_log_lsreg_result(@"Stock rollback registration", rollback);
+    }
+    NSDictionary<NSString *, id> *sessionFinalization =
+        result[@"installdSessionFinalization"];
+    if ([sessionFinalization isKindOfClass:NSDictionary.class]) {
+        settings_log_lsreg_result(@"Retained installd finalization",
+                                  sessionFinalization);
+    }
+    NSDictionary<NSString *, id> *effectiveSessionFinalization =
+        result[@"effectiveRegistrationSessionFinalization"];
+    if ([effectiveSessionFinalization isKindOfClass:NSDictionary.class]) {
+        settings_log_lsreg_result(@"Effective registration session finalization",
+                                  effectiveSessionFinalization);
+    }
+    if ([result[@"effectiveRegistrationVerificationSkipped"] boolValue]) {
+        log_user("[ICONREDIRECT] Effective LaunchServices verification skipped for a legacy journal without an Info.plist snapshot.\n");
+    }
+    if (result[@"iconCacheInvalidationIssued"]) {
+        log_user("[ICONREDIRECT] IconServices cache invalidation issued=%s\n",
+                 [result[@"iconCacheInvalidationIssued"] boolValue]
+                    ? "yes" : "no");
+    }
+    if (result[@"registrationSkipped"]) {
+        log_user("[ICONREDIRECT] Registration/RemoteCall skipped=%s\n",
+                 [result[@"registrationSkipped"] boolValue]
+                    ? "yes" : "no");
+    }
+    if (result[@"targetPath"] || result[@"fileMode"] ||
+        result[@"replacementHash"]) {
+        log_user("[ICONREDIRECT] File: mode=%s target=%s declaration=%s dimensions=%llux%llu original-bytes=%llu replacement-bytes=%llu\n",
+                 settings_lsreg_text(result[@"fileMode"]).UTF8String ?: "",
+                 settings_lsreg_text(result[@"targetPath"]).UTF8String ?: "",
+                 settings_lsreg_text(result[@"declaredBaseName"]).UTF8String ?: "",
+                 [result[@"width"] unsignedLongLongValue],
+                 [result[@"height"] unsignedLongLongValue],
+                 [result[@"originalLength"] unsignedLongLongValue],
+                 [result[@"replacementLength"] unsignedLongLongValue]);
+        log_user("[ICONREDIRECT] Hashes: original=%s replacement=%s transaction=%s\n",
+                 settings_lsreg_text(result[@"originalHash"]).UTF8String ?: "",
+                 settings_lsreg_text(result[@"replacementHash"]).UTF8String ?: "",
+                 settings_lsreg_text(result[@"transactionState"]).UTF8String ?: "");
+    }
+    if (result[@"infoTargetPath"] || result[@"infoOriginalHash"] ||
+        result[@"infoReplacementHash"]) {
+        const char *infoState = result[@"infoRestored"]
+            ? ([result[@"infoRestored"] boolValue] ? "restored" : "not-restored")
+            : (result[@"infoReplacementHash"] ? "mutated" : "not-reported");
+        log_user("[ICONREDIRECT] Info.plist: target=%s original-bytes=%llu replacement-bytes=%llu original-hash=%s replacement-hash=%s state=%s restored=%s\n",
+                 settings_lsreg_text(result[@"infoTargetPath"]).UTF8String ?: "",
+                 [result[@"infoOriginalLength"] unsignedLongLongValue],
+                 [result[@"infoReplacementLength"] unsignedLongLongValue],
+                 settings_lsreg_text(result[@"infoOriginalHash"]).UTF8String ?: "",
+                 settings_lsreg_text(result[@"infoReplacementHash"]).UTF8String ?: "",
+                 settings_lsreg_text(result[@"transactionState"]).UTF8String ?: "",
+                 infoState);
+    }
+    if (result[@"fileRestored"] || result[@"fileRollbackSucceeded"]) {
+        log_user("[ICONREDIRECT] File recovery: restored=%s rollback=%s\n",
+                 [result[@"fileRestored"] boolValue] ? "yes" : "no",
+                 [result[@"fileRollbackSucceeded"] boolValue] ? "yes" : "no");
+    }
+    NSString *exception = settings_lsreg_text(result[@"exception"]);
+    if (exception.length > 0) {
+        log_user("[ICONREDIRECT] Exception: %s\n", exception.UTF8String ?: "");
+    }
+    for (NSString *key in @[
+        @"rollbackFailure", @"infoRollbackFailure", @"iconRollbackFailure",
+        @"fileRollbackFailure", @"journalCleanupFailure", @"infoFailure",
+        @"iconFailure"
+    ]) {
+        NSString *failure = settings_lsreg_text(result[key]);
+        if (failure.length > 0) {
+            log_user("[ICONREDIRECT] %s: %s\n",
+                     key.UTF8String, failure.UTF8String);
+        }
+    }
+}
+
 static NSArray<NSString *> * const kPowercuffLevels = nil;
 
 // Session-scoped record of which tweaks were actually applied since launch.
 // Distinct from the persisted NSUserDefaults enable flag — these are wiped on
-// app launch and whenever the SpringBoard RemoteCall session is torn down, so
-// the UI can show accurate "Installed" state rather than a stale toggle.
+// app launch and whenever the SpringBoard RemoteCall session is torn down.
 static NSMutableSet<NSString *> *g_applied_tweak_keys = nil;
 
 static NSMutableSet<NSString *> *settings_applied_keys_set(void)
@@ -815,7 +1225,8 @@ static void settings_reconcile_applied_from_defaults(void)
 {
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     for (NSString *key in settings_rc_backed_tweak_keys()) {
-        if (![d boolForKey:key]) settings_mark_tweak_applied(key, NO);
+        if ([d boolForKey:key]) continue;
+        settings_mark_tweak_applied(key, NO);
     }
 }
 
@@ -849,6 +1260,240 @@ static uint64_t settings_now_us(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
     return ((uint64_t)ts.tv_sec * 1000000ULL) + ((uint64_t)ts.tv_nsec / 1000ULL);
+}
+
+static void settings_pause_statbar_for_app_churn(const char *reason)
+{
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults boolForKey:kSettingsStatBarEnabled]) return;
+
+    uint64_t nowUS = settings_now_us();
+    if (!nowUS) return;
+    uint64_t untilUS = nowUS + kStatBarAppChurnPauseUS;
+    if (untilUS > g_statbar_app_churn_pause_until_us) {
+        g_statbar_app_churn_pause_until_us = untilUS;
+    }
+    printf("[SETTINGS] StatBar paused for app churn%s%s duration=%llums\n",
+           (reason && reason[0]) ? ": " : "",
+           (reason && reason[0]) ? reason : "",
+           (unsigned long long)(kStatBarAppChurnPauseUS / 1000ULL));
+}
+
+static BOOL settings_statbar_app_churn_pause_remaining(uint64_t *remainingUS)
+{
+    uint64_t untilUS = g_statbar_app_churn_pause_until_us;
+    if (!untilUS) return NO;
+
+    uint64_t nowUS = settings_now_us();
+    if (!nowUS || untilUS <= nowUS) {
+        g_statbar_app_churn_pause_until_us = 0;
+        return NO;
+    }
+
+    if (remainingUS) *remainingUS = untilUS - nowUS;
+    return YES;
+}
+
+static void settings_pause_nsbar_for_app_churn(const char *reason)
+{
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults boolForKey:kSettingsNSBarEnabled]) return;
+
+    uint64_t nowUS = settings_now_us();
+    if (!nowUS) return;
+    uint64_t untilUS = nowUS + kNSBarAppChurnPauseUS;
+    if (untilUS > g_nsbar_app_churn_pause_until_us) {
+        g_nsbar_app_churn_pause_until_us = untilUS;
+    }
+    printf("[SETTINGS] NSBar paused for app churn%s%s duration=%llums\n",
+           (reason && reason[0]) ? ": " : "",
+           (reason && reason[0]) ? reason : "",
+           (unsigned long long)(kNSBarAppChurnPauseUS / 1000ULL));
+}
+
+static BOOL settings_nsbar_app_churn_pause_remaining(uint64_t *remainingUS)
+{
+    uint64_t untilUS = g_nsbar_app_churn_pause_until_us;
+    if (!untilUS) return NO;
+
+    uint64_t nowUS = settings_now_us();
+    if (!nowUS || untilUS <= nowUS) {
+        g_nsbar_app_churn_pause_until_us = 0;
+        return NO;
+    }
+
+    if (remainingUS) *remainingUS = untilUS - nowUS;
+    return YES;
+}
+
+static bool settings_apply_springboard_guarded(const char *tag, int timeoutFloorMS, bool (^work)(void))
+{
+    if (!work) return false;
+    const char *label = (tag && tag[0]) ? tag : "SpringBoard apply";
+    int requestedFloor = timeoutFloorMS > 0
+        ? timeoutFloorMS : kSettingsSpringBoardRCSafeTimeoutFloorMS;
+    int floor = requestedFloor > kSettingsSpringBoardRCSafeTimeoutFloorMS
+        ? requestedFloor : kSettingsSpringBoardRCSafeTimeoutFloorMS;
+    int previousTimeoutFloor = remote_call_set_stable_timeout_floor_ms(floor);
+    if (previousTimeoutFloor > floor) {
+        (void)remote_call_set_stable_timeout_floor_ms(previousTimeoutFloor);
+        floor = previousTimeoutFloor;
+    }
+
+    uint64_t startUS = settings_now_us();
+    log_user("[RC] %s started (timeout floor=%dms).\n", label, floor);
+    printf("[RCGUARD] %s start timeoutFloor=%dms requested=%dms\n",
+           label, floor, timeoutFloorMS);
+
+    bool ok = false;
+    @try {
+        ok = work();
+    } @finally {
+        remote_call_set_stable_timeout_floor_ms(previousTimeoutFloor);
+        uint64_t elapsedUS = startUS ? settings_now_us() - startUS : 0;
+        printf("[RCGUARD] %s finish ok=%d elapsed=%llums restoredFloor=%dms\n",
+               label, ok, (unsigned long long)(elapsedUS / 1000ULL), previousTimeoutFloor);
+        log_user("%s %s finished in %.2fs.\n",
+                 ok ? "[OK]" : "[WARN]",
+                 label,
+                 (double)elapsedUS / 1000000.0);
+        @synchronized (settings_rc_lock()) {
+            if (g_springboard_rc_ready) {
+                settings_note_springboard_remote_call_result_locked(label, ok);
+            }
+        }
+    }
+    return ok;
+}
+
+// SB Customizer uses the strict ownership guard for its mutable remote state.
+    // SnowBoard Remix does not use this shared SpringBoard path. Its
+    // IconServices publisher and process-local presentation installers own their
+    // short, independently verified sessions.
+static bool settings_apply_icon_operation_guarded_internal(NSString *appliedKey,
+                                                           const char *tag,
+                                                           int timeoutFloorMS,
+                                                           BOOL reuseOnly,
+                                                           bool (^work)(void))
+{
+    if (!work) return false;
+
+    const char *label = (tag && tag[0]) ? tag : "Icon operation";
+    int floor = timeoutFloorMS > kSettingsSpringBoardRCSafeTimeoutFloorMS
+        ? timeoutFloorMS : kSettingsSpringBoardRCSafeTimeoutFloorMS;
+    __block bool result = false;
+
+    @synchronized (settings_rc_lock()) {
+        BOOL channelReady = reuseOnly
+            ? settings_validate_springboard_remote_call_reuse_only_locked(label)
+            : (g_springboard_rc_ready &&
+               settings_validate_springboard_remote_call_locked(label, NO));
+        if (!channelReady) {
+            if (appliedKey) settings_mark_tweak_applied(appliedKey, NO);
+            printf("[ICONGUARD] %s rejected: SpringBoard channel unavailable reuseOnly=%d\n",
+                   label, reuseOnly);
+            return false;
+        }
+
+        uint64_t startUS = settings_now_us();
+        int previousTimeoutFloor =
+            remote_call_set_stable_timeout_floor_ms(floor);
+        if (previousTimeoutFloor > floor) {
+            floor = previousTimeoutFloor;
+            (void)remote_call_set_stable_timeout_floor_ms(floor);
+        }
+        uint64_t remotePool = 0;
+        bool semanticOK = false;
+        bool channelOK = remote_call_current_success();
+        uint64_t ioBefore = remote_call_current_io_failure_count();
+
+        log_user("[RC] %s started (serialized, timeout floor=%dms).\n",
+                 label, floor);
+        printf("[ICONGUARD] %s start timeoutFloor=%dms\n", label, floor);
+
+        @try {
+            remotePool = r_autorelease_pool_push();
+            channelOK = remotePool != 0 && remote_call_current_success();
+            if (channelOK) {
+                @autoreleasepool {
+                    semanticOK = work();
+                }
+                channelOK = remote_call_current_success();
+            }
+        } @catch (NSException *exception) {
+            semanticOK = false;
+            printf("[ICONGUARD] %s local exception: %s\n",
+                   label, exception.reason.UTF8String ?: "unknown");
+        } @finally {
+            // A terminal VM mapping fault invalidates this operation's result,
+            // but does not poison the exception channel. Drain the pool while
+            // that channel is still healthy and keep the session available.
+            if (remotePool && channelOK && remote_call_current_success()) {
+                channelOK = r_autorelease_pool_pop(remotePool) &&
+                            remote_call_current_success();
+            }
+            remote_call_set_stable_timeout_floor_ms(previousTimeoutFloor);
+        }
+
+        uint64_t ioAfter = remote_call_current_io_failure_count();
+        uint64_t ioDelta = ioAfter - ioBefore;
+        bool ioOK = ioDelta == 0;
+        result = semanticOK && channelOK && ioOK;
+        uint64_t elapsedUS = startUS ? settings_now_us() - startUS : 0;
+        printf("[ICONGUARD] %s finish semantic=%d channel=%d io=%d "
+               "ioDelta=%llu result=%d pool=0x%llx elapsed=%llums\n",
+               label, semanticOK, channelOK, ioOK,
+               (unsigned long long)ioDelta, result,
+               (unsigned long long)remotePool,
+               (unsigned long long)(elapsedUS / 1000ULL));
+        const char *transportLabel = !channelOK
+            ? (reuseOnly ? "unhealthy-retained" : "abandoned")
+            : (!ioOK ? "io-fault" : "healthy");
+        log_user("%s %s finished in %.2fs (transport=%s).\n",
+                 result ? "[OK]" : "[WARN]",
+                 label,
+                 (double)elapsedUS / 1000000.0,
+                 transportLabel);
+
+        if (!channelOK) {
+            if (appliedKey) settings_mark_tweak_applied(appliedKey, NO);
+            if (reuseOnly) {
+                printf("[ICONGUARD] %s reuse-only transport failure; channel left untouched for explicit Run recovery\n",
+                       label);
+            } else {
+                settings_abandon_springboard_remote_call_locked(
+                    label, YES, NO);
+            }
+        } else if (!ioOK) {
+            if (appliedKey) settings_mark_tweak_applied(appliedKey, NO);
+            printf("[ICONGUARD] %s failed closed after %llu terminal VM I/O fault(s); channel retained\n",
+                   label, (unsigned long long)ioDelta);
+        } else if (semanticOK && !reuseOnly) {
+            settings_note_springboard_remote_call_result_locked(label, true);
+        } else if (semanticOK) {
+            printf("[ICONGUARD] %s reuse-only operation completed without recovery/teardown\n",
+                   label);
+        } else {
+            // A selector/model mismatch is an operation result, not evidence
+            // that the exception transport itself is degrading.
+            printf("[ICONGUARD] %s semantic failure on healthy transport\n",
+                   label);
+        }
+    }
+
+    return result;
+}
+
+static bool settings_apply_icon_operation_guarded(NSString *appliedKey,
+                                                  const char *tag,
+                                                  int timeoutFloorMS,
+                                                  bool (^work)(void))
+{
+    return settings_apply_icon_operation_guarded_internal(appliedKey,
+                                                          tag,
+                                                          timeoutFloorMS,
+                                                          NO,
+                                                          work);
 }
 
 static void settings_apply_statbar_once_async(const char *reason);
@@ -951,8 +1596,7 @@ static BOOL settings_themer_dynamic_updates_blocked_by_stage(NSUserDefaults *d)
 {
     if (!settings_stagestrip_install_allowed()) return NO;
     if (![d boolForKey:kSettingsStageStripEnabled]) return NO;
-    return [d boolForKey:kSettingsThemerEnabled] ||
-           [d boolForKey:kSettingsSnowBoardLiteEnabled];
+    return [d boolForKey:kSettingsThemerEnabled];
 }
 
 static void settings_note_themer_stage_conflict(BOOL userVisible)
@@ -1043,6 +1687,20 @@ static BOOL settings_refresh_screen_lock_state(const char *reason)
     return old != newValue;
 }
 
+static BOOL settings_statbar_can_poll_springboard(void)
+{
+    (void)settings_refresh_screen_awake_state(NULL);
+    (void)settings_refresh_screen_lock_state(NULL);
+    return settings_screen_awake_cached() && !settings_screen_locked_cached();
+}
+
+static const char *settings_statbar_pause_reason(void)
+{
+    if (!settings_screen_awake_cached()) return "screen asleep";
+    if (settings_screen_locked_cached()) return "device locked";
+    return "screen unavailable";
+}
+
 static BOOL settings_axonlite_can_poll_springboard(void)
 {
     // Locked-but-awake is the lockscreen — that's where Axon must run, so the
@@ -1083,25 +1741,59 @@ static void settings_stop_axonlite_then_forget_locked(const char *reason)
     axonlite_forget_remote_state();
 }
 
-static void settings_forget_springboard_tweak_state_locked(void)
+static void settings_forget_springboard_tweak_state_locked_ex(BOOL skipThemerFamily)
 {
+    __block BOOL forgotThemerFamily = NO;
     settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
-        if (entry->forget) entry->forget();
+        if (!entry->forget) return;
+        BOOL isThemerFamily = [entry->key isEqualToString:kSettingsThemerEnabled];
+        if (isThemerFamily && skipThemerFamily) return;
+        if (isThemerFamily && forgotThemerFamily) return;
+        entry->forget();
+        if (isThemerFamily) forgotThemerFamily = YES;
     });
 }
 
+static void settings_forget_springboard_tweak_state_locked(void)
+{
+    settings_forget_springboard_tweak_state_locked_ex(NO);
+}
+
 static void settings_stop_springboard_tweaks_locked(const char *reason,
-                                                    BOOL springboardWillDie)
+                                                    BOOL springboardWillDie,
+                                                    BOOL ordinaryTermination)
 {
     if (!g_springboard_rc_ready) {
         settings_forget_springboard_tweak_state_locked();
         return;
     }
 
-    settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    __block NSUInteger stoppedCount = 0;
+    __block NSUInteger skippedCount = 0;
+    __block BOOL stoppedThemerFamily = NO;
+    void (^stopEntry)(const SettingsSpringBoardTweakCleanupEntry *) = ^(const SettingsSpringBoardTweakCleanupEntry *entry) {
         if (!entry->stop) return;
+        BOOL isThemerFamily = [entry->key isEqualToString:kSettingsThemerEnabled];
+        if (isThemerFamily && stoppedThemerFamily) {
+            skippedCount++;
+            printf("[SETTINGS] %s skipped duplicate shared icon-theme stop for %s\n",
+                   reason ?: "SpringBoard cleanup",
+                   entry->name ?: "icon theme");
+            return;
+        }
+        if (!settings_cleanup_entry_should_stop(d,
+                                                entry,
+                                                springboardWillDie,
+                                                ordinaryTermination)) {
+            skippedCount++;
+            return;
+        }
+        if (entry->requestStop) entry->requestStop();
         @try {
             bool stopped = entry->stop(springboardWillDie);
+            stoppedCount++;
+            if (isThemerFamily) stoppedThemerFamily = YES;
             printf("[SETTINGS] %s %s stop%s result=%d\n",
                    reason ?: "SpringBoard cleanup",
                    entry->name ?: "tweak",
@@ -1113,7 +1805,24 @@ static void settings_stop_springboard_tweaks_locked(const char *reason,
                    entry->name ?: "tweak",
                    e.reason.UTF8String);
         }
+    };
+
+    settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
+        if (!settings_cleanup_entry_is_js_runner(entry)) return;
+        stopEntry(entry);
     });
+
+    settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
+        if (settings_cleanup_entry_is_js_runner(entry)) return;
+        stopEntry(entry);
+    });
+
+    if (skippedCount > 0) {
+        printf("[SETTINGS] %s skipped %lu inactive SpringBoard tweak stop(s)%s\n",
+               reason ?: "SpringBoard cleanup",
+               (unsigned long)skippedCount,
+               stoppedCount == 0 ? " (nothing active)" : "");
+    }
 
     settings_forget_springboard_tweak_state_locked();
 }
@@ -1164,6 +1873,7 @@ static void settings_handle_springboard_restart(void)
             settings_request_all_live_loops_stop("SpringBoard restart");
             g_springboard_rc_ready = 0;
             g_springboard_sandbox_escaped = 0;
+            settings_reset_springboard_remote_call_health_locked();
 
             settings_forget_springboard_tweak_state_locked();
             if (hadSession) {
@@ -1227,6 +1937,8 @@ static void settings_install_screen_awake_observers(void)
                 // otherwise the next callback fires into a stale shmem mapping.
                 settings_stop_gravity_motion();
                 gravitylite_forget_remote_state();
+            } else if (changed && !g_screen_locked) {
+                settings_apply_statbar_once_async("device unlocked");
             }
         });
         if (status != NOTIFY_STATUS_OK) {
@@ -1272,6 +1984,70 @@ static void settings_install_screen_awake_observers(void)
         if (status != NOTIFY_STATUS_OK) {
             g_springboard_frontmost_notify_token = NOTIFY_TOKEN_INVALID;
         }
+
+#if 0
+        // SnowBoard Remix is explicit and journaled. It does not watch install
+        // notifications or implicitly rewrite app bundles after an update.
+        status = notify_register_dispatch("com.apple.mobile.application_installed",
+                                          &g_sbl_app_installed_notify_token,
+                                          dispatch_get_main_queue(), ^(int token) {
+            (void)token;
+            settings_snowboardlite_handle_app_snapshot_event(@"mobile application installed");
+        });
+        if (status != NOTIFY_STATUS_OK) {
+            g_sbl_app_installed_notify_token = NOTIFY_TOKEN_INVALID;
+            printf("[SBR] app notify registration failed name=com.apple.mobile.application_installed status=%d\n",
+                   status);
+        }
+
+        status = notify_register_dispatch("com.apple.mobile.application_updated",
+                                          &g_sbl_app_updated_notify_token,
+                                          dispatch_get_main_queue(), ^(int token) {
+            (void)token;
+            settings_snowboardlite_handle_app_snapshot_event(@"mobile application updated");
+        });
+        if (status != NOTIFY_STATUS_OK) {
+            g_sbl_app_updated_notify_token = NOTIFY_TOKEN_INVALID;
+            printf("[SBR] app notify registration failed name=com.apple.mobile.application_updated status=%d\n",
+                   status);
+        }
+
+        status = notify_register_dispatch("com.apple.LaunchServices.applicationRegistered",
+                                          &g_sbl_ls_registered_notify_token,
+                                          dispatch_get_main_queue(), ^(int token) {
+            (void)token;
+            settings_snowboardlite_handle_app_snapshot_event(@"launchservices application registered");
+        });
+        if (status != NOTIFY_STATUS_OK) {
+            g_sbl_ls_registered_notify_token = NOTIFY_TOKEN_INVALID;
+            printf("[SBR] app notify registration failed name=com.apple.LaunchServices.applicationRegistered status=%d\n",
+                   status);
+        }
+
+        status = notify_register_dispatch("com.apple.LaunchServices.ApplicationsChanged",
+                                          &g_sbl_ls_apps_changed_notify_token,
+                                          dispatch_get_main_queue(), ^(int token) {
+            (void)token;
+            settings_snowboardlite_handle_app_snapshot_event(@"launchservices applications changed");
+        });
+        if (status != NOTIFY_STATUS_OK) {
+            g_sbl_ls_apps_changed_notify_token = NOTIFY_TOKEN_INVALID;
+            printf("[SBR] app notify registration failed name=com.apple.LaunchServices.ApplicationsChanged status=%d\n",
+                   status);
+        }
+
+        status = notify_register_dispatch("com.apple.mobile.installation_proxy.installed",
+                                          &g_sbl_mobile_installation_notify_token,
+                                          dispatch_get_main_queue(), ^(int token) {
+            (void)token;
+            settings_snowboardlite_handle_app_snapshot_event(@"mobile installation proxy installed");
+        });
+        if (status != NOTIFY_STATUS_OK) {
+            g_sbl_mobile_installation_notify_token = NOTIFY_TOKEN_INVALID;
+            printf("[SBR] app notify registration failed name=com.apple.mobile.installation_proxy.installed status=%d\n",
+                   status);
+        }
+#endif
 
         // If the live loop tripped its 3-failure exit during a background
         // window, the screen-wake darwin notifications won't fire (the screen
@@ -1405,11 +2181,13 @@ static void settings_request_all_live_loops_stop(const char *reason)
 
 static BOOL settings_has_active_termination_live_tweak(void)
 {
-    if (settings_any_registered_live_loop_running()) {
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if (settings_any_registered_live_loop_running() ||
+        themer_has_remote_state() ||
+        sbcustomizer_has_remote_state()) {
         return YES;
     }
 
-    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     __block BOOL active = NO;
     settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
         if (active || !entry->cleanupOnTermination || !entry->key) return;
@@ -1420,7 +2198,7 @@ static BOOL settings_has_active_termination_live_tweak(void)
 
 static BOOL settings_has_persistent_springboard_remote_call_user(void)
 {
-    if (settings_has_active_termination_live_tweak()) {
+    if (settings_any_registered_live_loop_running()) {
         return YES;
     }
 
@@ -1437,6 +2215,7 @@ static void settings_wait_live_loops_stopped_for_switch(const char *reason)
 {
     uint64_t startUS = settings_now_us();
     BOOL logged = NO;
+    uint64_t timeoutUS = 2000000ULL;
     while (settings_any_registered_live_loop_running()) {
         uint64_t nowUS = settings_now_us();
         uint64_t elapsedUS = (startUS != 0 && nowUS >= startUS) ? nowUS - startUS : 0;
@@ -1445,7 +2224,7 @@ static void settings_wait_live_loops_stopped_for_switch(const char *reason)
                    reason ? ": " : "", reason ?: "");
             logged = YES;
         }
-        if (elapsedUS >= 2000000ULL) {
+        if (elapsedUS >= timeoutUS) {
             NSString *status = settings_registered_live_loop_status_string();
             printf("[SETTINGS] live loop stop wait timed out%s%s %s\n",
                    reason ? ": " : "", reason ?: "",
@@ -1665,6 +2444,7 @@ static BOOL settings_ensure_kexploit(void)
         g_kexploit_done = NO;
         g_springboard_rc_ready = 0;
         g_springboard_sandbox_escaped = 0;
+        settings_reset_springboard_remote_call_health_locked();
         kutils_reset_self_cache();
         settings_notify_remote_call_state_changed();
     }
@@ -1674,9 +2454,478 @@ static BOOL settings_ensure_kexploit(void)
         printf("[SETTINGS] kexploit_opa334 failed: %d\n", res);
         return NO;
     }
+
+    // A zero exploit result only means the acquisition path completed. Before
+    // any caller performs raw kernel reads/writes, require the same live socket
+    // readback validation that RemoteCall performs during initialization.
+    if (!kexploit_krw_ready()) {
+        printf("[SETTINGS] fresh KRW failed post-acquisition validation; refusing use\n");
+        log_user("[KRW] Fresh kernel r/w failed its final readback check; no tweak was applied. Please try again.\n");
+        bool parked = kexploit_terminal_cleanup();
+        printf("[SETTINGS] invalid fresh KRW cleanup parked=%d\n", parked);
+        g_kexploit_done = NO;
+        g_springboard_rc_ready = 0;
+        g_springboard_sandbox_escaped = 0;
+        settings_reset_springboard_remote_call_health_locked();
+        kutils_reset_self_cache();
+        settings_notify_remote_call_state_changed();
+        return NO;
+    }
+
     g_kexploit_done = YES;
     settings_notify_remote_call_state_changed();
     return YES;
+}
+
+static void settings_run_lsreg_baseline_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        BOOL actionLockAcquired = NO;
+        BOOL actionOK = NO;
+        NSString *completionMessage = @"Baseline LaunchServices registration failed. Check the log.";
+
+        @try {
+            actionLockAcquired = settings_try_claim_actions_lock(
+                "LaunchServices baseline registration",
+                "[LSREG] Another kslop action is already running.");
+            if (!actionLockAcquired) {
+                completionMessage = @"Baseline registration blocked: another kslop action is running.";
+                return;
+            }
+
+            log_user("[LSREG] Baseline test started. No icon, plist, or app-bundle file will be changed.\n");
+            log_user("[LSREG 1/4] Capturing this installation's current signed identity (read-only).\n");
+            NSDictionary<NSString *, id> *identity =
+                CNDLaunchServicesCopySelfRegistrationDictionary();
+            settings_log_lsreg_result(@"Identity preflight", identity);
+            if (![identity[@"ok"] boolValue]) {
+                completionMessage = [NSString stringWithFormat:
+                    @"Identity preflight failed at %@.",
+                    settings_lsreg_text(identity[@"stage"])];
+                return;
+            }
+
+            NSDictionary<NSString *, id> *registration =
+                identity[@"registrationDictionary"];
+            if (![registration isKindOfClass:NSDictionary.class] ||
+                registration.count == 0) {
+                log_user("[LSREG] Identity preflight returned no registration dictionary; aborting before KRW.\n");
+                completionMessage = @"Identity preflight returned no registration dictionary.";
+                return;
+            }
+
+            NSString *bundleIdentifier = settings_lsreg_text(identity[@"bundleIdentifier"]);
+            NSString *bundlePath = settings_lsreg_text(identity[@"bundlePath"]);
+            NSString *containerPath = settings_lsreg_text(identity[@"containerPath"]);
+            log_user("[LSREG] Identity: bundle=%s entitlements=%llu app-groups=%llu plug-ins=%llu\n",
+                     bundleIdentifier.UTF8String ?: "",
+                     [identity[@"entitlementCount"] unsignedLongLongValue],
+                     [identity[@"applicationGroupCount"] unsignedLongLongValue],
+                     [identity[@"pluginCount"] unsignedLongLongValue]);
+            log_user("[LSREG] Bundle path: %s\n", bundlePath.UTF8String ?: "");
+            log_user("[LSREG] Data container: %s\n", containerPath.UTF8String ?: "");
+
+            log_user("[LSREG 2/4] Establishing and validating kslop's live device KRW session.\n");
+            if (!remote_call_lab_backend_opted_in() &&
+                (!settings_ensure_kexploit() || !kexploit_krw_ready())) {
+                log_user("[LSREG] Failed before installd: live device KRW is unavailable.\n");
+                completionMessage = @"Baseline registration failed: live device KRW is unavailable.";
+                return;
+            }
+
+            log_user("[LSREG 3/4] Sending the unchanged current registration dictionary through stock installd.\n");
+            NSDictionary<NSString *, id> *registrationResult =
+                CNDLaunchServicesRegisterViaInstalld(registration);
+            settings_log_lsreg_result(@"Registration", registrationResult);
+
+            log_user("[LSREG 4/4] Verifying LaunchServices acceptance and RemoteCall teardown.\n");
+            actionOK = [registrationResult[@"ok"] boolValue] &&
+                [registrationResult[@"registrationAccepted"] boolValue] &&
+                [registrationResult[@"transport"] isEqual:@"healthy"] &&
+                [registrationResult[@"teardown"] intValue] == 0 &&
+                ![registrationResult[@"localStateRemaining"] boolValue];
+            if (!actionOK) {
+                completionMessage = [NSString stringWithFormat:
+                    @"Baseline registration failed at %@. Check the log.",
+                    settings_lsreg_text(registrationResult[@"stage"])];
+                log_user("[LSREG] FAILED: the baseline was not accepted with a clean transport teardown.\n");
+                return;
+            }
+
+            completionMessage = @"Baseline registration succeeded; the unchanged kslop identity was accepted.";
+            log_user("[LSREG] SUCCESS: stock installd accepted kslop's unchanged current identity and the RemoteCall session closed cleanly.\n");
+        } @finally {
+            if (actionLockAcquired) settings_release_actions_lock();
+            settings_post_actions_complete_async(actionOK, completionMessage);
+        }
+    });
+}
+
+static void settings_run_physical_rx_probe_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "physical SpringBoard RX probe",
+                "[RX_PROBE] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, @"Physical RX probe blocked: another action is running.");
+            return;
+        }
+        BOOL stoppedWatcher = CNDIconServicesConsumerLifecycleIsRunning();
+        if (stoppedWatcher) {
+            log_user("[RX_PROBE] Pausing the Spotlight lifecycle watcher to prevent overlapping target sessions.\n");
+            (void)CNDIconServicesConsumerLifecycleStop();
+        }
+        log_session_begin();
+        log_user("[RX_PROBE] Acquiring or reusing Cyanide's current KRW session. No separate action is required.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[RX_PROBE] KRW acquisition or validation failed.\n");
+            log_session_end();
+            if (stoppedWatcher) {
+                log_user("[RX_PROBE] The explicit Spotlight watcher remains stopped; restart it manually if needed.\n");
+            }
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, @"Physical RX probe failed to acquire validated KRW.");
+            return;
+        }
+
+        log_user("[RX_PROBE] Testing PT_ATTACHEXC and one private RX page in SpringBoard. Spotlight is not opened or contacted. A successful attach saves the JSON, forces one respring, parks KRW, and terminates Cyanide to clear both temporary debug allowances.\n");
+        CNDPhysicalCSAllowInvalidProbeRun(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL success = [result isEqualToString:
+                    @"success-private-rx-executed"];
+                log_user("[RX_PROBE] completed result=%s attach=%s cs-invalid=%s rx=%s springboard-reset=%s session-closed=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    [report[@"attachDetachCompleted"] boolValue] ? "yes" : "no",
+                    [report[@"csAllowInvalidObserved"] boolValue] ? "yes" : "no",
+                    [report[@"rxNonceResult"] UTF8String] ?: "-",
+                    [report[@"springBoardFinalResetProven"] boolValue] ? "yes" : "no",
+                    [report[@"remoteSessionClosed"] boolValue] ? "yes" : "no");
+                log_user("[RX_PROBE] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                if (stoppedWatcher) {
+                    log_user("[RX_PROBE] The explicit Spotlight watcher remains stopped; restart it manually if needed.\n");
+                }
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(
+                    success,
+                    [NSString stringWithFormat:
+                        @"Physical RX probe finished: %@.",
+                        result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+static NSString *settings_icon_redirect_target_name(void)
+{
+    if ((remote_call_lab_backend_opted_in() || cnd_lab_vphone_guest()) &&
+        !CNDIconDeclarationRedirectIsActive()) {
+        return @"eBay";
+    }
+    NSString *identifier =
+        CNDIconDeclarationRedirectTargetBundleIdentifier();
+    return [identifier isEqual:NSBundle.mainBundle.bundleIdentifier]
+        ? @"kslop" : @"eBay";
+}
+
+static BOOL settings_ensure_spotlight_local_var_rw(void);
+
+static void settings_run_icon_redirect_action(BOOL apply,
+                                              BOOL inspectOnly)
+{
+    if (inspectOnly) {
+        log_user("[ICONSTORE] The visible-Spotlight RemoteCall inspection path is retired; no target process was contacted.\n");
+        settings_post_actions_complete_async(
+            NO,
+            @"Visible Spotlight inspection is retired. Persistent-record discovery will return through the independent IconServices publisher.");
+        return;
+    }
+    BOOL vmIndexedInspection = NO;
+    dispatch_block_t action = ^{
+        BOOL actionLockAcquired = NO;
+        BOOL actionOK = NO;
+        NSString *verb = vmIndexedInspection
+            ? @"Inspect" : (apply ? @"Apply" : @"Restore");
+        NSString *completionMessage = [NSString stringWithFormat:
+            @"%@ icon redirect failed. Check the log.", verb];
+
+        @try {
+            actionLockAcquired = settings_try_claim_actions_lock(
+                vmIndexedInspection
+                    ? "visible Spotlight indexed response inspection"
+                    : ((remote_call_lab_backend_opted_in() ||
+                        cnd_lab_vphone_guest()) && apply)
+                        ? "marked structured IconServices publication"
+                    : apply
+                        ? "icon declaration redirect apply"
+                        : "icon declaration redirect restore",
+                "[ICONREDIRECT] Another kslop action is already running.");
+            if (!actionLockAcquired) {
+                completionMessage = @"Icon redirect blocked: another kslop action is running.";
+                return;
+            }
+
+            NSString *targetName = settings_icon_redirect_target_name();
+            BOOL filesystemRecovery = CNDIconDeclarationRedirectIsActive();
+            BOOL providerProof =
+                (remote_call_lab_backend_opted_in() ||
+                 cnd_lab_vphone_guest()) &&
+                (apply || !filesystemRecovery);
+            if (apply) {
+                log_user("[%s 1/6] Apply-only admission: refusing any pending durable %s recovery transaction. This action never invokes Restore.\n",
+                         providerProof ? "ICONSTORE" : "ICONREDIRECT",
+                         targetName.UTF8String);
+            } else {
+                log_user("[%s 1/6] Restore-only admission: loading the pending durable %s recovery transaction. This action never invokes Apply.\n",
+                         providerProof ? "ICONSTORE" : "ICONREDIRECT",
+                         targetName.UTF8String);
+            }
+            log_user(providerProof
+                ? "[ICONSTORE 2/6] Validating immutable app state and the direct-generation 68x68@3 IconServices request boundary.\n"
+                : "[ICONREDIRECT 2/6] Establishing and validating the existing-vnode write path.\n");
+            BOOL vmRootHarness = providerProof &&
+                remote_call_lab_backend_opted_in();
+            if (!vmRootHarness &&
+                (!settings_ensure_kexploit() || !kexploit_krw_ready())) {
+                completionMessage = @"Icon redirect failed: live device KRW is unavailable.";
+                return;
+            }
+            if (vmRootHarness) {
+                log_user("[ICONSTORE] Explicit vPhone root harness active. Publication uses one iconservicesagent session; presentation uses at most one installer session for SpringBoard and one for the current Spotlight PID. Every channel closes after verified mapping installation.\n");
+            }
+
+            if (providerProof) {
+                if (apply) {
+                    log_user("[ICONSTORE 3/6] Rendering transparent structured IFImage.data and persisting a pre-publication recovery journal.\n");
+                    log_user("[ICONSTORE 4/6] Installing one exact ISGenerationRequest hook in iconservicesagent, calling the original generator once for stock data/token and its optional pre-store UUID, then returning the themed IFCacheImage. This is the stock-first Apply transaction, not Restore.\n");
+                    log_user("[ICONSTORE 5/6] Restoring the publisher IMP, binding the canonical UUID from the exact data/token-matched outer cache entry, verifying its UUID.isdata bytes, removing the publisher payload, then installing process-local transparent presentation in SpringBoard and Spotlight.\n");
+                } else {
+                    log_user("[ICONSTORE 3/6] Confirming no one-shot publisher payload remains in its recorded iconservicesagent.\n");
+                    log_user("[ICONSTORE 4/6] Using one service-side observational hook to capture forced stock generation without replacing its response.\n");
+                    log_user("[ICONSTORE 5/6] Reading ISImageCache and the exact UUID.isdata unit inside iconservicesagent, then invalidating only after stock UUID/hash/token/data match; recovery remains armed on ambiguity.\n");
+                }
+            } else if (apply) {
+                log_user("[ICONREDIRECT 3/6] Capturing %s's current identity and inventorying its declared phone fallback icon.\n",
+                         targetName.UTF8String);
+                log_user("[ICONREDIRECT 4/6] Rendering the exact kslop payload, capturing the real %s Info.plist bytes/hash/vnode, writing and reading back the recovery journal, then updating both existing vnodes or creating a guarded missing fallback.\n",
+                         targetName.UTF8String);
+                log_user("[ICONREDIRECT 5/6] Removing only the phone primary CFBundleIconName from the on-disk Info.plist, rebuilding registration from the mutated bundle URL, and verifying the effective LaunchServices record.\n");
+            } else {
+                log_user("[ICONREDIRECT 3/6] Validating that %s still has the exact captured bundle path.\n",
+                         targetName.UTF8String);
+                log_user("[ICONREDIRECT 4/6] Attempting both the saved stock registration and exact original icon restoration.\n");
+                log_user("[ICONREDIRECT 5/6] Retaining recovery data unless all restore checks succeed.\n");
+            }
+            NSDictionary<NSString *, id> *result = providerProof
+                ? (apply ? CNDIconServicesInterceptProofApply()
+                         : CNDIconServicesInterceptProofRestore())
+                : (apply ? CNDIconDeclarationRedirectApply()
+                         : CNDIconDeclarationRedirectRestore());
+            if (vmIndexedInspection) {
+                log_user("[ICONINDEX] %s: ok=%s active=%s stage=%s message=%s\n",
+                         verb.UTF8String,
+                         [result[@"ok"] boolValue] ? "yes" : "no",
+                         [result[@"active"] boolValue] ? "yes" : "no",
+                         settings_lsreg_text(result[@"stage"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"message"]).UTF8String ?: "");
+                log_user("[ICONINDEX] rows=%d row=%s source=%s consumer=%s isIcon=%s cache=%s visible=%llux%llu/%.1fx%.1f@%.2f pixels=%s keys=%d cacheImages=%d indexed=%d exactMatches=%d descriptor=%s/%s response=%s/%.1fx%.1f@%.2f uuid=%s token=%s store=%s bytes=%llu/%s index=%s file=%s unitFile=%s noMutation=%s transport=%s closed=%s abandoned=%s reason=%s\n",
+                         [result[@"visibleTargetRowCount"] intValue],
+                         settings_lsreg_text(result[@"rowClass"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"rowSource"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"consumerIconClass"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"iconServicesIconClass"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"cacheClass"]).UTF8String ?: "",
+                         [result[@"visiblePixelWidth"] unsignedLongLongValue],
+                         [result[@"visiblePixelHeight"] unsignedLongLongValue],
+                         [result[@"visiblePointWidth"] doubleValue],
+                         [result[@"visiblePointHeight"] doubleValue],
+                         [result[@"visibleScale"] doubleValue],
+                         settings_lsreg_text(result[@"visiblePixelSHA256"]).UTF8String ?: "",
+                         [result[@"descriptorKeyCount"] intValue],
+                         [result[@"cacheImageCount"] intValue],
+                         [result[@"indexedCandidateCount"] intValue],
+                         [result[@"exactPixelMatchCount"] intValue],
+                         settings_lsreg_text(result[@"descriptorKeyClass"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"descriptorKeyText"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"responseClass"]).UTF8String ?: "",
+                         [result[@"responsePointWidth"] doubleValue],
+                         [result[@"responsePointHeight"] doubleValue],
+                         [result[@"responseScale"] doubleValue],
+                         settings_lsreg_text(result[@"uuid"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"validationTokenSHA256"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"storePath"]).UTF8String ?: "",
+                         [result[@"storeFileLength"] unsignedLongLongValue],
+                         settings_lsreg_text(result[@"storeFileSHA256"]).UTF8String ?: "",
+                         [result[@"storeIndexMatch"] boolValue] ? "yes" : "no",
+                         [result[@"storeFileVerified"] boolValue] ? "yes" : "no",
+                         [result[@"unitDataMatchesFile"] boolValue] ? "yes" : "no",
+                         [result[@"noMutation"] boolValue] ? "yes" : "no",
+                         [result[@"remoteOK"] boolValue] ? "yes" : "no",
+                         [result[@"closed"] boolValue] ? "yes" : "no",
+                         [result[@"abandoned"] boolValue] ? "yes" : "no",
+                         settings_lsreg_text(result[@"reason"]).UTF8String ?: "");
+            } else if (providerProof) {
+                NSDictionary *publisherDetails = apply
+                    ? result
+                    : ([result[@"publisherRestore"]
+                            isKindOfClass:NSDictionary.class]
+                        ? result[@"publisherRestore"] : @{});
+                log_user("[ICONSTORE] %s: ok=%s active=%s stage=%s message=%s\n",
+                         verb.UTF8String,
+                         [result[@"ok"] boolValue] ? "yes" : "no",
+                         [result[@"active"] boolValue] ? "yes" : "no",
+                         settings_lsreg_text(result[@"stage"]).UTF8String ?: "",
+                         settings_lsreg_text(result[@"message"]).UTF8String ?: "");
+                log_user("[ICONSTORE] storeRestored=%s recoveryCleared=%s journalCleared=%s invalidation=%s consumerRemoteCall=%s retiredMappings=%lu\n",
+                         [result[@"storeRestored"] boolValue] ? "yes" : "no",
+                         [result[@"recoveryCleared"] boolValue] ? "yes" : "no",
+                         [result[@"journalCleared"] boolValue] ? "yes" : "no",
+                         [result[@"cacheInvalidationIssued"] boolValue] ? "yes" : "no",
+                         [result[@"consumerRemoteCallAttempted"] boolValue] ? "YES" : "no",
+                         (unsigned long)[result[@"retiredConsumerMappings"] count]);
+                log_user("[ICONSTORE] agentPid=%d installed=%s matched=%s stockReturned=%s stockCaptured=%s preStoreUUID=%s canonicalUUIDFromCache=%s identityBound=%s replacement=%s/%s automaticResponse=%s/%s source=%s hookRestored=%s mappingCleaned=%s remote=%s closed=%s abandoned=%s trigger=%s agentCache=%s storeFile=%s path=%s bytes=%llu hash=%s expected=%s stock=%s cache=%s\n",
+                         [publisherDetails[@"agentPID"] intValue],
+                         [publisherDetails[@"installed"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"payloadMatched"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"originalReturned"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"stockCaptured"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"stockUUIDPresentAtGeneration"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"canonicalUUIDResolvedFromCache"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"cacheIdentityBoundByDataAndToken"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"replacementCreated"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"replacementReturned"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"triggerResponsePresent"] boolValue] ? "present" : "no",
+                         [publisherDetails[@"triggerResponseIdentityBound"] boolValue] ? "bound" : "unbound",
+                         settings_lsreg_text(publisherDetails[@"canonicalResponseSource"]).UTF8String ?: "",
+                         [publisherDetails[@"hookRestored"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"mappingCleaned"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"remoteOK"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"closed"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"abandoned"] boolValue] ? "YES" : "no",
+                         [publisherDetails[@"triggerVerified"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"agentCacheReadbackVerified"] boolValue] ? "yes" : "no",
+                         [publisherDetails[@"persistentStoreReadbackVerified"] boolValue] ? "yes" : "no",
+                         settings_lsreg_text(publisherDetails[@"persistentStorePath"]).UTF8String ?: "",
+                         [publisherDetails[@"persistentStoreDataLength"] unsignedLongLongValue],
+                         settings_lsreg_text(publisherDetails[@"persistentStoreDataSHA256"]).UTF8String ?: "",
+                         settings_lsreg_text(publisherDetails[@"expectedDataSHA256"]).UTF8String ?: "",
+                         settings_lsreg_text(publisherDetails[@"stockResponse"][@"dataSHA256"]).UTF8String ?: "",
+                         settings_lsreg_text(publisherDetails[@"agentCacheResponse"][@"dataSHA256"]).UTF8String ?: "");
+                if (apply) {
+                    NSDictionary *springPresentation = [result[@"springBoardPresentation"] isKindOfClass:NSDictionary.class] ? result[@"springBoardPresentation"] : @{};
+                    NSDictionary *spotlightPresentation = [result[@"spotlightPresentation"] isKindOfClass:NSDictionary.class] ? result[@"spotlightPresentation"] : @{};
+                    log_user("[ICONSTORE] immutable filesUnchanged=%s structured=%s\n",
+                             [result[@"filesUnchanged"] boolValue] ? "yes" : "no",
+                             settings_lsreg_text(result[@"structuredImageSHA256"]).UTF8String ?: "");
+                    log_user("[ICONSTORE] presentation ready=%s SpringBoard=%s pid=%d closed=%s abandoned=%s reason=%s Spotlight=%s pid=%d closed=%s abandoned=%s reason=%s\n",
+                             [result[@"presentationReady"] boolValue] ? "yes" : "no",
+                             [springPresentation[@"ok"] boolValue] ? "yes" : "no",
+                             [springPresentation[@"pid"] intValue],
+                             [springPresentation[@"closed"] boolValue] ? "yes" : "no",
+                             [springPresentation[@"abandoned"] boolValue] ? "YES" : "no",
+                             settings_lsreg_text(springPresentation[@"reason"]).UTF8String ?: "",
+                             [spotlightPresentation[@"ok"] boolValue] ? "yes" : "no",
+                             [spotlightPresentation[@"pid"] intValue],
+                             [spotlightPresentation[@"closed"] boolValue] ? "yes" : "no",
+                             [spotlightPresentation[@"abandoned"] boolValue] ? "YES" : "no",
+                             settings_lsreg_text(spotlightPresentation[@"reason"]).UTF8String ?: "");
+                }
+            } else {
+                settings_log_icon_redirect_result(verb, result);
+            }
+
+            log_user(vmIndexedInspection
+                ? "[ICONINDEX 6/6] Verifying a unique visible-pixel/index/file binding and clean RemoteCall teardown. No cache, store, file, bundle, registration, or recovery state was changed.\n"
+                : providerProof
+                ? "[ICONSTORE 6/6] Verifying exact response/store hashes, publisher cleanup, immutable app files, both consumer presentation routes, and clean teardown of all scoped installer sessions.\n"
+                : "[ICONREDIRECT 6/6] Verifying file hashes, LaunchServices acceptance, clean RemoteCall teardown, and IconServices invalidation issuance.\n");
+            actionOK = [result[@"ok"] boolValue] &&
+                (vmIndexedInspection ||
+                 ([result[@"active"] boolValue] == apply));
+            if (!actionOK) {
+                completionMessage = [NSString stringWithFormat:
+                    @"%@ icon redirect failed at %@. Check the log.%@",
+                    verb,
+                    settings_lsreg_text(result[@"stage"]),
+                    [result[@"active"] boolValue]
+                        ? (vmIndexedInspection
+                            ? @" Restore the pending experiment before inspecting stock state."
+                            : providerProof
+                            ? @" Use Restore eBay Spotlight Store Entry before another test."
+                            : [NSString stringWithFormat:@" Use Restore %@ Registration before another test.", targetName])
+                        : @""];
+                return;
+            }
+
+            if (vmIndexedInspection) {
+                completionMessage = @"The visible eBay row was bound to one indexed IconServices response. Copy the ICONINDEX log for its descriptor key, UUID, geometry, validation token, and .isdata path.";
+                log_user("[ICONINDEX] SUCCESS: one visible eBay row, decoded response, existing store index entry, and exact UUID.isdata bytes were bound without issuing a descriptor request or changing any state.\n");
+            } else if (providerProof && apply) {
+                completionMessage = @"The themed IconServices response is in the exact indexed .isdata unit, and transparent presentation is live in SpringBoard and the current Spotlight process. Check Home Screen and the visible Spotlight result now.";
+                log_user("[ICONSTORE] SUCCESS: durable IconServices publication and both process-resident transparent presentation mappings verified; every installer channel closed and eBay's bundle remained untouched.\n");
+            } else if (providerProof) {
+                completionMessage = @"Stock IconServices generation and exact .isdata readback matched, cache invalidation was issued, and the publisher recovery journal was cleared. Any process-local flat-image redirects remain until their processes exit.";
+                log_user("[ICONSTORE] SUCCESS: service-side stock generation, agent cache, and exact indexed store bytes matched; no consumer process was contacted during restore.\n");
+            } else if (apply) {
+                completionMessage = [NSString stringWithFormat:
+                    @"The %@ fallback file and on-disk phone declaration redirect are registered. Test the icon and relaunch behavior, then run Restore.", targetName];
+                log_user("[ICONREDIRECT] SUCCESS: both target bytes/hashes, bundle-URL registration acceptance, effective LaunchServices declaration, clean teardown, and cache invalidation issuance verified. Visual success is not claimed by this operation.\n");
+            } else {
+                completionMessage = [NSString stringWithFormat:
+                    @"%@'s stock registration and original Info.plist/icon bytes are restored; all recovery checks passed.", targetName];
+                log_user("[ICONREDIRECT] SUCCESS: stock bundle-URL registration, original Info.plist/icon hashes and vnode identities, teardown, and cache invalidation issuance verified; the journal was removed.\n");
+            }
+        } @finally {
+            if (actionLockAcquired) settings_release_actions_lock();
+            settings_post_actions_complete_async(actionOK, completionMessage);
+        }
+    };
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0),
+                   action);
+}
+
+static void settings_run_icon_redirect_reset_recovery_state(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        BOOL actionLockAcquired = NO;
+        BOOL actionOK = NO;
+        NSString *completionMessage =
+            @"kslop could not verify that all local icon restore state was reset.";
+        @try {
+            actionLockAcquired = settings_try_claim_actions_lock(
+                "icon recovery state reset",
+                "[ICONREDIRECT] Another kslop action is already running.");
+            if (!actionLockAcquired) return;
+            log_user("[ICONRESET 1/2] Forgetting kslop's local IconServices publication/recovery state while preserving any live consumer-mapping identities so later tests cannot stack hooks. No process, target file, registration, or cache is contacted.\n");
+            NSDictionary<NSString *, id> *providerResult =
+                CNDIconServicesInterceptProofResetRecoveryState();
+            settings_log_icon_redirect_result(
+                @"IconServices recovery reset", providerResult);
+            log_user("[ICONRESET 2/2] Forgetting kslop's local filesystem icon journal and staging file. The target app bundle is not opened or modified.\n");
+            NSDictionary<NSString *, id> *filesystemResult =
+                CNDIconDeclarationRedirectResetRecoveryState();
+            settings_log_icon_redirect_result(
+                @"Filesystem recovery reset", filesystemResult);
+            actionOK = [providerResult[@"ok"] boolValue] &&
+                [filesystemResult[@"ok"] boolValue] &&
+                !CNDIconServicesInterceptProofIsActive() &&
+                !CNDIconDeclarationRedirectIsActive();
+            if (!actionOK) {
+                completionMessage = @"Some local icon restore state remains. No target process, application file, registration, or cache was touched.";
+                return;
+            }
+            completionMessage = @"kslop forgot all active icon restore state. Any live process-local presentation state was retained for safe reuse until its host exits; you can start a new test immediately.";
+            log_user("[ICONRESET] SUCCESS: active icon restore state is empty; live consumer identities, if any, remain recorded to prevent duplicate hooks. No RemoteCall, KRW, target-file, registration, or cache operation ran.\n");
+        } @finally {
+            if (actionLockAcquired) settings_release_actions_lock();
+            settings_post_actions_complete_async(actionOK, completionMessage);
+        }
+    });
 }
 
 static BOOL settings_nano_load_override_enabled(void)
@@ -1717,11 +2966,305 @@ static BOOL settings_ensure_kexploit_recovery_only(void)
     return YES;
 }
 
+static void settings_reset_springboard_remote_call_health_locked(void)
+{
+    uint64_t nowUS = settings_now_us();
+    g_springboard_rc_last_health_us = nowUS;
+    g_springboard_rc_last_cache_trim_us = nowUS;
+    g_springboard_rc_consecutive_failures = 0;
+    g_springboard_rc_seen_stable_failures = 0;
+}
+
+static void settings_log_springboard_remote_call_snapshot_locked(const char *prefix,
+                                                                 const RemoteCallDebugSnapshot *snap)
+{
+    if (!snap) return;
+    printf("[SETTINGS] %s rcReady=%d pid=%d success=%d state=%d stable=%llu/%llu shmem=%llu evict=%llu last=%s fail=%s reason=%s\n",
+           prefix ?: "SpringBoard RemoteCall",
+           g_springboard_rc_ready,
+           snap->pid,
+           snap->success,
+           snap->hasLocalState,
+           (unsigned long long)snap->stableCalls,
+           (unsigned long long)snap->stableFailures,
+           (unsigned long long)snap->shmemUsed,
+           (unsigned long long)snap->shmemEvictions,
+           snap->lastStableCall,
+           snap->lastStableFailure,
+           snap->lastStableFailureReason);
+}
+
+static void settings_abandon_springboard_remote_call_locked(const char *reason,
+                                                            BOOL notifyState,
+                                                            BOOL preserveApplied)
+{
+    RemoteCallDebugSnapshot snap = {0};
+    (void)remote_call_copy_debug_snapshot(&snap);
+    BOOL hadSession = g_springboard_rc_ready != 0 || snap.hasLocalState;
+
+    settings_log_springboard_remote_call_snapshot_locked(reason ?: "abandoning SpringBoard RemoteCall",
+                                                         &snap);
+    if (!hadSession) {
+        g_springboard_rc_ready = 0;
+        g_springboard_sandbox_escaped = 0;
+        settings_reset_springboard_remote_call_health_locked();
+        return;
+    }
+
+    // A failed stable call may still reach its fake return exception after the
+    // local timeout. Never destroy that exception port while an explicit action
+    // is active.
+    if (g_settings_actions_running != 0) {
+        printf("[SETTINGS] SpringBoard RemoteCall abandon deferred during active action%s%s\n",
+               reason ? ": " : "", reason ?: "");
+        return;
+    }
+
+    // Live loops and lifecycle repairs do not own the actions lock. Apply the
+    // same rule to every poisoned channel while its target may still be alive;
+    // only a target confirmed absent makes local exception-port teardown safe.
+    if (snap.hasLocalState && !snap.success) {
+        BOOL targetConfirmedDead = NO;
+        if (snap.pid > 0 && kexploit_krw_ready()) {
+            targetConfirmedDead = proc_find((pid_t)snap.pid) == 0;
+        }
+        if (!targetConfirmedDead) {
+            printf("[SETTINGS] poisoned SpringBoard RemoteCall retained for live/unknown target pid=%d%s%s\n",
+                   snap.pid,
+                   reason ? ": " : "", reason ?: "");
+            return;
+        }
+    }
+
+    settings_request_all_live_loops_stop(reason ?: "SpringBoard RemoteCall abandoned");
+    settings_forget_springboard_tweak_state_locked();
+    abandon_remote_call();
+
+    g_springboard_rc_ready = 0;
+    g_springboard_sandbox_escaped = 0;
+    settings_reset_springboard_remote_call_health_locked();
+    if (notifyState) settings_notify_remote_call_state_changed_preserving_applied(preserveApplied);
+}
+
+static void settings_trim_springboard_remote_call_caches_if_due_locked(const char *reason)
+{
+    if (!g_springboard_rc_ready) return;
+    uint64_t nowUS = settings_now_us();
+    if (nowUS == 0) return;
+    if (g_springboard_rc_last_cache_trim_us != 0 &&
+        nowUS - g_springboard_rc_last_cache_trim_us < kSettingsSpringBoardRCCacheTrimIntervalUS) {
+        return;
+    }
+
+    remote_call_clear_shmem_cache_public(reason ?: "SpringBoard periodic cache trim");
+    g_springboard_rc_last_cache_trim_us = settings_now_us();
+}
+
+static BOOL settings_validate_springboard_remote_call_locked(const char *reason, BOOL force)
+{
+    if (!g_springboard_rc_ready) return NO;
+
+    RemoteCallDebugSnapshot snap = {0};
+    if (!remote_call_copy_debug_snapshot(&snap) ||
+        !snap.hasLocalState ||
+        !snap.success ||
+        snap.pid <= 0) {
+        settings_log_springboard_remote_call_snapshot_locked(reason ?: "SpringBoard RemoteCall local health failed",
+                                                             &snap);
+        settings_abandon_springboard_remote_call_locked(reason ?: "SpringBoard RemoteCall local health failed",
+                                                        YES,
+                                                        YES);
+        return NO;
+    }
+
+    uint64_t nowUS = settings_now_us();
+    BOOL due = force ||
+               g_springboard_rc_last_health_us == 0 ||
+               (nowUS != 0 &&
+                nowUS - g_springboard_rc_last_health_us >= kSettingsSpringBoardRCHealthIntervalUS);
+    if (due) {
+        int previousFloor = remote_call_set_stable_timeout_floor_ms(kSettingsSpringBoardRCHealthTimeoutFloorMS);
+        if (previousFloor > kSettingsSpringBoardRCHealthTimeoutFloorMS) {
+            (void)remote_call_set_stable_timeout_floor_ms(previousFloor);
+        }
+        uint64_t pid = do_remote_call_stable(250, "getpid", 0, 0, 0, 0, 0, 0, 0, 0);
+        remote_call_set_stable_timeout_floor_ms(previousFloor);
+
+        RemoteCallDebugSnapshot after = {0};
+        (void)remote_call_copy_debug_snapshot(&after);
+        if (!after.success || pid == 0 || (snap.pid > 0 && (int)pid != snap.pid)) {
+            printf("[SETTINGS] SpringBoard RemoteCall heartbeat failed%s%s expectedPid=%d got=%llu\n",
+                   reason ? ": " : "", reason ?: "",
+                   snap.pid,
+                   (unsigned long long)pid);
+            settings_log_springboard_remote_call_snapshot_locked("SpringBoard RemoteCall heartbeat snapshot",
+                                                                 &after);
+            settings_abandon_springboard_remote_call_locked(reason ?: "SpringBoard RemoteCall heartbeat failed",
+                                                            YES,
+                                                            YES);
+            return NO;
+        }
+
+        if (g_springboard_rc_consecutive_failures > 0) {
+            printf("[SETTINGS] SpringBoard RemoteCall recovered after %lu failure(s)%s%s\n",
+                   (unsigned long)g_springboard_rc_consecutive_failures,
+                   reason ? ": " : "", reason ?: "");
+        }
+        g_springboard_rc_consecutive_failures = 0;
+        g_springboard_rc_seen_stable_failures = after.stableFailures;
+        g_springboard_rc_last_health_us = settings_now_us();
+        printf("[SETTINGS] SpringBoard RemoteCall heartbeat ok%s%s pid=%llu stable=%llu/%llu shmem=%llu evict=%llu\n",
+               reason ? ": " : "", reason ?: "",
+               (unsigned long long)pid,
+               (unsigned long long)after.stableCalls,
+               (unsigned long long)after.stableFailures,
+               (unsigned long long)after.shmemUsed,
+               (unsigned long long)after.shmemEvictions);
+    }
+
+    settings_trim_springboard_remote_call_caches_if_due_locked(reason);
+    return YES;
+}
+
+// Timer-driven app-churn work may reuse the exact SpringBoard channel created
+// by a successful user Run, but it must never turn a notification into an
+// exploit, session open, recovery, abandon, or respring path. This single
+// validation checks both the kernel process identity and a live getpid round
+// trip. Failure deliberately leaves all transport state untouched so the next
+// explicit Run/Reapply owns recovery.
+static BOOL settings_validate_springboard_remote_call_reuse_only_locked(
+    const char *reason)
+{
+    BOOL krwReady = kexploit_krw_ready();
+    if (!g_kexploit_done || !krwReady || !g_springboard_rc_ready) {
+        printf("[SBR] reuse-only SpringBoard gate failed%s%s krwFlag=%d krwReady=%d rcReady=%d\n",
+               reason ? ": " : "", reason ?: "",
+               g_kexploit_done,
+               krwReady,
+               g_springboard_rc_ready);
+        return NO;
+    }
+
+    RemoteCallDebugSnapshot before = {0};
+    if (!remote_call_copy_debug_snapshot(&before) ||
+        !before.hasLocalState ||
+        !before.success ||
+        before.pid <= 0 ||
+        remote_call_current_pid() != before.pid) {
+        settings_log_springboard_remote_call_snapshot_locked(
+            reason ?: "SnowBoard reuse-only local health failed", &before);
+        return NO;
+    }
+
+    uint64_t namedSpringBoard = proc_find_by_name("SpringBoard");
+    uint64_t sessionProcess = proc_find((pid_t)before.pid);
+    if (!namedSpringBoard || !sessionProcess || namedSpringBoard != sessionProcess) {
+        printf("[SBR] reuse-only SpringBoard PID identity failed%s%s expectedPid=%d namedProc=0x%llx sessionProc=0x%llx\n",
+               reason ? ": " : "", reason ?: "",
+               before.pid,
+               (unsigned long long)namedSpringBoard,
+               (unsigned long long)sessionProcess);
+        return NO;
+    }
+
+    int previousFloor =
+        remote_call_set_stable_timeout_floor_ms(kSettingsSpringBoardRCHealthTimeoutFloorMS);
+    if (previousFloor > kSettingsSpringBoardRCHealthTimeoutFloorMS) {
+        (void)remote_call_set_stable_timeout_floor_ms(previousFloor);
+    }
+    uint64_t livePID = do_remote_call_stable(
+        250, "getpid", 0, 0, 0, 0, 0, 0, 0, 0);
+    remote_call_set_stable_timeout_floor_ms(previousFloor);
+
+    RemoteCallDebugSnapshot after = {0};
+    BOOL copied = remote_call_copy_debug_snapshot(&after);
+    BOOL healthy = copied &&
+                   g_springboard_rc_ready &&
+                   after.hasLocalState &&
+                   after.success &&
+                   after.pid == before.pid &&
+                   livePID == (uint64_t)before.pid;
+    if (!healthy) {
+        printf("[SBR] reuse-only SpringBoard heartbeat failed%s%s expectedPid=%d got=%llu copied=%d\n",
+               reason ? ": " : "", reason ?: "",
+               before.pid,
+               (unsigned long long)livePID,
+               copied);
+        settings_log_springboard_remote_call_snapshot_locked(
+            "SnowBoard reuse-only heartbeat snapshot", &after);
+        return NO;
+    }
+
+    g_springboard_rc_last_health_us = settings_now_us();
+    g_springboard_rc_seen_stable_failures = after.stableFailures;
+    printf("[SBR] reuse-only SpringBoard gate passed%s%s pid=%d stable=%llu/%llu\n",
+           reason ? ": " : "", reason ?: "",
+           after.pid,
+           (unsigned long long)after.stableCalls,
+           (unsigned long long)after.stableFailures);
+    return YES;
+}
+
+static void settings_note_springboard_remote_call_result_locked(const char *source, bool ok)
+{
+    if (!g_springboard_rc_ready) return;
+
+    if (ok) {
+        if (g_springboard_rc_consecutive_failures > 0) {
+            printf("[SETTINGS] SpringBoard RemoteCall result recovered source=%s failures=%lu\n",
+                   source ?: "unknown",
+                   (unsigned long)g_springboard_rc_consecutive_failures);
+        }
+        g_springboard_rc_consecutive_failures = 0;
+        (void)settings_validate_springboard_remote_call_locked(source, NO);
+        return;
+    }
+
+    g_springboard_rc_consecutive_failures++;
+    RemoteCallDebugSnapshot snap = {0};
+    (void)remote_call_copy_debug_snapshot(&snap);
+    BOOL newStableFailure = snap.stableFailures > g_springboard_rc_seen_stable_failures;
+    g_springboard_rc_seen_stable_failures = snap.stableFailures;
+
+    printf("[SETTINGS] SpringBoard RemoteCall result failed source=%s count=%lu newStableFailure=%d success=%d state=%d pid=%d stable=%llu/%llu last=%s fail=%s reason=%s\n",
+           source ?: "unknown",
+           (unsigned long)g_springboard_rc_consecutive_failures,
+           newStableFailure,
+           snap.success,
+           snap.hasLocalState,
+           snap.pid,
+           (unsigned long long)snap.stableCalls,
+           (unsigned long long)snap.stableFailures,
+           snap.lastStableCall,
+           snap.lastStableFailure,
+           snap.lastStableFailureReason);
+
+    if (!snap.hasLocalState || !snap.success || newStableFailure) {
+        if (g_settings_actions_running != 0) {
+            printf("[SETTINGS] SpringBoard RemoteCall abandon deferred during active Run source=%s\n",
+                   source ?: "unknown");
+            return;
+        }
+        settings_abandon_springboard_remote_call_locked(source ?: "SpringBoard RemoteCall failed",
+                                                        YES,
+                                                        YES);
+    }
+}
+
 static BOOL settings_ensure_springboard_remote_call_locked(void)
 {
     if (g_springboard_rc_ready) {
-        printf("[SETTINGS] reusing SpringBoard RemoteCall session\n");
-        return YES;
+        if (!settings_validate_springboard_remote_call_locked("reuse", NO)) {
+            if (g_springboard_rc_ready) {
+                printf("[SETTINGS] SpringBoard RemoteCall reuse is unhealthy but retained; refusing unsafe reopen\n");
+                log_user("[RC] The previous SpringBoard call did not finish cleanly. The channel was retained instead of being torn down under a possibly returning thread; respring before retrying.\n");
+                return NO;
+            }
+            printf("[SETTINGS] SpringBoard RemoteCall reuse was stale; reopening\n");
+        } else {
+            printf("[SETTINGS] reusing SpringBoard RemoteCall session\n");
+            return YES;
+        }
     }
 
     if (init_remote_call_with_first_exception_timeout("SpringBoard",
@@ -1733,6 +3276,10 @@ static BOOL settings_ensure_springboard_remote_call_locked(void)
 
     g_springboard_rc_ready = 1;
     g_springboard_sandbox_escaped = 0;
+    settings_reset_springboard_remote_call_health_locked();
+    if (!settings_validate_springboard_remote_call_locked("new session", YES)) {
+        return NO;
+    }
     settings_notify_remote_call_state_changed();
     return YES;
 }
@@ -1741,11 +3288,27 @@ static void settings_destroy_springboard_remote_call_locked_internal_ex(const ch
 {
     if (!g_springboard_rc_ready) return;
 
-    printf("[SETTINGS] destroying SpringBoard RemoteCall session%s%s\n",
+    RemoteCallDebugSnapshot snap = {0};
+    (void)remote_call_copy_debug_snapshot(&snap);
+    BOOL poisoned = snap.hasLocalState && !snap.success;
+    printf("[SETTINGS] %s SpringBoard RemoteCall session%s%s\n",
+           poisoned ? "abandoning poisoned" : "destroying",
            reason ? ": " : "", reason ?: "");
+    if (poisoned) {
+        // Normal teardown sends munmap/pthread_exit through the remote thread,
+        // while raw abandon destroys the exception ports. Route poisoned state
+        // through the liveness-aware gate and leave it retained when the target
+        // may still return from a timed-out call.
+        settings_abandon_springboard_remote_call_locked(reason ?: "poisoned SpringBoard RemoteCall teardown",
+                                                        notifyState,
+                                                        preserveApplied);
+        return;
+    }
+
     destroy_remote_call();
     g_springboard_rc_ready = 0;
     g_springboard_sandbox_escaped = 0;
+    settings_reset_springboard_remote_call_health_locked();
     if (notifyState) settings_notify_remote_call_state_changed_preserving_applied(preserveApplied);
 }
 
@@ -1771,7 +3334,7 @@ static void settings_prepare_for_respring_sync(void)
         if (g_springboard_rc_ready) {
             // SB is about to be killed by the respring, so cleanup uses the
             // fast variant for tweaks where full remote restoration is wasted.
-            settings_stop_springboard_tweaks_locked("pre-respring cleanup", YES);
+            settings_stop_springboard_tweaks_locked("pre-respring cleanup", YES, NO);
             settings_destroy_springboard_remote_call_locked("pre-respring cleanup");
         }
     }
@@ -1782,6 +3345,7 @@ static void settings_prepare_for_respring_sync(void)
         g_kexploit_done = NO;
         g_springboard_rc_ready = 0;
         g_springboard_sandbox_escaped = 0;
+        settings_reset_springboard_remote_call_health_locked();
         kutils_reset_self_cache();
         settings_notify_remote_call_state_changed();
     }
@@ -1790,20 +3354,38 @@ static void settings_prepare_for_respring_sync(void)
     usleep(300000);
 }
 
-static void settings_terminal_kexploit_cleanup_sync_internal(const char *reason)
+static void settings_terminal_kexploit_cleanup_sync_internal(const char *reason,
+                                                              BOOL ordinaryTermination)
 {
-    log_user("[CLEANUP] Tearing down live tweaks and releasing KRW state...\n");
-    printf("[SETTINGS] terminal KRW cleanup requested%s%s done=%d rcReady=%d\n",
+    if (ordinaryTermination) {
+        log_user("[CLEANUP] Closing kslop control resources; durable SnowBoard Remix icon transactions remain installed.\n");
+    } else {
+        log_user("[CLEANUP] Tearing down live tweaks and releasing KRW state...\n");
+    }
+    printf("[SETTINGS] terminal KRW cleanup requested%s%s termination=%d done=%d rcReady=%d\n",
            reason ? ": " : "", reason ?: "",
-           g_kexploit_done, g_springboard_rc_ready);
+           ordinaryTermination,
+           g_kexploit_done,
+           g_springboard_rc_ready);
     settings_request_all_live_loops_stop("terminal KRW cleanup");
     settings_end_statbar_background_task_async("terminal KRW cleanup");
     settings_wait_live_loops_stopped_for_switch("terminal KRW cleanup");
 
     @synchronized (settings_rc_lock()) {
         if (g_springboard_rc_ready) {
-            settings_stop_springboard_tweaks_locked("terminal cleanup", NO);
-            settings_destroy_springboard_remote_call_locked(reason ?: "terminal KRW cleanup");
+            settings_stop_springboard_tweaks_locked("terminal cleanup",
+                                                    NO,
+                                                    ordinaryTermination);
+            settings_destroy_springboard_remote_call_locked_internal_ex(
+                reason ?: "terminal KRW cleanup",
+                YES,
+                ordinaryTermination);
+        } else if (ordinaryTermination && remote_call_has_local_state()) {
+            themer_forget_remote_state();
+            settings_abandon_springboard_remote_call_locked(
+                "termination cleanup found detached local RemoteCall state",
+                YES,
+                YES);
         } else {
             settings_forget_springboard_tweak_state_locked();
         }
@@ -1811,29 +3393,42 @@ static void settings_terminal_kexploit_cleanup_sync_internal(const char *reason)
 
     if (!g_kexploit_done) {
         printf("[SETTINGS] terminal KRW cleanup skipped: no local KRW session\n");
-        log_user("[CLEANUP] Nothing to clean up — no active KRW session.\n");
+        if (ordinaryTermination) {
+            log_user("[CLEANUP] kslop session already closed; durable SnowBoard Remix icon transactions remain installed.\n");
+        } else {
+            log_user("[CLEANUP] Nothing to clean up — no active KRW session.\n");
+        }
         g_springboard_rc_ready = 0;
         g_springboard_sandbox_escaped = 0;
+        settings_reset_springboard_remote_call_health_locked();
         kutils_reset_self_cache();
-        settings_notify_remote_call_state_changed();
+        settings_notify_remote_call_state_changed_preserving_applied(
+            ordinaryTermination);
         return;
     }
 
     bool parked = kexploit_terminal_cleanup();
     printf("[SETTINGS] terminal KRW cleanup result parked=%d\n", parked);
-    log_user("%s Clean Up complete. %s\n",
-             parked ? "[OK]" : "[WARN]",
-             parked ? "KRW parked — next Run will recover in seconds." : "KRW not parked — next Run will re-exploit.");
+    if (ordinaryTermination) {
+        log_user("%s kslop session closed; durable SnowBoard Remix icon transactions remain installed.\n",
+                 parked ? "[OK]" : "[WARN]");
+    } else {
+        log_user("%s Clean Up complete. %s\n",
+                 parked ? "[OK]" : "[WARN]",
+                 parked ? "KRW parked — next Run will recover in seconds." : "KRW not parked — next Run will re-exploit.");
+    }
     g_kexploit_done = NO;
     g_springboard_rc_ready = 0;
     g_springboard_sandbox_escaped = 0;
+    settings_reset_springboard_remote_call_health_locked();
     kutils_reset_self_cache();
-    settings_notify_remote_call_state_changed();
+    settings_notify_remote_call_state_changed_preserving_applied(
+        ordinaryTermination);
 }
 
 static void settings_terminal_kexploit_cleanup_sync(const char *reason)
 {
-    settings_terminal_kexploit_cleanup_sync_internal(reason);
+    settings_terminal_kexploit_cleanup_sync_internal(reason, NO);
 }
 
 static BOOL settings_acquire_actions_lock_wait(const char *owner, uint64_t timeoutUS)
@@ -1887,7 +3482,7 @@ static void settings_queue_terminal_kexploit_cleanup(const char *reason)
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         BOOL locked = settings_acquire_actions_lock_wait("terminal cleanup", 0);
         @try {
-            settings_terminal_kexploit_cleanup_sync_internal(reason ?: "manual action");
+            settings_terminal_kexploit_cleanup_sync_internal(reason ?: "manual action", NO);
         } @finally {
             if (locked) __sync_lock_release(&g_settings_actions_running);
             __sync_lock_release(&g_settings_cleanup_running);
@@ -1908,9 +3503,12 @@ void settings_best_effort_termination_cleanup(const char *reason)
     log_user("[CLEANUP] App exiting (%s) — running last-chance teardown.\n", why);
     printf("[SETTINGS] best-effort termination cleanup requested: %s\n", why);
 
-    if (!settings_has_active_termination_live_tweak()) {
-        printf("[SETTINGS] termination cleanup skipped: no live tweaks active\n");
-        log_user("[CLEANUP] No live tweaks active — nothing to tear down.\n");
+    if (!g_kexploit_done &&
+        !g_springboard_rc_ready &&
+        !remote_call_has_local_state() &&
+        !settings_has_active_termination_live_tweak()) {
+        printf("[SETTINGS] termination cleanup skipped: no local control resources or live tweaks\n");
+        log_user("[CLEANUP] No local control resources are active; durable mutations were left untouched.\n");
         return;
     }
 
@@ -1923,7 +3521,7 @@ void settings_best_effort_termination_cleanup(const char *reason)
     }
 
     @try {
-        settings_terminal_kexploit_cleanup_sync_internal(why);
+        settings_terminal_kexploit_cleanup_sync_internal(why, YES);
     } @finally {
         __sync_lock_release(&g_settings_actions_running);
     }
@@ -1936,7 +3534,7 @@ void settings_destroy_springboard_remote_call_sync(void)
     settings_wait_live_loops_stopped_for_switch("remote call sync cleanup");
     @synchronized (settings_rc_lock()) {
         if (g_springboard_rc_ready) {
-            settings_stop_springboard_tweaks_locked("remote call sync cleanup", NO);
+            settings_stop_springboard_tweaks_locked("remote call sync cleanup", NO, NO);
         }
         settings_destroy_springboard_remote_call_locked("manual/sync cleanup");
     }
@@ -1952,7 +3550,7 @@ void settings_destroy_springboard_remote_call(void)
         @synchronized (settings_rc_lock()) {
             BOOL hadSession = g_springboard_rc_ready != 0;
             if (g_springboard_rc_ready) {
-                settings_stop_springboard_tweaks_locked("remote call cleanup", NO);
+                settings_stop_springboard_tweaks_locked("remote call cleanup", NO, NO);
             }
             settings_destroy_springboard_remote_call_locked("manual cleanup");
             log_user(hadSession ? "[OK] SpringBoard channel closed — live tweaks stopped.\n" :
@@ -1961,14 +3559,43 @@ void settings_destroy_springboard_remote_call(void)
     });
 }
 
+static NSInteger settings_sbc_dock_autofill_capacity(NSUserDefaults *d)
+{
+    NSInteger dockIcons = [d integerForKey:kSettingsSBCDockIcons];
+    return MAX(0, MIN(3, dockIcons - 4));
+}
+
+static NSArray<NSString *> *settings_sbc_ordered_dock_bundle_ids(NSUserDefaults *d)
+{
+    NSInteger capacity = settings_sbc_dock_autofill_capacity(d);
+    NSMutableArray<NSString *> *orderedBundleIDs = [NSMutableArray array];
+    id rawSelection = [d objectForKey:kSettingsSBCDockAutofillBundleIDs];
+    if (![rawSelection isKindOfClass:[NSArray class]]) return @[];
+
+    for (id value in (NSArray *)rawSelection) {
+        if (orderedBundleIDs.count >= (NSUInteger)capacity) break;
+        if (![value isKindOfClass:[NSString class]] || [value length] == 0) continue;
+        if (![orderedBundleIDs containsObject:value]) [orderedBundleIDs addObject:value];
+    }
+    return [orderedBundleIDs copy];
+}
+
 static bool settings_apply_sbc_from_defaults_locked(NSUserDefaults *d)
 {
     if (![d boolForKey:kSettingsSBCEnabled]) return false;
 
-    return sbcustomizer_apply_in_session((int)[d integerForKey:kSettingsSBCDockIcons],
-                                         (int)[d integerForKey:kSettingsSBCCols],
-                                         (int)[d integerForKey:kSettingsSBCRows],
-                                         [d boolForKey:kSettingsSBCHideLabels]);
+    NSInteger dockIcons = [d integerForKey:kSettingsSBCDockIcons];
+    NSArray<NSString *> *orderedBundleIDs = settings_sbc_ordered_dock_bundle_ids(d);
+
+    return settings_apply_icon_operation_guarded(kSettingsSBCEnabled,
+                                                  "SBCustomizer",
+                                                  kSettingsSpringBoardRCSafeTimeoutFloorMS, ^bool{
+        return sbcustomizer_apply_in_session((int)dockIcons,
+                                             (int)[d integerForKey:kSettingsSBCCols],
+                                             (int)[d integerForKey:kSettingsSBCRows],
+                                             [d boolForKey:kSettingsSBCHideLabels],
+                                             orderedBundleIDs);
+    });
 }
 
 static NSString *settings_nicebar_key(NSString *prefix, NSInteger slot)
@@ -2004,7 +3631,7 @@ static NSString *settings_nicebar_kind_name(NSInteger kind)
 static NSString *settings_nicebar_system_name(NSInteger item)
 {
     switch ((NiceBarLiteSystemItem)item) {
-        case NiceBarLiteSystemBatteryTemp: return @"Battery Temp";
+        case NiceBarLiteSystemBatteryTemp: return @"Battery Current";
         case NiceBarLiteSystemFreeRAM: return @"Free RAM";
         case NiceBarLiteSystemBatteryPercent: return @"Battery";
         case NiceBarLiteSystemNetworkSpeed: return @"Network Speed";
@@ -2285,11 +3912,39 @@ BOOL settings_hide_home_bar_respring_pending(void)
     return settings_hide_home_bar_materialkit_zero_active(NSUserDefaults.standardUserDefaults);
 }
 
-void settings_present_hide_home_bar_respring_prompt(UIViewController *host)
+void settings_begin_system_edit_respring(UIViewController *host)
+{
+    __weak UIViewController *weakHost = host;
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        if (__sync_lock_test_and_set(&g_settings_actions_running, 1)) {
+            printf("[SETTINGS] system edit respring blocked: actions already running\n");
+            log_user("[RESPRING] Another action is still running. Try Respring again in a moment.\n");
+            return;
+        }
+
+        __sync_lock_test_and_set(&g_settings_respring_cleanup_running, 1);
+        settings_notify_cleanup_state_changed();
+        @try {
+            settings_prepare_for_respring_sync();
+        } @finally {
+            __sync_lock_release(&g_settings_actions_running);
+            __sync_lock_release(&g_settings_respring_cleanup_running);
+            settings_notify_cleanup_state_changed();
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            settings_show_respring_overlay(weakHost);
+        });
+    });
+}
+
+void settings_present_system_edit_respring_prompt(UIViewController *host,
+                                                  NSString *title,
+                                                  NSString *message)
 {
     UIAlertController *ac = [UIAlertController
-        alertControllerWithTitle:@"Respring to Hide Home Bar?"
-                         message:@"Hide Home Bar was applied, but SpringBoard needs to restart before the home indicator disappears."
+        alertControllerWithTitle:title ?: @"Respring Required"
+                         message:message ?: @"The system-file edit was applied, but SpringBoard needs to restart before the change is visible."
                   preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"Later"
                                            style:UIAlertActionStyleCancel
@@ -2298,29 +3953,16 @@ void settings_present_hide_home_bar_respring_prompt(UIViewController *host)
     [ac addAction:[UIAlertAction actionWithTitle:@"Respring"
                                            style:UIAlertActionStyleDestructive
                                          handler:^(UIAlertAction *_) {
-        dispatch_async(dispatch_get_global_queue(0, 0), ^{
-            if (__sync_lock_test_and_set(&g_settings_actions_running, 1)) {
-                printf("[SETTINGS] hide home bar respring blocked: actions already running\n");
-                log_user("[RESPRING] Another action is still running. Try Respring again in a moment.\n");
-                return;
-            }
-
-            __sync_lock_test_and_set(&g_settings_respring_cleanup_running, 1);
-            settings_notify_cleanup_state_changed();
-            @try {
-                settings_prepare_for_respring_sync();
-            } @finally {
-                __sync_lock_release(&g_settings_actions_running);
-                __sync_lock_release(&g_settings_respring_cleanup_running);
-                settings_notify_cleanup_state_changed();
-            }
-
-            dispatch_async(dispatch_get_main_queue(), ^{
-                settings_show_respring_overlay(weakHost);
-            });
-        });
+        settings_begin_system_edit_respring(weakHost);
     }]];
     settings_present_controller(ac, host);
+}
+
+void settings_present_hide_home_bar_respring_prompt(UIViewController *host)
+{
+    settings_present_system_edit_respring_prompt(host,
+                                                @"Respring to Hide Home Bar?",
+                                                @"Hide Home Bar was applied, but SpringBoard needs to restart before the home indicator disappears.");
 }
 
 static BOOL settings_dark_tweaks_should_run(NSUserDefaults *d, BOOL pendingOnly)
@@ -2424,7 +4066,18 @@ static bool settings_apply_layout_extras_from_defaults_locked(NSUserDefaults *d)
     NSInteger dkPct = [d integerForKey:kSettingsLayoutDockScalePct];
     double homeScale = (hsPct > 0) ? (double)hsPct / 100.0 : 1.0;
     double dockScale = (dkPct > 0) ? (double)dkPct / 100.0 : 1.0;
-    return darksword_layout_apply_in_session(exL, exR, exT, exB, dockExH, homeScale, dockScale);
+    if (exL == 0.0 && exR == 0.0 && exT == 0.0 && exB == 0.0 &&
+        dockExH == 0.0 && homeScale == 1.0 && dockScale == 1.0) {
+        log_user("[LAYOUT] Home Layout Extras is enabled but all values are stock; skipping remote layout pass.\n");
+        return true;
+    }
+
+    log_user("[LAYOUT] Applying extras L=%.0f R=%.0f T=%.0f B=%.0f dockH=%.0f homeScale=%.2f dockScale=%.2f\n",
+             exL, exR, exT, exB, dockExH, homeScale, dockScale);
+    return settings_apply_springboard_guarded("Home Layout Extras", 1500, ^bool{
+        return darksword_layout_apply_in_session(exL, exR, exT, exB,
+                                                 dockExH, homeScale, dockScale);
+    });
 }
 
 static GravityLiteConfig settings_gravitylite_config_from_defaults(NSUserDefaults *d)
@@ -2454,7 +4107,10 @@ static GravityLiteConfig settings_gravitylite_config_from_defaults(NSUserDefault
 static bool settings_apply_gravitylite_from_defaults_locked(NSUserDefaults *d)
 {
     if (![d boolForKey:kSettingsGravityLiteEnabled]) return false;
-    return gravitylite_apply_in_session(settings_gravitylite_config_from_defaults(d));
+    GravityLiteConfig config = settings_gravitylite_config_from_defaults(d);
+    return settings_apply_springboard_guarded("Gravity Lite", 1500, ^bool{
+        return gravitylite_apply_in_session(config);
+    });
 }
 
 static double settings_fastlockx_lite_retry_interval(NSUserDefaults *d)
@@ -2589,7 +4245,9 @@ static void settings_apply_armed_gravitylite_once_async(const char *reason)
                     }
                     appliedConfig = settings_gravitylite_config_from_defaults(d);
                     printf("[SETTINGS] Gravity async apply attempt=%d begin\n", attempt + 1);
-                    ok = gravitylite_apply_in_session(appliedConfig);
+                    ok = settings_apply_springboard_guarded("Gravity Lite async", 1500, ^bool{
+                        return gravitylite_apply_in_session(appliedConfig);
+                    });
                     printf("[SETTINGS] Gravity async apply attempt=%d result=%d\n", attempt + 1, ok);
                     settings_mark_tweak_applied(kSettingsGravityLiteEnabled,
                                                 ok && [d boolForKey:kSettingsGravityLiteEnabled]);
@@ -2731,7 +4389,7 @@ static bool settings_apply_themer_from_defaults_locked(NSUserDefaults *d)
     if (![theme isEqualToString:kThemerThemeBuiltinIOS6] &&
         ![theme isEqualToString:kThemerThemeCustom]) {
         printf("[THEMER] resolve: no selected theme; install/apply blocked\n");
-        log_user("[THEMER] Pick a theme in SnowBoard Lite settings before running.\n");
+        log_user("[THEMER] Pick a theme in SnowBoard Remix settings before running.\n");
         return false;
     }
 
@@ -2743,7 +4401,9 @@ static bool settings_apply_themer_from_defaults_locked(NSUserDefaults *d)
             return false;
         }
         NSDictionary *dict = settings_themer_load_plist_theme(plistPath);
-        return dict.count > 0 ? themer_apply_data_in_session(dict) : false;
+        return dict.count > 0 ? settings_apply_springboard_guarded("Icon Theme Engine", 1500, ^bool{
+            return themer_apply_data_in_session(dict);
+        }) : false;
     }
 
     NSString *path = [d stringForKey:kSettingsThemerCustomThemePath];
@@ -2756,10 +4416,14 @@ static bool settings_apply_themer_from_defaults_locked(NSUserDefaults *d)
     }
     if (isDir) {
         printf("[THEMER] resolve: using imported folder %s\n", path.UTF8String);
-        return themer_apply_in_session(path.fileSystemRepresentation);
+        return settings_apply_springboard_guarded("Icon Theme Engine", 1500, ^bool{
+            return themer_apply_in_session(path.fileSystemRepresentation);
+        });
     }
     NSDictionary *dict = settings_themer_load_plist_theme(path);
-    return dict.count > 0 ? themer_apply_data_in_session(dict) : false;
+    return dict.count > 0 ? settings_apply_springboard_guarded("Icon Theme Engine", 1500, ^bool{
+        return themer_apply_data_in_session(dict);
+    }) : false;
 }
 
 static void settings_reset_sbc_defaults(void)
@@ -2772,6 +4436,7 @@ static void settings_reset_sbc_defaults(void)
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     [d setBool:YES forKey:kSettingsSBCEnabled];
     [d setInteger:kSBCDefaultDockIcons forKey:kSettingsSBCDockIcons];
+    [d setObject:@[] forKey:kSettingsSBCDockAutofillBundleIDs];
     [d setInteger:kSBCDefaultCols forKey:kSettingsSBCCols];
     [d setInteger:kSBCDefaultRows forKey:kSettingsSBCRows];
     [d setBool:kSBCDefaultHideLabels forKey:kSettingsSBCHideLabels];
@@ -2787,12 +4452,22 @@ static void settings_reset_sbc_defaults(void)
     if (!g_springboard_rc_ready) return;
 
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        BOOL closedNonLiveRemoteCall = NO;
         @synchronized (settings_rc_lock()) {
             if (!g_springboard_rc_ready) return;
             bool ok = settings_apply_sbc_from_defaults_locked(d);
             settings_mark_tweak_applied(kSettingsSBCEnabled,
                                         ok && [d boolForKey:kSettingsSBCEnabled]);
             printf("[SETTINGS] SBC reset apply result=%d\n", ok);
+            if (!settings_has_persistent_springboard_remote_call_user() &&
+                g_springboard_rc_ready) {
+                settings_destroy_springboard_remote_call_locked_internal_ex(
+                    "SBC reset one-shot apply complete", YES, YES);
+                closedNonLiveRemoteCall = g_springboard_rc_ready == 0;
+            }
+        }
+        if (closedNonLiveRemoteCall) {
+            log_user("[OK] SpringBoard channel released — SBC defaults were committed.\n");
         }
         settings_notify_package_queue_changed_async();
     });
@@ -2980,6 +4655,5831 @@ BOOL settings_apply_hide_home_bar_hidden(BOOL hidden)
     }
 }
 
+BOOL settings_apply_font_changer_now(BOOL apply)
+{
+    if (!settings_try_claim_actions_lock("Font Changer apply",
+                                         "[FONT] Another action is already running.")) {
+        return NO;
+    }
+
+    @try {
+        if (!settings_ensure_kexploit()) {
+            log_user("[FONT] Failed: kernel primitives were not acquired. Please try running chain again.\n");
+            return NO;
+        }
+        return (apply ? font_changer_apply_selected_family()
+                      : font_changer_restore_originals()) ? YES : NO;
+    } @finally {
+        settings_release_actions_lock();
+    }
+}
+
+BOOL settings_font_changer_has_regular_font(void)
+{
+    return font_changer_has_regular_font();
+}
+
+#if 0
+// Retired SnowBoard Lite app snapshot/reapply monitor. Updates are detected
+// by durable Remix journals and require an explicit Apply operation.
+static NSString *settings_snowboardlite_join_bundles(NSSet<NSString *> *bundles,
+                                                      NSUInteger limit)
+{
+    if (bundles.count == 0) return @"";
+    NSMutableArray<NSString *> *items = [NSMutableArray array];
+    for (NSString *bundle in bundles) {
+        if (![bundle isKindOfClass:NSString.class] || bundle.length == 0) continue;
+        [items addObject:bundle];
+    }
+    [items sortUsingSelector:@selector(compare:)];
+    NSUInteger total = items.count;
+    if (limit > 0 && items.count > limit) {
+        items = [[items subarrayWithRange:NSMakeRange(0, limit)] mutableCopy];
+        [items addObject:[NSString stringWithFormat:@"...(+%lu)",
+                          (unsigned long)(total - limit)]];
+    }
+    return [items componentsJoinedByString:@","];
+}
+
+static NSDictionary<NSString *, NSString *> *settings_snowboardlite_persisted_app_snapshot(void)
+{
+    id stored = [NSUserDefaults.standardUserDefaults objectForKey:kSettingsSnowBoardLiteAppSnapshotKey];
+    if (![stored isKindOfClass:NSDictionary.class]) return @{};
+
+    NSMutableDictionary<NSString *, NSString *> *clean = [NSMutableDictionary dictionary];
+    [(NSDictionary *)stored enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+        (void)stop;
+        if ([key isKindOfClass:NSString.class] &&
+            [obj isKindOfClass:NSString.class] &&
+            [(NSString *)key length] > 0) {
+            clean[(NSString *)key] = (NSString *)obj;
+        }
+    }];
+    return clean;
+}
+
+static void settings_snowboardlite_persist_app_snapshot(NSDictionary<NSString *, NSString *> *snapshot)
+{
+    if (![snapshot isKindOfClass:NSDictionary.class] || snapshot.count == 0) return;
+    [NSUserDefaults.standardUserDefaults setObject:snapshot
+                                            forKey:kSettingsSnowBoardLiteAppSnapshotKey];
+    [NSUserDefaults.standardUserDefaults synchronize];
+}
+
+static NSSet<NSString *> *settings_snowboardlite_changed_bundles(NSDictionary<NSString *, NSString *> *oldSnapshot,
+                                                                 NSDictionary<NSString *, NSString *> *newSnapshot)
+{
+    if (![newSnapshot isKindOfClass:NSDictionary.class] || newSnapshot.count == 0) {
+        return [NSSet set];
+    }
+
+    NSMutableSet<NSString *> *changed = [NSMutableSet set];
+    for (NSString *bundleID in newSnapshot) {
+        if (![bundleID isKindOfClass:NSString.class] || bundleID.length == 0) continue;
+        NSString *oldValue = [oldSnapshot isKindOfClass:NSDictionary.class] ? oldSnapshot[bundleID] : nil;
+        NSString *newValue = newSnapshot[bundleID];
+        if (oldValue.length == 0 ||
+            ([newValue isKindOfClass:NSString.class] &&
+             newValue.length > 0 &&
+             ![oldValue isEqualToString:newValue])) {
+            [changed addObject:bundleID];
+        }
+    }
+    return changed;
+}
+
+static void settings_snowboardlite_schedule_targeted_reapply(NSSet<NSString *> *bundleIDs,
+                                                             NSString *reason)
+{
+    if (bundleIDs.count == 0) return;
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    if (![d boolForKey:kSettingsSnowBoardLiteEnabled] ||
+        !settings_snowboardlite_has_selected_theme()) {
+        return;
+    }
+
+    @synchronized ([SettingsViewController class]) {
+        if (!g_sbl_pending_app_bundles) {
+            g_sbl_pending_app_bundles = [NSMutableSet set];
+        }
+        [g_sbl_pending_app_bundles unionSet:bundleIDs];
+        g_sbl_app_reapply_generation++;
+    }
+
+    uint64_t generation = g_sbl_app_reapply_generation;
+    NSString *reasonCopy = [reason copy] ?: @"app snapshot changed";
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSSet<NSString *> *pending = nil;
+        @synchronized ([SettingsViewController class]) {
+            if (generation != g_sbl_app_reapply_generation ||
+                g_sbl_pending_app_bundles.count == 0) {
+                return;
+            }
+            pending = [g_sbl_pending_app_bundles copy];
+            [g_sbl_pending_app_bundles removeAllObjects];
+        }
+
+        if (pending.count == 0) return;
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        if (![defaults boolForKey:kSettingsSnowBoardLiteEnabled] ||
+            !settings_snowboardlite_has_selected_theme() ||
+            !settings_tweak_is_applied(kSettingsSnowBoardLiteEnabled)) {
+            return;
+        }
+
+        if (!settings_try_claim_actions_lock("SnowBoard Remix app update reapply",
+                                             "[SBR] App update repair skipped; another action is running. Run/Reapply required.")) {
+            // A busy action lock means this repair was deferred, not that the
+            // already-installed SnowBoard state disappeared.
+            return;
+        }
+
+        BOOL ok = NO;
+        @try {
+            log_user("[SBR] App install/update detected (%s); reapplying %lu changed app(s): %s\n",
+                     reasonCopy.UTF8String,
+                     (unsigned long)pending.count,
+                     settings_snowboardlite_join_bundles(pending, 12).UTF8String);
+
+            if (!g_kexploit_done || !kexploit_krw_ready()) {
+                log_user("[SBR] App update repair skipped: the existing kernel session is unavailable. Run/Reapply required.\n");
+            } else {
+                @synchronized (settings_rc_lock()) {
+                    if (settings_cleanup_in_progress()) {
+                        log_user("[SBR] App update repair skipped during cleanup. Run/Reapply required.\n");
+                    } else if (!settings_validate_springboard_remote_call_reuse_only_locked(
+                                   "SnowBoard Remix App Update Reapply")) {
+                        log_user("[SBR] App update repair skipped: the existing SpringBoard session is unavailable or stale. Run/Reapply required.\n");
+                    } else {
+                        ok = settings_apply_springboard_guarded(
+                            "SnowBoard Remix App Update Reapply", 1500, ^bool{
+                                return settings_apply_snowboardlite_bundles_from_defaults_locked(
+                                    defaults, pending);
+                            }) ? YES : NO;
+                    }
+                }
+            }
+
+            settings_mark_tweak_applied(kSettingsSnowBoardLiteEnabled,
+                                        ok && [defaults boolForKey:kSettingsSnowBoardLiteEnabled]);
+            log_user("%s SnowBoard Remix app update repair %s.\n",
+                     ok ? "[OK]" : "[WARN]",
+                     ok ? "completed" : "did not apply; Run/Reapply required");
+            settings_notify_package_queue_changed_async();
+        } @finally {
+            settings_release_actions_lock();
+        }
+    });
+}
+
+static void settings_snowboardlite_process_app_snapshot_event(NSString *reason)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSDictionary<NSString *, NSString *> *snapshot =
+            settings_snowboardlite_installed_app_snapshot();
+        if (snapshot.count == 0) return;
+
+        NSDictionary<NSString *, NSString *> *oldSnapshot = nil;
+        @synchronized ([SettingsViewController class]) {
+            if (!g_sbl_app_snapshot) {
+                NSDictionary<NSString *, NSString *> *persisted =
+                    settings_snowboardlite_persisted_app_snapshot();
+                if (persisted.count > 0) {
+                    g_sbl_app_snapshot = [persisted mutableCopy];
+                    printf("[SBR] app snapshot restored baseline apps=%lu reason=%s\n",
+                           (unsigned long)persisted.count,
+                           reason.UTF8String ?: "?");
+                } else {
+                    g_sbl_app_snapshot = [snapshot mutableCopy];
+                    settings_snowboardlite_persist_app_snapshot(snapshot);
+                    printf("[SBR] app snapshot baseline apps=%lu reason=%s\n",
+                           (unsigned long)snapshot.count,
+                           reason.UTF8String ?: "?");
+                    return;
+                }
+            }
+
+            oldSnapshot = [g_sbl_app_snapshot copy];
+            g_sbl_app_snapshot = [snapshot mutableCopy];
+        }
+        settings_snowboardlite_persist_app_snapshot(snapshot);
+
+        NSSet<NSString *> *changed =
+            settings_snowboardlite_changed_bundles(oldSnapshot, snapshot);
+        if (changed.count == 0) return;
+        printf("[SBR] app snapshot changed reason=%s changed=%lu bundles=%s\n",
+               reason.UTF8String ?: "?",
+               (unsigned long)changed.count,
+               settings_snowboardlite_join_bundles(changed, 12).UTF8String);
+        settings_pause_statbar_for_app_churn(reason.UTF8String ?: "app snapshot changed");
+        settings_pause_nsbar_for_app_churn(reason.UTF8String ?: "app snapshot changed");
+        settings_snowboardlite_schedule_targeted_reapply(changed, reason);
+    });
+}
+
+static void settings_snowboardlite_handle_app_snapshot_event(NSString *reason)
+{
+    NSString *reasonCopy = [reason copy] ?: @"app snapshot changed";
+    uint64_t generation = __sync_add_and_fetch(&g_sbl_app_snapshot_event_generation, 1);
+    const int64_t delaysNS[] = {
+        0,
+        5LL * NSEC_PER_SEC,
+        20LL * NSEC_PER_SEC,
+    };
+    const size_t count = sizeof(delaysNS) / sizeof(delaysNS[0]);
+    for (size_t i = 0; i < count; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delaysNS[i]),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            if (i > 0 && generation != g_sbl_app_snapshot_event_generation) {
+                return;
+            }
+            settings_snowboardlite_process_app_snapshot_event(reasonCopy);
+        });
+    }
+}
+#endif
+
+#if 0
+// Retired live SnowBoard Lite reapply/Clock repair path. Remix operations are
+// dispatched through CNDSnowBoardRemix and never hold a SpringBoard channel.
+static BOOL settings_apply_snowboardlite_now(void)
+{
+    if (!settings_device_supported()) {
+        NSString *message = settings_unsupported_message();
+        log_user("[SBR] %s\n", message.UTF8String);
+        return NO;
+    }
+    if (!settings_snowboardlite_has_selected_theme()) {
+        log_user("[SBR] Pick or import a theme before reapplying SBR.\n");
+        return NO;
+    }
+    if (!settings_try_claim_actions_lock("SnowBoard Remix reapply",
+                                         "[SBR] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL ok = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        NSString *themeName = settings_snowboardlite_selected_theme_display_name();
+        [d setBool:YES forKey:kSettingsSnowBoardLiteEnabled];
+        [d synchronize];
+
+        log_user("[SBR] Reapplying selected theme: %s\n",
+                 themeName.UTF8String ?: "unknown");
+        NSUInteger step = 0;
+        NSUInteger total = 3;
+
+        settings_progress(&step, total, "Racing kernel allocator for r/w primitives");
+        if (!settings_ensure_kexploit()) {
+            log_user("[SBR] Failed: kernel primitives were not acquired. Please try again.\n");
+            cyanide_upload_log_milestone(@"snowboard-lite-reapply-krw-failed");
+            return NO;
+        }
+        if (!kexploit_krw_ready()) {
+            log_user("[SBR] Failed: kernel primitives did not pass post-acquisition validation. Please try again.\n");
+            cyanide_upload_log_milestone(@"snowboard-lite-reapply-krw-validation-failed");
+            return NO;
+        }
+
+        @synchronized (settings_rc_lock()) {
+            settings_progress(&step, total, "Opening SpringBoard injection channel");
+            if (!settings_ensure_springboard_remote_call_locked()) {
+                log_user("[SBR] Failed: could not open the SpringBoard control session.\n");
+                cyanide_upload_log_milestone(@"snowboard-lite-reapply-remote-call-failed");
+                return NO;
+            }
+
+            settings_progress(&step, total, "Reapplying SnowBoard Remix theme");
+            ok = settings_apply_springboard_guarded(
+                "SnowBoard Remix Reapply",
+                kSettingsSpringBoardRCSafeTimeoutFloorMS,
+                ^bool{
+                    return settings_apply_snowboardlite_from_defaults_locked(d);
+                }) ? YES : NO;
+            settings_mark_tweak_applied(kSettingsSnowBoardLiteEnabled,
+                                        ok && [d boolForKey:kSettingsSnowBoardLiteEnabled]);
+            if (ok && remote_call_current_success()) {
+                bool repairOK = themer_force_repaint_cached_views_in_session();
+                printf("[SETTINGS] SnowBoard Remix reapply home/notification repair result=%d\n",
+                       repairOK);
+            }
+        }
+
+        if (ok) {
+            log_user("[OK] SnowBoard Remix theme reapplied.\n");
+            cyanide_upload_log_milestone(@"snowboard-lite-reapplied");
+        } else {
+            log_user("[WARN] SnowBoard Remix did not reapply cleanly.\n");
+            cyanide_upload_log_milestone(@"snowboard-lite-reapply-warning");
+        }
+
+        if (!settings_has_persistent_springboard_remote_call_user()) {
+            BOOL closedNonLiveRemoteCall = NO;
+            @synchronized (settings_rc_lock()) {
+                if (!settings_has_persistent_springboard_remote_call_user() &&
+                    g_springboard_rc_ready) {
+                    settings_destroy_springboard_remote_call_locked_internal_ex("snowboard lite reapply complete",
+                                                                               YES,
+                                                                               YES);
+                    closedNonLiveRemoteCall = g_springboard_rc_ready == 0;
+                }
+            }
+            if (closedNonLiveRemoteCall) {
+                log_user("[OK] SpringBoard channel released — no persistent hooks.\n");
+                cyanide_upload_log_milestone(@"springboard-remote-call-closed");
+            }
+        }
+
+        return ok;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static void settings_run_snowboardlite_reapply_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        BOOL ok = settings_apply_snowboardlite_now();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *message = ok
+                ? @"SnowBoard Remix theme reapplied."
+                : @"SnowBoard Remix reapply failed — check the log.";
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:PackageQueueDidChangeNotification
+                              object:[PackageQueue sharedQueue]];
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil
+                            userInfo:@{
+                                kSettingsActionsDidCompleteSuccessKey: @(ok),
+                                kSettingsActionsDidCompleteMessageKey: message
+                            }];
+            cyanide_upload_log_if_enabled();
+        });
+    });
+}
+
+static BOOL settings_repair_snowboardlite_static_dynamic_now(void)
+{
+    if (!settings_device_supported()) {
+        NSString *message = settings_unsupported_message();
+        log_user("[SBR] %s\n", message.UTF8String);
+        return NO;
+    }
+    if (!settings_snowboardlite_has_selected_theme()) {
+        log_user("[SBR] Pick or import a theme before repairing the Clock icon.\n");
+        return NO;
+    }
+    if (!settings_try_claim_actions_lock("SnowBoard Remix Clock repair",
+                                         "[SBR] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL ok = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+
+        NSUInteger step = 0;
+        NSUInteger total = 3;
+        settings_progress(&step, total, "Racing kernel allocator for r/w primitives");
+        if (!settings_ensure_kexploit()) {
+            log_user("[SBR] Failed: kernel primitives were not acquired. Please try again.\n");
+            cyanide_upload_log_milestone(@"snowboard-lite-dynamic-repair-krw-failed");
+            return NO;
+        }
+
+        @synchronized (settings_rc_lock()) {
+            settings_progress(&step, total, "Opening SpringBoard injection channel");
+            if (!settings_ensure_springboard_remote_call_locked()) {
+                log_user("[SBR] Failed: could not open the SpringBoard control session.\n");
+                cyanide_upload_log_milestone(@"snowboard-lite-dynamic-repair-remote-call-failed");
+                return NO;
+            }
+
+            settings_progress(&step, total, "Repairing visible Clock icon");
+            ok = settings_apply_springboard_guarded("SnowBoard Remix Clock Repair", 1500, ^bool{
+                return themer_repair_static_dynamic_visible_icons_in_session();
+            }) ? YES : NO;
+        }
+
+        if (ok) {
+            log_user("[OK] Clock static repair ran. Send the static-dynamic repair lines if it still looks wrong.\n");
+            cyanide_upload_log_milestone(@"snowboard-lite-dynamic-repair-applied");
+        } else {
+            log_user("[WARN] Clock repair did not find a repairable Clock icon. Leave the target page/folder as the current SpringBoard page, then try again.\n");
+            cyanide_upload_log_milestone(@"snowboard-lite-dynamic-repair-warning");
+        }
+
+        if (!settings_has_persistent_springboard_remote_call_user()) {
+            BOOL closedNonLiveRemoteCall = NO;
+            @synchronized (settings_rc_lock()) {
+                if (!settings_has_persistent_springboard_remote_call_user() &&
+                    g_springboard_rc_ready) {
+                    settings_destroy_springboard_remote_call_locked_internal_ex("snowboard lite dynamic repair complete",
+                                                                               YES,
+                                                                               YES);
+                    closedNonLiveRemoteCall = g_springboard_rc_ready == 0;
+                }
+            }
+            if (closedNonLiveRemoteCall) {
+                log_user("[OK] SpringBoard channel released — no persistent hooks.\n");
+                cyanide_upload_log_milestone(@"springboard-remote-call-closed");
+            }
+        }
+
+        return ok;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static void settings_run_snowboardlite_static_dynamic_repair_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        BOOL ok = settings_repair_snowboardlite_static_dynamic_now();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *message = ok
+                ? @"Clock repair ran."
+                : @"Clock repair found nothing — check the log.";
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:PackageQueueDidChangeNotification
+                              object:[PackageQueue sharedQueue]];
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil
+                            userInfo:@{
+                                kSettingsActionsDidCompleteSuccessKey: @(ok),
+                                kSettingsActionsDidCompleteMessageKey: message
+                            }];
+            cyanide_upload_log_if_enabled();
+        });
+    });
+}
+#endif
+
+static BOOL settings_spotlight_target_matches(int expectedPID,
+                                              uint64_t expectedProc,
+                                              uint64_t expectedTask,
+                                              uint64_t *currentProcOut,
+                                              uint64_t *currentTaskOut)
+{
+    if (currentProcOut) *currentProcOut = 0;
+    if (currentTaskOut) *currentTaskOut = 0;
+    if (remote_call_lab_backend_opted_in() && expectedPID > 1 &&
+        expectedProc == 0 && expectedTask == 0) {
+        errno = 0;
+        int probeResult = kill(expectedPID, 0);
+        return probeResult == 0 || errno == EPERM;
+    }
+    if (expectedPID <= 0 || !expectedProc || expectedProc == UINT64_MAX ||
+        !expectedTask || expectedTask == UINT64_MAX) {
+        return NO;
+    }
+
+    uint64_t currentProc = proc_find(expectedPID);
+    if (currentProcOut) *currentProcOut = currentProc;
+    if (!currentProc || currentProc == UINT64_MAX) return NO;
+
+    uint64_t currentTask = proc_task(currentProc);
+    if (currentTaskOut) *currentTaskOut = currentTask;
+    return currentProc == expectedProc && currentTask == expectedTask;
+}
+
+// A different (or absent) process at the recorded PID proves that the old
+// RemoteCall host incarnation is gone.  It does not prove that any durable
+// IconServices journal was restored; callers must keep those journals armed
+// until the corresponding recovery operation and channel closure succeed.
+static BOOL settings_spotlight_owner_exit_proven(int expectedPID,
+                                                 uint64_t expectedProc,
+                                                 uint64_t expectedTask,
+                                                 uint64_t *currentProcOut,
+                                                 uint64_t *currentTaskOut)
+{
+    if (currentProcOut) *currentProcOut = 0;
+    if (currentTaskOut) *currentTaskOut = 0;
+    if (expectedPID <= 0 || !expectedProc || expectedProc == UINT64_MAX ||
+        !expectedTask || expectedTask == UINT64_MAX ||
+        (expectedProc >> 48) != UINT16_MAX ||
+        (expectedTask >> 48) != UINT16_MAX) {
+        return NO;
+    }
+    uint64_t currentProc = proc_find(expectedPID);
+    if (currentProcOut) *currentProcOut = currentProc;
+    if (currentProc == UINT64_MAX ||
+        (currentProc && (currentProc >> 48) != UINT16_MAX)) return NO;
+    if (!currentProc) {
+        errno = 0;
+        int probeResult = kill(expectedPID, 0);
+        return probeResult == -1 && errno == ESRCH;
+    }
+    // A valid, different proc pointer is sufficient evidence that the old
+    // incarnation is gone.  Only the same proc pointer requires a task check.
+    if (currentProc != expectedProc) return YES;
+    uint64_t currentTask = proc_task(currentProc);
+    if (currentTaskOut) *currentTaskOut = currentTask;
+    if (!currentTask || currentTask == UINT64_MAX ||
+        (currentTask >> 48) != UINT16_MAX) return NO;
+    return currentTask != expectedTask;
+}
+
+static BOOL __attribute__((unused))
+settings_diagnose_snowboardlite_spotlight_legacy_now(void)
+{
+    if (!settings_device_supported()) {
+        NSString *message = settings_unsupported_message();
+        log_user("[SPOTLIGHT] %s\n", message.UTF8String);
+        return NO;
+    }
+    if (!settings_snowboardlite_has_selected_theme()) {
+        log_user("[SPOTLIGHT] Pick or import a SnowBoard Remix theme before patching Spotlight icons.\n");
+        return NO;
+    }
+    NSDictionary<NSString *, NSData *> *themeData =
+        settings_sbl_selected_theme_data();
+    if (themeData.count == 0) {
+        log_user("[SPOTLIGHT] The selected theme did not contain any usable PNG data.\n");
+        return NO;
+    }
+    if (!settings_try_claim_actions_lock("SnowBoard Remix Spotlight patch",
+                                         "[SPOTLIGHT] Another action is already running.")) {
+        return NO;
+    }
+    __sync_lock_test_and_set(&g_spotlight_trace_stop_requested, 0);
+
+    BOOL ok = NO;
+    RemoteCallSession *spotlightSession = nil;
+    NSString *spotlightHost = nil;
+    int spotlightPID = 0;
+    uint64_t spotlightProc = 0;
+    uint64_t spotlightTask = 0;
+    BOOL spotlightRemoteHealthy = YES;
+    __block uint64_t spotlightSetupAutoreleasePool = 0;
+    NSUInteger traceSamples = 0;
+    BOOL traceCompleted = NO;
+    BOOL traceTargetChanged = NO;
+    BOOL canonicalPreloadAttempted = NO;
+    BOOL canonicalPreloadSucceeded = NO;
+    BOOL liveValidationAttempted = NO;
+    BOOL liveValidationSucceeded = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        printf("[SPOTLIGHT] process-cache action begin entries=%lu\n",
+               (unsigned long)themeData.count);
+
+        NSUInteger step = 0;
+        NSUInteger total = 6;
+        settings_progress(&step, total, "Racing kernel allocator for r/w primitives");
+        if (!settings_ensure_kexploit()) {
+            log_user("[SPOTLIGHT] Failed: kernel primitives were not acquired. Please try again.\n");
+            cyanide_upload_log_milestone(@"spotlight-icon-diagnostic-krw-failed");
+            return NO;
+        }
+
+        settings_progress(&step, total, "Waiting for the Spotlight UI process");
+        log_user("[SPOTLIGHT] Open Spotlight so its UI process is running, then leave an application result visible for the post-preload recycling validation.\n");
+
+        NSArray<NSString *> *hostCandidates = @[
+            @"Spotlight",
+            @"SpotlightUIService",
+            @"SearchUIService",
+        ];
+        NSMutableSet<NSString *> *attemptedHosts = [NSMutableSet set];
+        uint64_t hostDeadline = settings_now_us() + 15000000ULL;
+        while (!spotlightSession &&
+               !g_spotlight_trace_stop_requested &&
+               settings_now_us() < hostDeadline) {
+            for (NSString *candidate in hostCandidates) {
+                if (g_spotlight_trace_stop_requested) break;
+                if ([attemptedHosts containsObject:candidate]) continue;
+                uint64_t proc = proc_find_by_name(candidate.UTF8String);
+                if (!proc || proc == UINT64_MAX) continue;
+
+                [attemptedHosts addObject:candidate];
+                printf("[SPOTLIGHT] host candidate process=%s proc=0x%llx\n",
+                       candidate.UTF8String,
+                       (unsigned long long)proc);
+                @synchronized (settings_rc_lock()) {
+                    spotlightSession = [[RemoteCallSession alloc]
+                        initWithProcess:candidate
+                        useMigFilterBypass:NO
+                        firstExceptionTimeoutMS:10000];
+                }
+                if (spotlightSession) {
+                    spotlightHost = candidate;
+                    spotlightPID = spotlightSession.pid;
+                    spotlightTask = spotlightSession.taskAddr;
+                    spotlightProc = proc_find(spotlightPID);
+                    break;
+                }
+                printf("[SPOTLIGHT] host candidate failed process=%s initFailure=%s\n",
+                       candidate.UTF8String,
+                       remote_call_init_failure_description(remote_call_last_init_failure()));
+            }
+            if (!spotlightSession) usleep(500000);
+        }
+
+        if (g_spotlight_trace_stop_requested) {
+            log_user("[SPOTLIGHT] Stopped because the background-time budget expired before a host was ready.\n");
+            return NO;
+        }
+        if (!spotlightSession) {
+            log_user("[SPOTLIGHT] Failed: no reachable Spotlight UI process appeared. Keep Spotlight open and try again.\n");
+            cyanide_upload_log_milestone(@"spotlight-host-process-missing");
+            return NO;
+        }
+
+        uint64_t connectedProc = 0;
+        uint64_t connectedTask = 0;
+        if (!settings_spotlight_target_matches(spotlightPID,
+                                               spotlightProc,
+                                               spotlightTask,
+                                               &connectedProc,
+                                               &connectedTask)) {
+            spotlightRemoteHealthy = NO;
+            log_user("[SPOTLIGHT] The selected host changed during RemoteCall setup; retry with Spotlight open.\n");
+            printf("[SPOTLIGHT_TRACE] setup-target-changed pid=%d "
+                   "expectedProc=0x%llx currentProc=0x%llx "
+                   "expectedTask=0x%llx currentTask=0x%llx\n",
+                   spotlightPID,
+                   (unsigned long long)spotlightProc,
+                   (unsigned long long)connectedProc,
+                   (unsigned long long)spotlightTask,
+                   (unsigned long long)connectedTask);
+            return NO;
+        }
+
+        log_user("[SPOTLIGHT] Connected to %s (pid %d) without loading a dylib.\n",
+                 spotlightHost.UTF8String,
+                 spotlightPID);
+        settings_progress(&step, total,
+                          "Preloading canonical Spotlight application icons");
+        canonicalPreloadAttempted = YES;
+
+        __block BOOL preloadOK = NO;
+        __block BOOL preloadRemoteOK = NO;
+        __block RemoteCallDebugSnapshot preloadDebug = {0};
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(spotlightSession, ^{
+                    spotlightSetupAutoreleasePool =
+                        themer_spotlight_remote_autorelease_pool_push();
+                    printf("[SPOTLIGHT_PRELOAD] autorelease-pool-push "
+                           "token=0x%llx\n",
+                           (unsigned long long)spotlightSetupAutoreleasePool);
+                    if (!spotlightSetupAutoreleasePool) {
+                        printf("[SPOTLIGHT_PRELOAD] stopped "
+                               "reason=autorelease-pool-create-failed\n");
+                        preloadOK = NO;
+                        preloadRemoteOK = NO;
+                        (void)remote_call_copy_debug_snapshot(&preloadDebug);
+                        return;
+                    }
+                    preloadOK =
+                        themer_apply_spotlight_data_in_session(
+                            themeData, &g_spotlight_trace_stop_requested)
+                            ? YES : NO;
+                    if (remote_call_current_success() &&
+                        spotlightSetupAutoreleasePool) {
+                        uint64_t poolToken = spotlightSetupAutoreleasePool;
+                        themer_spotlight_remote_autorelease_pool_pop(poolToken);
+                        if (remote_call_current_success()) {
+                            spotlightSetupAutoreleasePool = 0;
+                        }
+                        printf("[SPOTLIGHT_PRELOAD] autorelease-pool-pop "
+                               "token=0x%llx success=%d\n",
+                               (unsigned long long)poolToken,
+                               remote_call_current_success());
+                    }
+                    preloadRemoteOK = remote_call_current_success() ? YES : NO;
+                    (void)remote_call_copy_debug_snapshot(&preloadDebug);
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[SPOTLIGHT_PRELOAD] remote-exception phase=apply "
+                   "name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            preloadRemoteOK = NO;
+        }
+
+        uint64_t postApplyProc = 0;
+        uint64_t postApplyTask = 0;
+        BOOL targetStable = settings_spotlight_target_matches(
+            spotlightPID, spotlightProc, spotlightTask,
+            &postApplyProc, &postApplyTask);
+        if (!preloadRemoteOK || !targetStable) {
+            spotlightRemoteHealthy = NO;
+            traceTargetChanged = !targetStable;
+            printf("[SPOTLIGHT_PRELOAD] apply-failed patch=%d remote=%d "
+                   "targetStable=%d success=%d localState=%d "
+                   "stable=%llu/%llu last=%s reason=%s\n",
+                   preloadOK,
+                   preloadRemoteOK,
+                   targetStable,
+                   preloadDebug.success,
+                   preloadDebug.hasLocalState,
+                   (unsigned long long)preloadDebug.stableCalls,
+                   (unsigned long long)preloadDebug.stableFailures,
+                   preloadDebug.lastStableFailure,
+                   preloadDebug.lastStableFailureReason);
+        }
+        canonicalPreloadSucceeded =
+            preloadOK && preloadRemoteOK && targetStable;
+        ok = canonicalPreloadSucceeded;
+        printf("[SPOTLIGHT_PRELOAD] phase-complete success=%d patch=%d "
+               "remote=%d targetStable=%d\n",
+               canonicalPreloadSucceeded,
+               preloadOK,
+               preloadRemoteOK,
+               targetStable);
+
+        if (!spotlightRemoteHealthy) {
+            log_user("[SPOTLIGHT] Canonical preload lost the RemoteCall channel or exact target; live-row validation was not started.\n");
+            return NO;
+        }
+        liveValidationAttempted = YES;
+
+        settings_progress(&step, total, "Waiting for live SearchUI app results");
+
+        __block int visibleViews = 0;
+        uint64_t viewDeadline = settings_now_us() + 12000000ULL;
+        do {
+            if (g_spotlight_trace_stop_requested) break;
+            uint64_t currentProc = 0;
+            uint64_t currentTask = 0;
+            if (!settings_spotlight_target_matches(spotlightPID,
+                                                   spotlightProc,
+                                                   spotlightTask,
+                                                   &currentProc,
+                                                   &currentTask)) {
+                spotlightRemoteHealthy = NO;
+                traceTargetChanged = YES;
+                printf("[SPOTLIGHT_TRACE] target-changed phase=view-wait pid=%d "
+                       "expectedProc=0x%llx currentProc=0x%llx "
+                       "expectedTask=0x%llx currentTask=0x%llx\n",
+                       spotlightPID,
+                       (unsigned long long)spotlightProc,
+                       (unsigned long long)currentProc,
+                       (unsigned long long)spotlightTask,
+                       (unsigned long long)currentTask);
+                break;
+            }
+
+            __block BOOL viewRemoteOK = NO;
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(spotlightSession, ^{
+                        if (!spotlightSetupAutoreleasePool) {
+                            spotlightSetupAutoreleasePool =
+                                themer_spotlight_remote_autorelease_pool_push();
+                            printf("[SPOTLIGHT_FAST] autorelease-pool-push "
+                                   "phase=setup token=0x%llx\n",
+                                   (unsigned long long)
+                                       spotlightSetupAutoreleasePool);
+                        }
+                        visibleViews =
+                            themer_spotlight_visible_view_count_in_session();
+                        viewRemoteOK = remote_call_current_success() ? YES : NO;
+                    });
+                }
+            } @catch (NSException *exception) {
+                printf("[SPOTLIGHT_TRACE] remote-exception phase=view-wait "
+                       "name=%s reason=%s\n",
+                       exception.name.UTF8String ?: "?",
+                       exception.reason.UTF8String ?: "?");
+                viewRemoteOK = NO;
+            }
+            if (!viewRemoteOK) {
+                spotlightRemoteHealthy = NO;
+                break;
+            }
+            if (visibleViews > 0) break;
+            usleep(750000);
+        } while (settings_now_us() < viewDeadline);
+
+        if (g_spotlight_trace_stop_requested) {
+            log_user("[SPOTLIGHT] Stopped because the background-time budget expired while waiting for SearchUI.\n");
+            return NO;
+        }
+        if (!spotlightRemoteHealthy) {
+            log_user("[SPOTLIGHT] The Spotlight host or RemoteCall channel changed while waiting for SearchUI.\n");
+            return NO;
+        }
+        if (visibleViews == 0) {
+            log_user("[SPOTLIGHT] SearchUI was not visible in %s. Keep Spotlight open and try the probe again.\n",
+                     spotlightHost.UTF8String);
+            cyanide_upload_log_milestone(@"spotlight-searchui-view-missing");
+            return NO;
+        }
+
+        settings_progress(&step, total,
+                          "Patching all materialized Spotlight app rows");
+        __block BOOL patchOK = NO;
+        __block BOOL traceArmed = NO;
+        __block BOOL patchRemoteOK = NO;
+        __block RemoteCallDebugSnapshot patchDebug = {0};
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(spotlightSession, ^{
+                    patchOK =
+                        themer_apply_spotlight_rows_diagnostic_in_session(themeData)
+                            ? YES : NO;
+                    traceArmed = themer_spotlight_lifecycle_trace_is_armed()
+                        ? YES : NO;
+                    uint64_t poolToken = spotlightSetupAutoreleasePool;
+                    if (poolToken) {
+                        themer_spotlight_remote_autorelease_pool_pop(poolToken);
+                        spotlightSetupAutoreleasePool = 0;
+                        printf("[SPOTLIGHT_FAST] autorelease-pool-pop "
+                               "phase=post-patch token=0x%llx success=%d\n",
+                               (unsigned long long)poolToken,
+                               remote_call_current_success());
+                    }
+                    patchRemoteOK = remote_call_current_success() ? YES : NO;
+                    (void)remote_call_copy_debug_snapshot(&patchDebug);
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[SPOTLIGHT_TRACE] remote-exception phase=patch "
+                   "name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            patchRemoteOK = NO;
+        }
+        if (!patchRemoteOK) {
+            spotlightRemoteHealthy = NO;
+            printf("[SPOTLIGHT_TRACE] patch-remote-failed success=%d "
+                   "localState=%d stable=%llu/%llu last=%s reason=%s\n",
+                   patchDebug.success,
+                   patchDebug.hasLocalState,
+                   (unsigned long long)patchDebug.stableCalls,
+                   (unsigned long long)patchDebug.stableFailures,
+                   patchDebug.lastStableFailure,
+                   patchDebug.lastStableFailureReason);
+        }
+        liveValidationSucceeded =
+            patchOK && patchRemoteOK && traceArmed;
+        ok = canonicalPreloadSucceeded && liveValidationSucceeded;
+
+        settings_progress(&step, total, "Monitoring Spotlight owner/model/cache lifecycle");
+        if (traceArmed && spotlightRemoteHealthy) {
+            const uint64_t traceDurationUS = 23000000ULL;
+            const uint64_t traceQuietPeriodUS = 11000000ULL;
+            const uint64_t traceTerminalQuietPeriodUS = 5000000ULL;
+            const useconds_t traceIntervalUS = 750000;
+            uint64_t traceDeadline = 0;
+            uint64_t traceQuietUntilUS = 0;
+            BOOL nameResolutionChangeLogged = NO;
+            BOOL terminalQuietLogged = NO;
+
+            while (!g_spotlight_trace_stop_requested &&
+                   (!traceDeadline || settings_now_us() < traceDeadline)) {
+                uint64_t currentProc = 0;
+                uint64_t currentTask = 0;
+                if (!settings_spotlight_target_matches(spotlightPID,
+                                                       spotlightProc,
+                                                       spotlightTask,
+                                                       &currentProc,
+                                                       &currentTask)) {
+                    uint64_t namedProc = spotlightHost.length > 0
+                        ? proc_find_by_name(spotlightHost.UTF8String) : 0;
+                    traceTargetChanged = YES;
+                    spotlightRemoteHealthy = NO;
+                    printf("[SPOTLIGHT_TRACE] target-changed phase=monitor "
+                           "pid=%d expectedProc=0x%llx currentProc=0x%llx "
+                           "namedProc=0x%llx expectedTask=0x%llx "
+                           "currentTask=0x%llx\n",
+                           spotlightPID,
+                           (unsigned long long)spotlightProc,
+                           (unsigned long long)currentProc,
+                           (unsigned long long)namedProc,
+                           (unsigned long long)spotlightTask,
+                           (unsigned long long)currentTask);
+                    break;
+                }
+
+                uint64_t namedProc = spotlightHost.length > 0
+                    ? proc_find_by_name(spotlightHost.UTF8String) : 0;
+                if (!nameResolutionChangeLogged &&
+                    namedProc && namedProc != UINT64_MAX &&
+                    namedProc != spotlightProc) {
+                    nameResolutionChangeLogged = YES;
+                    printf("[SPOTLIGHT_TRACE] name-resolution-changed "
+                           "host=%s originalProc=0x%llx namedProc=0x%llx "
+                           "originalStillAlive=1\n",
+                           spotlightHost.UTF8String ?: "?",
+                           (unsigned long long)spotlightProc,
+                           (unsigned long long)namedProc);
+                }
+
+                uint64_t monitorNowUS = settings_now_us();
+                if (traceQuietUntilUS &&
+                    monitorNowUS < traceQuietUntilUS) {
+                    uint64_t quietSleepUS =
+                        traceQuietUntilUS - monitorNowUS;
+                    if (quietSleepUS > traceIntervalUS) {
+                        quietSleepUS = traceIntervalUS;
+                    }
+                    usleep((useconds_t)quietSleepUS);
+                    continue;
+                }
+                if (traceDeadline &&
+                    monitorNowUS < traceDeadline &&
+                    traceDeadline - monitorNowUS <=
+                        traceTerminalQuietPeriodUS) {
+                    if (!terminalQuietLogged) {
+                        terminalQuietLogged = YES;
+                        printf("[SPOTLIGHT_FAST] terminal-quiet-begin "
+                               "durationMS=%llu\n",
+                               (unsigned long long)(
+                                   traceTerminalQuietPeriodUS / 1000ULL));
+                    }
+                    uint64_t quietSleepUS = traceDeadline - monitorNowUS;
+                    if (quietSleepUS > traceIntervalUS) {
+                        quietSleepUS = traceIntervalUS;
+                    }
+                    usleep((useconds_t)quietSleepUS);
+                    continue;
+                }
+
+                __block BOOL sampled = NO;
+                __block BOOL sampleRemoteOK = NO;
+                __block RemoteCallDebugSnapshot sampleDebug = {0};
+                uint64_t sampleStartUS = settings_now_us();
+                uint64_t remainingUS = traceDeadline &&
+                    sampleStartUS < traceDeadline
+                    ? traceDeadline - sampleStartUS : 0;
+                BOOL forceSample = traceDeadline &&
+                    remainingUS <= 1500000ULL;
+                @try {
+                    @synchronized (settings_rc_lock()) {
+                        remote_call_with_session(spotlightSession, ^{
+                            uint64_t samplePool =
+                                themer_spotlight_remote_autorelease_pool_push();
+                            sampled = traceDeadline
+                                ? themer_spotlight_lifecycle_trace_sentinel_in_session(
+                                      "monitor-fast", forceSample) ? YES : NO
+                                : themer_spotlight_lifecycle_trace_sample_in_session(
+                                      "monitor-baseline", forceSample) ? YES : NO;
+                            if (samplePool) {
+                                themer_spotlight_remote_autorelease_pool_pop(
+                                    samplePool);
+                            }
+                            printf("[SPOTLIGHT_FAST] autorelease-scope "
+                                   "phase=%s token=0x%llx success=%d\n",
+                                   traceDeadline ? "monitor-fast"
+                                                 : "monitor-baseline",
+                                   (unsigned long long)samplePool,
+                                   remote_call_current_success());
+                            sampleRemoteOK = remote_call_current_success()
+                                ? YES : NO;
+                            (void)remote_call_copy_debug_snapshot(&sampleDebug);
+                        });
+                    }
+                } @catch (NSException *exception) {
+                    printf("[SPOTLIGHT_TRACE] remote-exception phase=monitor "
+                           "name=%s reason=%s\n",
+                           exception.name.UTF8String ?: "?",
+                           exception.reason.UTF8String ?: "?");
+                    sampleRemoteOK = NO;
+                }
+
+                if (!sampleRemoteOK) {
+                    spotlightRemoteHealthy = NO;
+                    printf("[SPOTLIGHT_TRACE] monitor-remote-failed "
+                           "sample=%lu success=%d localState=%d "
+                           "stable=%llu/%llu last=%s reason=%s\n",
+                           (unsigned long)traceSamples,
+                           sampleDebug.success,
+                           sampleDebug.hasLocalState,
+                           (unsigned long long)sampleDebug.stableCalls,
+                           (unsigned long long)sampleDebug.stableFailures,
+                           sampleDebug.lastStableFailure,
+                           sampleDebug.lastStableFailureReason);
+                    break;
+                }
+                if (sampled) traceSamples++;
+
+                if (!traceDeadline) {
+                    if (!sampled) {
+                        printf("[SPOTLIGHT_TRACE] baseline-missing "
+                               "remoteHealthy=%d\n",
+                               spotlightRemoteHealthy);
+                        break;
+                    }
+                    traceDeadline = settings_now_us() + traceDurationUS;
+                    traceQuietUntilUS =
+                        settings_now_us() + traceQuietPeriodUS;
+                    printf("[SPOTLIGHT_TRACE] baseline-ready sample=0 "
+                           "followupWindowMS=%llu quietPeriodMS=%llu\n",
+                           (unsigned long long)(traceDurationUS / 1000ULL),
+                           (unsigned long long)(traceQuietPeriodUS / 1000ULL));
+                    log_user("[SPOTLIGHT] The baseline is captured. Dismiss Spotlight now for 8–10 seconds, then reopen it and leave the result visible. The monitor makes no remote Spotlight calls for 11 seconds while it is dismissed, switches to a compact provider/cache/carrier/presentation sentinel, then performs a final five-second no-call test before one forced pre-teardown sample.\n");
+                }
+
+                uint64_t nowUS = settings_now_us();
+                if (nowUS >= traceDeadline) break;
+                uint64_t sleepUS = traceDeadline - nowUS;
+                if (sleepUS > traceIntervalUS) sleepUS = traceIntervalUS;
+                usleep((useconds_t)sleepUS);
+            }
+
+            if (traceDeadline && spotlightRemoteHealthy &&
+                !g_spotlight_trace_stop_requested &&
+                !traceTargetChanged) {
+                __block BOOL finalSampled = NO;
+                __block BOOL finalRemoteOK = NO;
+                __block RemoteCallDebugSnapshot finalDebug = {0};
+                @try {
+                    @synchronized (settings_rc_lock()) {
+                        remote_call_with_session(spotlightSession, ^{
+                            uint64_t finalPool =
+                                themer_spotlight_remote_autorelease_pool_push();
+                            finalSampled =
+                                themer_spotlight_lifecycle_trace_sentinel_in_session(
+                                    "monitor-final", true) ? YES : NO;
+                            if (finalPool) {
+                                themer_spotlight_remote_autorelease_pool_pop(
+                                    finalPool);
+                            }
+                            printf("[SPOTLIGHT_FAST] autorelease-scope "
+                                   "phase=monitor-final token=0x%llx "
+                                   "success=%d\n",
+                                   (unsigned long long)finalPool,
+                                   remote_call_current_success());
+                            finalRemoteOK = remote_call_current_success()
+                                ? YES : NO;
+                            (void)remote_call_copy_debug_snapshot(&finalDebug);
+                        });
+                    }
+                } @catch (NSException *exception) {
+                    printf("[SPOTLIGHT_FAST] remote-exception phase=final "
+                           "name=%s reason=%s\n",
+                           exception.name.UTF8String ?: "?",
+                           exception.reason.UTF8String ?: "?");
+                    finalRemoteOK = NO;
+                }
+                if (finalSampled) traceSamples++;
+                if (!finalRemoteOK) {
+                    spotlightRemoteHealthy = NO;
+                    printf("[SPOTLIGHT_FAST] final-remote-failed success=%d "
+                           "localState=%d stable=%llu/%llu last=%s "
+                           "reason=%s\n",
+                           finalDebug.success,
+                           finalDebug.hasLocalState,
+                           (unsigned long long)finalDebug.stableCalls,
+                           (unsigned long long)finalDebug.stableFailures,
+                           finalDebug.lastStableFailure,
+                           finalDebug.lastStableFailureReason);
+                }
+            }
+
+            traceCompleted = traceSamples > 0 &&
+                             traceDeadline != 0 &&
+                             !g_spotlight_trace_stop_requested &&
+                             !traceTargetChanged &&
+                             spotlightRemoteHealthy &&
+                             settings_now_us() >= traceDeadline;
+            printf("[SPOTLIGHT_TRACE] monitor-complete samples=%lu "
+                   "completed=%d stopped=%d targetChanged=%d remoteHealthy=%d\n",
+                   (unsigned long)traceSamples,
+                   traceCompleted,
+                   g_spotlight_trace_stop_requested,
+                   traceTargetChanged,
+                   spotlightRemoteHealthy);
+        } else {
+            printf("[SPOTLIGHT_TRACE] monitor-skipped armed=%d remoteHealthy=%d "
+                   "patchOK=%d\n",
+                   traceArmed,
+                   spotlightRemoteHealthy,
+                   patchOK);
+        }
+
+        liveValidationSucceeded =
+            liveValidationSucceeded && traceSamples > 0 &&
+            !g_spotlight_trace_stop_requested && !traceTargetChanged &&
+            spotlightRemoteHealthy;
+        ok = canonicalPreloadSucceeded && liveValidationSucceeded;
+        printf("[SPOTLIGHT_TRACE] validation-complete success=%d rows=%d "
+               "remote=%d armed=%d samples=%lu completed=%d\n",
+               liveValidationSucceeded,
+               patchOK,
+               patchRemoteOK,
+               traceArmed,
+               (unsigned long)traceSamples,
+               traceCompleted);
+
+        if (liveValidationSucceeded) {
+            log_user("[OK] Spotlight live-row validation patched the currently materialized themed app rows in %s and collected %lu representative lifecycle sample(s)%s. Copy Relevant Log and inspect [SPOTLIGHT] live-cache plus [SPOTLIGHT_FAST] classifications.\n",
+                     spotlightHost.UTF8String,
+                     (unsigned long)traceSamples,
+                     traceCompleted ? " (full window)" : " (partial window)");
+            cyanide_upload_log_milestone(@"spotlight-icon-single-probe-complete");
+            if (traceCompleted) {
+                cyanide_upload_log_milestone(@"spotlight-lifecycle-trace-complete");
+            }
+        } else {
+            log_user("[WARN] Spotlight live-row validation did not fully verify the themed row; %lu lifecycle sample(s) were collected. Canonical preload status is reported separately. Copy Relevant Log and send the [SPOTLIGHT], [SPOTLIGHT_TRACE], and [SPOTLIGHT_FAST] lines.\n",
+                     (unsigned long)traceSamples);
+            cyanide_upload_log_milestone(@"spotlight-icon-single-probe-warning");
+        }
+
+    } @finally {
+        printf("[SPOTLIGHT_FAST] teardown-begin remoteHealthy=%d "
+               "traceSamples=%lu\n",
+               spotlightRemoteHealthy,
+               (unsigned long)traceSamples);
+        if (spotlightSetupAutoreleasePool && spotlightSession &&
+            [spotlightSession hasLocalState] && spotlightRemoteHealthy) {
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(spotlightSession, ^{
+                        uint64_t poolToken =
+                            spotlightSetupAutoreleasePool;
+                        themer_spotlight_remote_autorelease_pool_pop(
+                            poolToken);
+                        spotlightSetupAutoreleasePool = 0;
+                        printf("[SPOTLIGHT_FAST] autorelease-pool-pop "
+                               "phase=teardown-fallback token=0x%llx "
+                               "success=%d\n",
+                               (unsigned long long)poolToken,
+                               remote_call_current_success());
+                    });
+                }
+            } @catch (NSException *exception) {
+                printf("[SPOTLIGHT_FAST] autorelease-pool-pop-exception "
+                       "phase=teardown-fallback name=%s reason=%s\n",
+                       exception.name.UTF8String ?: "?",
+                       exception.reason.UTF8String ?: "?");
+            }
+        }
+        themer_spotlight_lifecycle_trace_forget();
+        if (spotlightSession && [spotlightSession hasLocalState]) {
+            uint64_t currentProc = 0;
+            uint64_t currentTask = 0;
+            BOOL exactTargetAlive = settings_spotlight_target_matches(
+                spotlightPID, spotlightProc, spotlightTask,
+                &currentProc, &currentTask);
+            if (!exactTargetAlive || !spotlightRemoteHealthy) {
+                ok = NO;
+            }
+            @synchronized (settings_rc_lock()) {
+                if (exactTargetAlive && spotlightRemoteHealthy) {
+                    printf("[SPOTLIGHT_FAST] destroy-begin pid=%d "
+                           "proc=0x%llx task=0x%llx\n",
+                           spotlightPID,
+                           (unsigned long long)currentProc,
+                           (unsigned long long)currentTask);
+                    (void)[spotlightSession destroyRemoteCall];
+                    printf("[SPOTLIGHT_FAST] destroy-end pid=%d\n",
+                           spotlightPID);
+                    printf("[SPOTLIGHT] closed diagnostic host session "
+                           "process=%s pid=%d proc=0x%llx task=0x%llx\n",
+                           spotlightHost.UTF8String ?: "?",
+                           spotlightPID,
+                           (unsigned long long)currentProc,
+                           (unsigned long long)currentTask);
+                } else {
+                    [spotlightSession abandonRemoteCall];
+                    printf("[SPOTLIGHT] abandoned diagnostic host session "
+                           "process=%s pid=%d exactAlive=%d remoteHealthy=%d "
+                           "expectedProc=0x%llx currentProc=0x%llx "
+                           "expectedTask=0x%llx currentTask=0x%llx\n",
+                           spotlightHost.UTF8String ?: "?",
+                           spotlightPID,
+                           exactTargetAlive,
+                           spotlightRemoteHealthy,
+                           (unsigned long long)spotlightProc,
+                           (unsigned long long)currentProc,
+                           (unsigned long long)spotlightTask,
+                           (unsigned long long)currentTask);
+                }
+            }
+        }
+        if (canonicalPreloadAttempted) {
+            if (canonicalPreloadSucceeded) {
+                log_user("[OK] Spotlight preloaded every canonical application icon it could resolve in %s. Test unseen and smaller search results; Copy Relevant Log and inspect [SPOTLIGHT_PRELOAD] complete for coverage and cache warming.\n",
+                         spotlightHost.UTF8String ?: "Spotlight");
+                cyanide_upload_log_milestone(
+                    @"spotlight-canonical-preload-complete");
+            } else {
+                log_user("[WARN] Spotlight canonical preload was incomplete. Copy Relevant Log and send the [SPOTLIGHT_PRELOAD] lines.\n");
+                cyanide_upload_log_milestone(
+                    @"spotlight-canonical-preload-warning");
+            }
+        }
+        if (liveValidationAttempted && !spotlightRemoteHealthy) {
+            liveValidationSucceeded = NO;
+        }
+        ok = canonicalPreloadSucceeded && liveValidationSucceeded &&
+             spotlightRemoteHealthy;
+        printf("[SPOTLIGHT] process-cache action complete "
+               "preloadAttempted=%d preloadSuccess=%d "
+               "liveAttempted=%d liveSuccess=%d success=%d host=%s "
+               "targetChanged=%d\n",
+               canonicalPreloadAttempted,
+               canonicalPreloadSucceeded,
+               liveValidationAttempted,
+               liveValidationSucceeded,
+               ok,
+               spotlightHost.UTF8String ?: "-",
+               traceTargetChanged);
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+    return ok;
+}
+
+static void settings_apply_spotlight_preload_and_rows(
+    RemoteCallSession *session,
+    NSDictionary<NSString *, NSData *> *themeData,
+    volatile int *stopRequested,
+    BOOL includeRowDiagnostic,
+    BOOL *preloadOut,
+    BOOL *rowsOut,
+    BOOL *remoteOut)
+{
+    if (preloadOut) *preloadOut = NO;
+    if (rowsOut) *rowsOut = NO;
+    if (remoteOut) *remoteOut = NO;
+    if (!session || themeData.count == 0) return;
+
+    __block BOOL preloadOK = NO;
+    __block BOOL rowsOK = NO;
+    __block BOOL remoteOK = NO;
+    @try {
+        @synchronized (settings_rc_lock()) {
+            remote_call_with_session(session, ^{
+                uint64_t pool =
+                    themer_spotlight_remote_autorelease_pool_push();
+                if (!pool) {
+                    printf("[SPOTLIGHT_PRELOAD] stopped "
+                           "reason=autorelease-pool-create-failed\n");
+                    return;
+                }
+
+                preloadOK = themer_apply_spotlight_data_in_session(
+                    themeData, stopRequested) ? YES : NO;
+                if (includeRowDiagnostic &&
+                    remote_call_current_success() &&
+                    !(stopRequested && *stopRequested)) {
+                    // Keep the established live-row path active. It is a
+                    // presentation repair/diagnostic; cache preload success is
+                    // still decided independently by exact optioned readback.
+                    rowsOK =
+                        themer_apply_spotlight_rows_diagnostic_in_session(
+                            themeData) ? YES : NO;
+                }
+                if (remote_call_current_success()) {
+                    themer_spotlight_remote_autorelease_pool_pop(pool);
+                }
+                remoteOK = remote_call_current_success() ? YES : NO;
+            });
+        }
+    } @catch (NSException *exception) {
+        printf("[SPOTLIGHT_PRELOAD] remote-exception name=%s reason=%s\n",
+               exception.name.UTF8String ?: "?",
+               exception.reason.UTF8String ?: "?");
+        remoteOK = NO;
+    }
+
+    if (preloadOut) *preloadOut = preloadOK;
+    if (rowsOut) *rowsOut = rowsOK;
+    if (remoteOut) *remoteOut = remoteOK;
+}
+
+static RemoteCallSession *settings_open_spotlight_host_session(
+    NSString **hostOut,
+    int *pidOut,
+    uint64_t *procOut,
+    uint64_t *taskOut)
+{
+    if (hostOut) *hostOut = nil;
+    if (pidOut) *pidOut = 0;
+    if (procOut) *procOut = 0;
+    if (taskOut) *taskOut = 0;
+
+    NSArray<NSString *> *hostCandidates = @[
+        @"Spotlight",
+        @"SpotlightUIService",
+        @"SearchUIService",
+    ];
+    for (NSString *candidate in hostCandidates) {
+        BOOL labBackend = remote_call_lab_backend_opted_in();
+        if (!labBackend) {
+            uint64_t namedProc = proc_find_by_name(candidate.UTF8String);
+            if (!namedProc || namedProc == UINT64_MAX) continue;
+        }
+
+        RemoteCallSession *session = nil;
+        @synchronized (settings_rc_lock()) {
+            session = [[RemoteCallSession alloc]
+                initWithProcess:candidate
+                useMigFilterBypass:NO
+                firstExceptionTimeoutMS:10000];
+        }
+        if (!session) {
+            printf("[SPOTLIGHT] host-open-failed process=%s reason=%s\n",
+                   candidate.UTF8String,
+                   remote_call_init_failure_description(
+                       remote_call_last_init_failure()));
+            continue;
+        }
+
+        int pid = session.pid;
+        uint64_t task = session.taskAddr;
+        uint64_t proc = (labBackend && task == 0) ? 0 : proc_find(pid);
+        uint64_t currentProc = 0;
+        uint64_t currentTask = 0;
+        if (settings_spotlight_target_matches(
+                pid, proc, task, &currentProc, &currentTask)) {
+            if (hostOut) *hostOut = candidate;
+            if (pidOut) *pidOut = pid;
+            if (procOut) *procOut = proc;
+            if (taskOut) *taskOut = task;
+            return session;
+        }
+
+        printf("[SPOTLIGHT] host-open-target-changed process=%s pid=%d "
+               "expectedProc=0x%llx currentProc=0x%llx "
+               "expectedTask=0x%llx currentTask=0x%llx\n",
+               candidate.UTF8String,
+               pid,
+               (unsigned long long)proc,
+               (unsigned long long)currentProc,
+               (unsigned long long)task,
+               (unsigned long long)currentTask);
+        @synchronized (settings_rc_lock()) {
+            [session abandonRemoteCall];
+        }
+    }
+    return nil;
+}
+
+static RemoteCallSession *settings_open_iconservices_agent_session(
+    int *pidOut, uint64_t *procOut, uint64_t *taskOut)
+{
+    if (pidOut) *pidOut = 0;
+    if (procOut) *procOut = 0;
+    if (taskOut) *taskOut = 0;
+    NSString *process = @"iconservicesagent";
+    if (!remote_call_lab_backend_opted_in()) {
+        uint64_t namedProc = proc_find_by_name(process.UTF8String);
+        if (!namedProc || namedProc == UINT64_MAX) return nil;
+    }
+
+    RemoteCallSession *session = nil;
+    @synchronized (settings_rc_lock()) {
+        session = [[RemoteCallSession alloc]
+            initWithProcess:process
+            useMigFilterBypass:NO
+            firstExceptionTimeoutMS:10000];
+    }
+    if (!session) {
+        printf("[ICONSERVICES_WRITER_STATE] agent-open-failed process=%s reason=%s\n",
+               process.UTF8String,
+               remote_call_init_failure_description(
+                   remote_call_last_init_failure()));
+        return nil;
+    }
+
+    int pid = session.pid;
+    uint64_t task = session.taskAddr;
+    uint64_t proc = (remote_call_lab_backend_opted_in() && task == 0)
+        ? 0 : proc_find(pid);
+    if (!settings_spotlight_target_matches(
+            pid,proc,task,NULL,NULL)) {
+        printf("[ICONSERVICES_WRITER_STATE] agent-open-target-changed process=%s pid=%d proc=0x%llx task=0x%llx\n",
+               process.UTF8String,pid,(unsigned long long)proc,
+               (unsigned long long)task);
+        @synchronized (settings_rc_lock()) {
+            [session abandonRemoteCall];
+        }
+        return nil;
+    }
+    if (pidOut) *pidOut = pid;
+    if (procOut) *procOut = proc;
+    if (taskOut) *taskOut = task;
+    return session;
+}
+
+static BOOL settings_apply_snowboardlite_spotlight_data(
+    NSDictionary<NSString *, NSData *> *themeData,
+    BOOL includeVisibleRowRepair)
+{
+    if (themeData.count == 0 || !kexploit_krw_ready()) return NO;
+
+    NSString *spotlightHost = nil;
+    int spotlightPID = 0;
+    uint64_t spotlightProc = 0;
+    uint64_t spotlightTask = 0;
+    RemoteCallSession *spotlightSession =
+        settings_open_spotlight_host_session(
+            &spotlightHost, &spotlightPID,
+            &spotlightProc, &spotlightTask);
+
+    if (!spotlightSession) {
+        log_user("[SPOTLIGHT] No Spotlight UI host is running. Open Spotlight once, then use Apply Theme Permanently.\n");
+        return NO;
+    }
+
+    log_user("[SPOTLIGHT] Installing canonical icon sources in %s (pid %d) without a dylib or persistent control thread.\n",
+             spotlightHost.UTF8String,
+             spotlightPID);
+    __sync_lock_test_and_set(&g_spotlight_trace_stop_requested, 0);
+
+    BOOL preloadOK = NO;
+    BOOL rowsOK = NO;
+    BOOL remoteOK = NO;
+    settings_apply_spotlight_preload_and_rows(
+        spotlightSession,
+        themeData,
+        &g_spotlight_trace_stop_requested,
+        includeVisibleRowRepair,
+        &preloadOK,
+        &rowsOK,
+        &remoteOK);
+    themer_spotlight_lifecycle_trace_forget();
+
+    uint64_t currentProc = 0;
+    uint64_t currentTask = 0;
+    BOOL targetStable = settings_spotlight_target_matches(
+        spotlightPID, spotlightProc, spotlightTask,
+        &currentProc, &currentTask);
+    // preloadOK means the canonical source bundle was committed while the
+    // channel was healthy. Optional presentation work may fail afterward
+    // without undoing that process-resident source state.
+    BOOL sourceInstalled = preloadOK && targetStable;
+    if (sourceInstalled) {
+        g_spotlight_last_applied_pid = spotlightPID;
+        g_spotlight_last_applied_proc = spotlightProc;
+        g_spotlight_last_applied_task = spotlightTask;
+    }
+
+    BOOL controlChannelClosed = ![spotlightSession hasLocalState];
+    BOOL controlChannelAbandoned = NO;
+    if (!controlChannelClosed) {
+        @synchronized (settings_rc_lock()) {
+            if (remoteOK && targetStable) {
+                (void)[spotlightSession destroyRemoteCall];
+                controlChannelClosed = ![spotlightSession hasLocalState];
+                printf("[SPOTLIGHT] host-session-closed process=%s pid=%d "
+                       "source=%d rows=%d\n",
+                       spotlightHost.UTF8String,
+                       spotlightPID,
+                       sourceInstalled,
+                       rowsOK);
+            } else {
+                [spotlightSession abandonRemoteCall];
+                controlChannelAbandoned = YES;
+                printf("[SPOTLIGHT] host-session-abandoned process=%s pid=%d "
+                       "remote=%d targetStable=%d source=%d\n",
+                       spotlightHost.UTF8String,
+                       spotlightPID,
+                       remoteOK,
+                       targetStable,
+                       sourceInstalled);
+            }
+        }
+    }
+
+    if (sourceInstalled && controlChannelClosed) {
+        log_user("[OK] Spotlight canonical icon sources installed for the current host process%s. The control channel is closed; theming should remain until Spotlight restarts or the device resprings.\n",
+                 rowsOK ? " and visible rows repaired" : "");
+    } else if (sourceInstalled && controlChannelAbandoned) {
+        log_user("[WARN] Spotlight canonical icon sources were committed, but the control channel failed afterward and was abandoned locally. Test persistence in the current host; a host restart or respring clears any remaining remote thread state.\n");
+    } else {
+        log_user("[WARN] Spotlight canonical source installation did not complete. Keep Spotlight open and use Apply Theme Permanently, then inspect [SPOTLIGHT_PRELOAD] in the log.\n");
+    }
+    return sourceInstalled;
+}
+
+static __attribute__((unused)) BOOL
+settings_restore_snowboardlite_spotlight(void)
+{
+    if (!kexploit_krw_ready()) {
+        log_user("[SPOTLIGHT_RESTORE] Kernel primitives are unavailable; "
+                 "Spotlight stock restoration was deferred.\n");
+        return NO;
+    }
+
+    NSString *spotlightHost = nil;
+    int spotlightPID = 0;
+    uint64_t spotlightProc = 0;
+    uint64_t spotlightTask = 0;
+    RemoteCallSession *spotlightSession =
+        settings_open_spotlight_host_session(
+            &spotlightHost, &spotlightPID,
+            &spotlightProc, &spotlightTask);
+    if (!spotlightSession) {
+        g_spotlight_last_applied_pid = 0;
+        g_spotlight_last_applied_proc = 0;
+        g_spotlight_last_applied_task = 0;
+        log_user("[SPOTLIGHT_RESTORE] No Spotlight UI host is running; "
+                 "there is no live process state to restore.\n");
+        return YES;
+    }
+
+    __block BOOL restored = NO;
+    __block BOOL remoteOK = NO;
+    @try {
+        @synchronized (settings_rc_lock()) {
+            remote_call_with_session(spotlightSession, ^{
+                uint64_t pool =
+                    themer_spotlight_remote_autorelease_pool_push();
+                if (!pool) return;
+                restored = themer_restore_spotlight_theme_in_session()
+                    ? YES : NO;
+                if (remote_call_current_success()) {
+                    themer_spotlight_remote_autorelease_pool_pop(pool);
+                }
+                remoteOK = remote_call_current_success() ? YES : NO;
+            });
+        }
+    } @catch (NSException *exception) {
+        printf("[SPOTLIGHT_RESTORE] remote-exception name=%s reason=%s\n",
+               exception.name.UTF8String ?: "?",
+               exception.reason.UTF8String ?: "?");
+        remoteOK = NO;
+    }
+    themer_spotlight_lifecycle_trace_forget();
+
+    uint64_t currentProc = 0;
+    uint64_t currentTask = 0;
+    BOOL targetStable = settings_spotlight_target_matches(
+        spotlightPID, spotlightProc, spotlightTask,
+        &currentProc, &currentTask);
+    BOOL success = restored && remoteOK && targetStable;
+
+    if ([spotlightSession hasLocalState]) {
+        @synchronized (settings_rc_lock()) {
+            if (remoteOK && targetStable) {
+                (void)[spotlightSession destroyRemoteCall];
+                printf("[SPOTLIGHT_RESTORE] host-session-closed "
+                       "process=%s pid=%d restored=%d\n",
+                       spotlightHost.UTF8String,
+                       spotlightPID,
+                       restored);
+            } else {
+                [spotlightSession abandonRemoteCall];
+                printf("[SPOTLIGHT_RESTORE] host-session-abandoned "
+                       "process=%s pid=%d remote=%d targetStable=%d\n",
+                       spotlightHost.UTF8String,
+                       spotlightPID,
+                       remoteOK,
+                       targetStable);
+            }
+        }
+    }
+
+    if (success) {
+        g_spotlight_last_applied_pid = 0;
+        g_spotlight_last_applied_proc = 0;
+        g_spotlight_last_applied_task = 0;
+    }
+    log_user(success
+        ? "[OK] Spotlight canonical icons restored to stock for the current host process.\n"
+        : "[WARN] Spotlight stock restoration did not complete; respring will clear the remaining process state.\n");
+    return success;
+}
+
+static uint64_t settings_spotlight_iconservices_u64_default(NSString *key)
+{
+    NSNumber *value = [[NSUserDefaults standardUserDefaults] objectForKey:key];
+    return [value respondsToSelector:@selector(unsignedLongLongValue)]
+        ? value.unsignedLongLongValue : 0;
+}
+
+static const char *settings_spotlight_stock68_journal_limit(
+    ThemerSpotlightStock68JournalSnapshot journal)
+{
+    switch (journal.classification) {
+        case ThemerSpotlightStock68JournalLegacyIssuedAmbiguous:
+            return "legacy journal records an issued request without a dispatch "
+                   "boundary; it can restore an exact live dictionary but cannot "
+                   "certify store cleanup";
+        case ThemerSpotlightStock68JournalDispatchPossible:
+            return "the durable marker permits that generation may have reached "
+                   "the helper; store cleanup remains unproven";
+        case ThemerSpotlightStock68JournalLegacyUnissued:
+            return "legacy unissued journal needs the saved owner binding and "
+                   "verified dictionary restoration or proven owner exit";
+        case ThemerSpotlightStock68JournalNoDispatchProven:
+            return "the current transaction is certified before generation, but "
+                   "its saved owner binding still has to be proven";
+        case ThemerSpotlightStock68JournalInvalid:
+            return "journal fields are malformed, so no recovery state can be "
+                   "cleared";
+        case ThemerSpotlightStock68JournalAbsent:
+            return "no generation journal is present";
+    }
+    return "journal classification is unknown";
+}
+
+// This is the single admission check for new IconServices work.  It must be
+// called while g_settings_actions_running is held, before theme/target
+// selection and before any owner fields are written.  A blocked action leaves
+// every recovery owner and status untouched so a later Emergency Restore can
+// still identify the run that needs cleanup.
+static BOOL settings_spotlight_new_work_is_blocked_locked(NSString *operation)
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    ThemerSpotlightStock68JournalSnapshot journal =
+        themer_spotlight_stock68_journal_snapshot();
+    BOOL themedArmed = [d boolForKey:kSettingsSpotlightIconServicesArmed];
+    NSString *materializationStatus =
+        [d stringForKey:kSettingsSpotlightStock68Status] ?: @"idle";
+    BOOL materializationRecovery =
+        [materializationStatus isEqualToString:@"running"] ||
+        [materializationStatus isEqualToString:@"recovery-required"];
+    BOOL unresolvedGeneration =
+        themer_spotlight_stock68_has_unresolved_generation();
+    BOOL pendingCleanup =
+        themer_spotlight_iconservices_has_pending_recovery();
+    if (!themedArmed && !materializationRecovery &&
+        !unresolvedGeneration && !pendingCleanup) {
+        return NO;
+    }
+
+    log_user("[ICONSERVICES_LAB] %s blocked: recovery is pending "
+                 "(themedArmed=%d materializationStatus=%s "
+                 "unresolvedGeneration=%d pendingCleanup=%d journalClass=%d "
+                 "journalVersion=%d journalPid=%d journalTarget=%s "
+                 "journalFingerprint=%s issuedKnown=%d issued=%d limit=%s). "
+                 "The recorded owner and journal were preserved.\n",
+             operation.UTF8String ?: "New IconServices work",
+             themedArmed,
+             materializationStatus.UTF8String ?: "idle",
+             unresolvedGeneration,
+             pendingCleanup,
+             journal.classification,
+             journal.version,
+             journal.pid,
+             journal.targetBundle[0] ? journal.targetBundle : "-",
+             journal.themeFingerprint[0] ? journal.themeFingerprint : "-",
+             journal.issuedKnown,
+             journal.issued,
+             settings_spotlight_stock68_journal_limit(journal));
+    return YES;
+}
+
+static ThemerSpotlightIconServicesCandidate
+settings_spotlight_iconservices_selected_candidate(void)
+{
+    id stored = [[NSUserDefaults standardUserDefaults]
+        objectForKey:kSettingsSpotlightIconServicesCandidate];
+    NSInteger raw = [stored respondsToSelector:@selector(integerValue)]
+        ? [stored integerValue]
+        : ThemerSpotlightIconServicesCandidateCanonicalMixedBag;
+    if (raw < 0 || raw >= ThemerSpotlightIconServicesCandidateCount) {
+        raw = ThemerSpotlightIconServicesCandidateCanonicalMixedBag;
+    }
+    return (ThemerSpotlightIconServicesCandidate)raw;
+}
+
+static void settings_spotlight_iconservices_reset_local_state(BOOL clearProbe)
+{
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    [d setBool:NO forKey:kSettingsSpotlightIconServicesArmed];
+    [d setInteger:0 forKey:kSettingsSpotlightIconServicesTargetPID];
+    [d setObject:@0 forKey:kSettingsSpotlightIconServicesTargetProc];
+    [d setObject:@0 forKey:kSettingsSpotlightIconServicesTargetTask];
+    [d setObject:@"" forKey:kSettingsSpotlightIconServicesTargetHost];
+    [d setBool:NO forKey:kSettingsSpotlightIconServicesChannelClean];
+    if (clearProbe) {
+        [d setObject:@0 forKey:kSettingsSpotlightIconServicesSupportedMask];
+        [d setInteger:0 forKey:kSettingsSpotlightIconServicesProbePID];
+        [d setObject:@0 forKey:kSettingsSpotlightIconServicesProbeProc];
+        [d setObject:@0 forKey:kSettingsSpotlightIconServicesProbeTask];
+    }
+    [d synchronize];
+}
+
+static void settings_spotlight_iconservices_store_probe(
+    uint64_t supportedMask,
+    int pid,
+    uint64_t proc,
+    uint64_t task)
+{
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    [d setObject:@(supportedMask)
+          forKey:kSettingsSpotlightIconServicesSupportedMask];
+    [d setInteger:pid forKey:kSettingsSpotlightIconServicesProbePID];
+    [d setObject:@(proc) forKey:kSettingsSpotlightIconServicesProbeProc];
+    [d setObject:@(task) forKey:kSettingsSpotlightIconServicesProbeTask];
+    uint64_t mixedBagBit = UINT64_C(1) <<
+        ThemerSpotlightIconServicesCandidateCanonicalMixedBag;
+    if (supportedMask == mixedBagBit) {
+        [d setInteger:ThemerSpotlightIconServicesCandidateCanonicalMixedBag
+                forKey:kSettingsSpotlightIconServicesCandidate];
+    }
+    [d synchronize];
+}
+
+static void settings_spotlight_iconservices_store_armed(
+    NSString *host,
+    int pid,
+    uint64_t proc,
+    uint64_t task,
+    BOOL channelClean)
+{
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    [d setBool:YES forKey:kSettingsSpotlightIconServicesArmed];
+    [d setInteger:pid forKey:kSettingsSpotlightIconServicesTargetPID];
+    [d setObject:@(proc) forKey:kSettingsSpotlightIconServicesTargetProc];
+    [d setObject:@(task) forKey:kSettingsSpotlightIconServicesTargetTask];
+    [d setObject:host ?: @"" forKey:kSettingsSpotlightIconServicesTargetHost];
+    [d setBool:channelClean forKey:kSettingsSpotlightIconServicesChannelClean];
+    [d synchronize];
+}
+
+static BOOL settings_spotlight_iconservices_close_session(
+    RemoteCallSession *session,
+    BOOL remoteOK,
+    BOOL targetStable,
+    BOOL *abandonedOut)
+{
+    if (abandonedOut) *abandonedOut = NO;
+    if (!session) return NO;
+    BOOL closed = ![session hasLocalState];
+    if (!closed) {
+        @synchronized (settings_rc_lock()) {
+            if (remoteOK && targetStable) {
+                (void)[session destroyRemoteCall];
+                closed = ![session hasLocalState];
+            }
+            if (!closed) {
+                [session abandonRemoteCall];
+                if (abandonedOut) *abandonedOut = YES;
+            }
+        }
+    }
+    return closed;
+}
+
+#pragma mark - Foreground development Lab Bridge
+
+static RemoteCallSession *g_lab_bridge_session;
+static NSString *g_lab_bridge_target;
+static NSString *g_lab_bridge_host;
+static int g_lab_bridge_pid;
+static uint64_t g_lab_bridge_proc;
+static uint64_t g_lab_bridge_task;
+
+static NSDictionary *settings_lab_bridge_error(NSString *code,
+                                                NSString *message)
+{
+    return @{ @"ok": @NO, @"error": code ?: @"bridge-error",
+              @"message": message ?: @"Unknown bridge error.",
+              @"readOnly": @YES, @"serviceDispatch": @0,
+              @"storeMutations": @0, @"fileMutations": @0,
+              @"recoveryAccess": @0, @"protocolVersion": @1 };
+}
+
+static NSDictionary *settings_lab_bridge_close_lease(void)
+{
+    RemoteCallSession *session = g_lab_bridge_session;
+    NSString *target = g_lab_bridge_target;
+    int pid = g_lab_bridge_pid;
+    uint64_t proc = g_lab_bridge_proc;
+    uint64_t task = g_lab_bridge_task;
+    g_lab_bridge_session = nil;
+    g_lab_bridge_target = nil;
+    g_lab_bridge_host = nil;
+    g_lab_bridge_pid = 0;
+    g_lab_bridge_proc = 0;
+    g_lab_bridge_task = 0;
+    if (!session) {
+        return @{ @"ok": @YES, @"closed": @YES, @"hadSession": @NO,
+                  @"readOnly": @YES, @"protocolVersion": @1 };
+    }
+
+    __block BOOL remoteOK = NO;
+    @synchronized (settings_rc_lock()) {
+        remote_call_with_session(session, ^{
+            remoteOK = remote_call_current_success() ? YES : NO;
+        });
+    }
+    BOOL stable = settings_spotlight_target_matches(
+        pid,proc,task,NULL,NULL);
+    BOOL abandoned = NO;
+    BOOL closed = settings_spotlight_iconservices_close_session(
+        session,remoteOK,stable,&abandoned);
+    printf("[LAB_BRIDGE] lease-close target=%s pid=%d stable=%d remote=%d closed=%d abandoned=%d\n",
+           target.UTF8String ?: "-",pid,stable,remoteOK,closed,abandoned);
+    return @{ @"ok": @(closed && !abandoned), @"closed": @(closed),
+              @"hadSession": @YES, @"target": target ?: @"",
+              @"pid": @(pid), @"stable": @(stable),
+              @"remote": @(remoteOK), @"abandoned": @(abandoned),
+              @"readOnly": @YES, @"protocolVersion": @1 };
+}
+
+static NSDictionary *settings_lab_bridge_session_info(void)
+{
+    if (!g_lab_bridge_session) {
+        return @{ @"ok": @YES, @"sessionOpen": @NO,
+                  @"readOnly": @YES, @"protocolVersion": @1 };
+    }
+    BOOL stable = settings_spotlight_target_matches(
+        g_lab_bridge_pid,g_lab_bridge_proc,g_lab_bridge_task,NULL,NULL);
+    __block RemoteCallDebugSnapshot snapshot = {0};
+    __block BOOL snapshotOK = NO;
+    __block size_t stateCount = 0;
+    @synchronized (settings_rc_lock()) {
+        remote_call_with_session(g_lab_bridge_session, ^{
+            snapshotOK = remote_call_copy_debug_snapshot(&snapshot);
+            arm_thread_state64_internal states[5] = {0};
+            stateCount = remote_call_copy_original_thread_states(states,5);
+        });
+    }
+    return @{ @"ok": @(stable && snapshotOK), @"sessionOpen": @YES,
+              @"target": g_lab_bridge_target ?: @"",
+              @"host": g_lab_bridge_host ?: @"",
+              @"pid": @(g_lab_bridge_pid),
+              @"proc": [NSString stringWithFormat:@"0x%llx",
+                         (unsigned long long)g_lab_bridge_proc],
+              @"task": [NSString stringWithFormat:@"0x%llx",
+                         (unsigned long long)g_lab_bridge_task],
+              @"stable": @(stable), @"transport": @(snapshot.success),
+              @"labBackend": @(snapshot.labBackend),
+              @"capturedThreadStates": @(stateCount),
+              @"stableCalls": @(snapshot.stableCalls),
+              @"stableFailures": @(snapshot.stableFailures),
+              @"ioFailures": @(snapshot.ioFailures),
+              @"lastCall": [NSString stringWithUTF8String:snapshot.lastStableCall] ?: @"",
+              @"readOnly": @YES, @"protocolVersion": @1 };
+}
+
+static NSDictionary *settings_lab_bridge_open_session(NSString *target)
+{
+    if (![target isEqualToString:@"iconservicesagent"] &&
+        ![target isEqualToString:@"spotlight"]) {
+        return settings_lab_bridge_error(
+            @"target-prohibited",@"Allowed targets are iconservicesagent and spotlight.");
+    }
+    if (g_lab_bridge_session && [g_lab_bridge_target isEqualToString:target] &&
+        settings_spotlight_target_matches(g_lab_bridge_pid,g_lab_bridge_proc,
+                                          g_lab_bridge_task,NULL,NULL)) {
+        return settings_lab_bridge_session_info();
+    }
+    (void)settings_lab_bridge_close_lease();
+    if (!remote_call_lab_backend_opted_in() &&
+        (!settings_ensure_kexploit() || !kexploit_krw_ready())) {
+        return settings_lab_bridge_error(
+            @"krw-unavailable",@"Kernel primitives could not be acquired.");
+    }
+
+    RemoteCallSession *session = nil;
+    NSString *host = nil;
+    int pid = 0;
+    uint64_t proc = 0;
+    uint64_t task = 0;
+    if ([target isEqualToString:@"iconservicesagent"]) {
+        session = settings_open_iconservices_agent_session(&pid,&proc,&task);
+        host = @"iconservicesagent";
+    } else {
+        session = settings_open_spotlight_host_session(
+            &host,&pid,&proc,&task);
+    }
+    if (!session) {
+        return settings_lab_bridge_error(
+            @"session-open-failed",
+            [target isEqualToString:@"spotlight"]
+                ? @"Open Spotlight once, return to kslop, and retry."
+                : @"The existing iconservicesagent process could not be opened.");
+    }
+    g_lab_bridge_session = session;
+    g_lab_bridge_target = [target copy];
+    g_lab_bridge_host = [host copy];
+    g_lab_bridge_pid = pid;
+    g_lab_bridge_proc = proc;
+    g_lab_bridge_task = task;
+    printf("[LAB_BRIDGE] lease-open target=%s host=%s pid=%d readOnly=1 serviceDispatch=0 storeMutations=0 fileMutations=0 recoveryAccess=0\n",
+           target.UTF8String,host.UTF8String ?: "-",pid);
+    return settings_lab_bridge_session_info();
+}
+
+static NSDictionary *settings_lab_bridge_log_tail(NSDictionary *request)
+{
+    NSUInteger maxBytes = [request[@"maxBytes"] unsignedIntegerValue];
+    if (!maxBytes) maxBytes = 32768;
+    maxBytes = MIN(maxBytes,(NSUInteger)65536);
+    NSString *path = log_most_recent_session_path();
+    NSData *data = path ? [NSData dataWithContentsOfFile:path] : nil;
+    if (!data) return settings_lab_bridge_error(
+        @"log-unavailable",@"No current diagnostic log could be read.");
+    NSRange range = NSMakeRange(data.length > maxBytes ? data.length - maxBytes : 0,
+                                MIN(data.length,maxBytes));
+    NSData *tailData = [data subdataWithRange:range];
+    NSString *tail = [[NSString alloc] initWithData:tailData
+                                           encoding:NSUTF8StringEncoding] ?: @"";
+    return @{ @"ok": @YES, @"path": path ?: @"",
+              @"totalBytes": @(data.length), @"returnedBytes": @(range.length),
+              @"tail": tail, @"readOnly": @YES, @"protocolVersion": @1 };
+}
+
+static NSDictionary *settings_lab_bridge_named_inspection(NSString *command)
+{
+    if (!g_lab_bridge_session) return settings_lab_bridge_error(
+        @"session-required",@"Open the matching target session first.");
+    BOOL agent = [command isEqualToString:@"inspect.agent-writer"];
+    if ((agent && ![g_lab_bridge_target isEqualToString:@"iconservicesagent"]) ||
+        (!agent && ![g_lab_bridge_target isEqualToString:@"spotlight"])) {
+        return settings_lab_bridge_error(
+            @"wrong-target",agent ? @"Open iconservicesagent first."
+                                   : @"Open spotlight first.");
+    }
+    __block ThemerSpotlightStoreSurfaceInventoryReport report = {0};
+    __block ThemerSpotlightStoreSurfaceInventoryResult result =
+        ThemerSpotlightStoreSurfaceInventoryTransportFailed;
+    @synchronized (settings_rc_lock()) {
+        remote_call_with_session(g_lab_bridge_session, ^{
+            uint64_t pool = themer_spotlight_remote_autorelease_pool_push();
+            if (!pool) return;
+            result = agent
+                ? themer_iconservices_inspect_agent_writer_state_in_session(&report)
+                : themer_spotlight_iconservices_inspect_live_store_state_in_session(&report);
+            if (remote_call_current_success()) {
+                themer_spotlight_remote_autorelease_pool_pop(pool);
+            }
+        });
+    }
+    BOOL stable = settings_spotlight_target_matches(
+        g_lab_bridge_pid,g_lab_bridge_proc,g_lab_bridge_task,NULL,NULL);
+    return @{ @"ok": @(result == ThemerSpotlightStoreSurfaceInventoryComplete && stable),
+              @"result": @(result), @"reason": [NSString stringWithUTF8String:report.reason] ?: @"",
+              @"target": g_lab_bridge_target ?: @"", @"pid": @(g_lab_bridge_pid),
+              @"stable": @(stable), @"classesScanned": @(report.classesScanned),
+              @"methodsScanned": @(report.methodsScanned),
+              @"candidateCount": @(report.candidateCount),
+              @"transport": @(report.transportClean), @"readOnly": @YES,
+              @"serviceDispatch": @0, @"storeMutations": @0,
+              @"fileMutations": @0, @"recoveryAccess": @0,
+              @"protocolVersion": @1 };
+}
+
+static NSDictionary *settings_lab_bridge_handle_request(NSDictionary *request)
+{
+    NSString *command = [request[@"command"] isKindOfClass:NSString.class]
+        ? request[@"command"] : @"";
+    printf("[LAB_BRIDGE] request command=%s session=%s pid=%d\n",
+           command.UTF8String ?: "-",g_lab_bridge_target.UTF8String ?: "none",
+           g_lab_bridge_pid);
+    if ([command isEqualToString:@"ping"]) {
+        return @{ @"ok": @YES, @"bridge": @"cyanide-lab",
+                  @"protocolVersion": @1, @"foregroundOnly": @NO,
+                  @"boundedBackground": @YES,
+                  @"backgroundGraceSeconds": @25,
+                  @"authenticated": @YES, @"readOnly": @YES,
+                  @"sessionOpen": @(g_lab_bridge_session != nil),
+                  @"commands": @[@"session.open",@"session.info",@"session.close",
+                      @"inspect.agent-writer",@"inspect.live-store",@"log.tail",
+                      @"probe.capabilities"] };
+    }
+    if ([command isEqualToString:@"session.open"]) {
+        NSString *target = [request[@"target"] isKindOfClass:NSString.class]
+            ? request[@"target"] : @"";
+        return settings_lab_bridge_open_session(target);
+    }
+    if ([command isEqualToString:@"session.info"]) {
+        return settings_lab_bridge_session_info();
+    }
+    if ([command isEqualToString:@"session.close"]) {
+        return settings_lab_bridge_close_lease();
+    }
+    if ([command isEqualToString:@"log.tail"]) {
+        return settings_lab_bridge_log_tail(request);
+    }
+    if ([command isEqualToString:@"inspect.agent-writer"] ||
+        [command isEqualToString:@"inspect.live-store"]) {
+        return settings_lab_bridge_named_inspection(command);
+    }
+    if (!g_lab_bridge_session) return settings_lab_bridge_error(
+        @"session-required",@"Open a target session before issuing probe commands.");
+    if (!settings_spotlight_target_matches(g_lab_bridge_pid,g_lab_bridge_proc,
+                                           g_lab_bridge_task,NULL,NULL)) {
+        (void)settings_lab_bridge_close_lease();
+        return settings_lab_bridge_error(
+            @"target-changed",@"The leased process identity changed; the session was closed.");
+    }
+    __block NSDictionary *response = nil;
+    @synchronized (settings_rc_lock()) {
+        remote_call_with_session(g_lab_bridge_session, ^{
+            response = cyanide_lab_probe_handle_request(
+                g_lab_bridge_session,request);
+        });
+    }
+    return response ?: settings_lab_bridge_error(
+        @"probe-failed",@"The probe returned no response.");
+}
+
+static void settings_lab_bridge_cleanup_after_stop(void)
+{
+    (void)settings_lab_bridge_close_lease();
+    settings_release_actions_lock();
+    settings_notify_cleanup_state_changed();
+}
+
+static void settings_toggle_lab_bridge(UIViewController *presenter)
+{
+    if (cyanide_lab_bridge_is_running()) {
+        cyanide_lab_bridge_stop();
+        UIAlertController *alert = [UIAlertController
+            alertControllerWithTitle:@"Lab Bridge Stopping"
+                             message:@"The listener and any leased RemoteCall session are closing."
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:nil]];
+        settings_present_controller(alert,presenter);
+        return;
+    }
+    if (!settings_try_claim_actions_lock(
+            "kslop Lab Bridge",
+            "[LAB_BRIDGE] Another action is already running.")) {
+        return;
+    }
+    NSError *error = nil;
+    BOOL started = cyanide_lab_bridge_start(
+        ^NSDictionary *(NSDictionary *request) {
+            return settings_lab_bridge_handle_request(request);
+        }, ^{
+            settings_lab_bridge_cleanup_after_stop();
+        }, &error);
+    if (!started) {
+        settings_release_actions_lock();
+        UIAlertController *alert = [UIAlertController
+            alertControllerWithTitle:@"Lab Bridge Failed"
+                             message:error.localizedDescription ?: @"The local listener could not start."
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:nil]];
+        settings_present_controller(alert,presenter);
+        return;
+    }
+    NSString *token = cyanide_lab_bridge_token() ?: @"";
+    NSDictionary *configuration = @{
+        @"host": @"iPinky-Max.coredevice.local",
+        @"port": @(cyanide_lab_bridge_port()), @"token": token,
+        @"protocolVersion": @1
+    };
+    NSData *json = [NSJSONSerialization dataWithJSONObject:configuration
+                                                   options:NSJSONWritingPrettyPrinted error:nil];
+    NSString *text = [[NSString alloc] initWithData:json
+                                           encoding:NSUTF8StringEncoding] ?: token;
+    NSString *message = [NSString stringWithFormat:
+        @"Port: %u\n\nToken:\n%@\n\nUse the Mac CLI in scripts/cyanide_lab_bridge.py. When kslop moves to the background, the authenticated bridge remains available for up to 25 seconds, then closes and releases its lease automatically.",
+        cyanide_lab_bridge_port(),token];
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"Lab Bridge Running"
+                         message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Copy Configuration"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(__unused UIAlertAction *action) {
+        UIPasteboard.generalPasteboard.string = text;
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Done"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    settings_present_controller(alert,presenter);
+    settings_notify_cleanup_state_changed();
+}
+
+static BOOL settings_ensure_spotlight_local_var_rw(void)
+{
+    int before = check_sandbox_var_rw();
+    BOOL labOptedIn = cnd_lab_remotecall_opted_in();
+    BOOL labRootTokenConsumed = NO;
+    int afterLabToken = before;
+    BOOL tokenConsumed = NO;
+    int afterToken = before;
+    int patchResult = -1;
+    int afterPatch = before;
+    int borrowResult = -1;
+    int afterBorrow = before;
+
+    if (before != 0 && labOptedIn) {
+        labRootTokenConsumed = cnd_lab_remotecall_consume_root_file_token();
+        afterLabToken = check_sandbox_var_rw();
+    }
+
+    // The vPhone lab has no physical-device socket-PCB anchor from which
+    // proc_self() can be recovered.  Its SSH harness supplies an explicit,
+    // VM-only file extension instead; never enter the kernel credential walk
+    // when that grant is absent or invalid.
+    if (afterLabToken != 0 && cnd_lab_vphone_guest()) {
+        printf("[ICONSERVICES_LAB] local-sandbox-preflight before=%d "
+               "labOptedIn=%d labRootTokenConsumed=%d afterLabToken=%d "
+               "result=failed-without-kernel-credential-walk\n",
+               before, labOptedIn, labRootTokenConsumed, afterLabToken);
+        return NO;
+    }
+
+    if (afterLabToken != 0 && kexploit_krw_ready()) {
+        tokenConsumed = krw_persistence_consume_launchd_root_file_token();
+        afterToken = check_sandbox_var_rw();
+        afterPatch = afterToken;
+        afterBorrow = afterToken;
+        if (afterToken != 0) {
+            patchResult = patch_sandbox_ext();
+            afterPatch = check_sandbox_var_rw();
+            afterBorrow = afterPatch;
+        }
+        if (afterPatch != 0) {
+            borrowResult = borrow_sandbox_ext("sysdiagnosed");
+            afterBorrow = check_sandbox_var_rw();
+        }
+    }
+
+    int finalResult = check_sandbox_var_rw();
+    printf("[ICONSERVICES_LAB] local-sandbox-preflight before=%d "
+           "labOptedIn=%d labRootTokenConsumed=%d afterLabToken=%d "
+           "krw=%d tokenConsumed=%d afterToken=%d patch=%d afterPatch=%d "
+           "borrow=%d afterBorrow=%d final=%d uid=%u euid=%u\n",
+           before,
+           labOptedIn,
+           labRootTokenConsumed,
+           afterLabToken,
+           kexploit_krw_ready(),
+           tokenConsumed,
+           afterToken,
+           patchResult,
+           afterPatch,
+           borrowResult,
+           afterBorrow,
+           finalResult,
+           (unsigned)getuid(),
+           (unsigned)geteuid());
+    return finalResult == 0;
+}
+
+static BOOL settings_spotlight_iconservices_prepare_theme(
+    NSDictionary<NSString *, NSData *> **themeDataOut)
+{
+    if (themeDataOut) *themeDataOut = nil;
+    if (!settings_device_supported()) {
+        log_user("[ICONSERVICES_LAB] This device/version is not supported.\n");
+        return NO;
+    }
+    if (!settings_snowboardlite_has_selected_theme()) {
+        log_user("[ICONSERVICES_LAB] Pick or import a SnowBoard Remix theme first.\n");
+        return NO;
+    }
+    NSDictionary<NSString *, NSData *> *themeData =
+        settings_sbl_selected_theme_data();
+    if (themeData.count == 0) {
+        log_user("[ICONSERVICES_LAB] The selected theme contains no usable icon data.\n");
+        return NO;
+    }
+    if (themeDataOut) *themeDataOut = themeData;
+    return YES;
+}
+
+static void settings_spotlight_stock68_clear_local_state(void)
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    [d setObject:@"" forKey:kSettingsSpotlightStock68Target];
+    [d setObject:@"" forKey:kSettingsSpotlightStock68Control];
+    [d setObject:@"" forKey:kSettingsSpotlightStock68Fingerprint];
+    [d setObject:@"idle" forKey:kSettingsSpotlightStock68Status];
+    [d setInteger:0 forKey:kSettingsSpotlightStock68PID];
+    [d setObject:@0 forKey:kSettingsSpotlightStock68Proc];
+    [d setObject:@0 forKey:kSettingsSpotlightStock68Task];
+    [d setObject:@"" forKey:kSettingsSpotlightStock68Host];
+    (void)[d synchronize];
+}
+
+static BOOL settings_materialize_spotlight_stock68_now(
+    ThemerSpotlightStock68MaterializationResult *resultOut)
+{
+    if (resultOut) {
+        *resultOut = ThemerSpotlightStock68MaterializationResultTransportFailed;
+    }
+    if (!settings_try_claim_actions_lock(
+            "Spotlight stock68 materialization",
+            "[ICONSERVICES_MATERIALIZE] Another action is already running.")) {
+        return NO;
+    }
+
+    // Admission is deliberately under the action lock.  A concurrent or
+    // stale recovery run must win over target discovery and owner replacement.
+    BOOL blocked = NO;
+    @try {
+        blocked = settings_spotlight_new_work_is_blocked_locked(
+            @"Spotlight stock68 materialization");
+    } @catch (NSException *exception) {
+        log_user("[ICONSERVICES_MATERIALIZE] Admission check threw name=%s "
+                 "reason=%s; recovery owner was preserved.\n",
+                 exception.name.UTF8String ?: "?",
+                 exception.reason.UTF8String ?: "?");
+        settings_release_actions_lock();
+        return NO;
+    }
+    if (blocked) {
+        if (resultOut) {
+            *resultOut =
+                ThemerSpotlightStock68MaterializationResultStatePresent;
+        }
+        settings_release_actions_lock();
+        return NO;
+    }
+
+    NSDictionary<NSString *, NSData *> *themeData = nil;
+    BOOL themePrepared = NO;
+    @try {
+        themePrepared = settings_spotlight_iconservices_prepare_theme(&themeData);
+    } @catch (NSException *exception) {
+        log_user("[ICONSERVICES_MATERIALIZE] Theme preparation threw "
+                 "name=%s reason=%s.\n",
+                 exception.name.UTF8String ?: "?",
+                 exception.reason.UTF8String ?: "?");
+        settings_release_actions_lock();
+        return NO;
+    }
+    if (!themePrepared) {
+        settings_release_actions_lock();
+        return NO;
+    }
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    char target[192] = {0};
+    char control[192] = {0};
+    char fingerprint[65] = {0};
+    BOOL targetSelected = NO;
+    @try {
+        targetSelected = themer_spotlight_stock68_select_target(
+            themeData,
+            target, sizeof(target),
+            control, sizeof(control),
+            fingerprint);
+    } @catch (NSException *exception) {
+        log_user("[ICONSERVICES_MATERIALIZE] Target selection threw name=%s "
+                 "reason=%s.\n",
+                 exception.name.UTF8String ?: "?",
+                 exception.reason.UTF8String ?: "?");
+        settings_release_actions_lock();
+        return NO;
+    }
+    if (!targetSelected) {
+        log_user("[ICONSERVICES_MATERIALIZE] No deterministic materialization target could be selected.\n");
+        settings_release_actions_lock();
+        return NO;
+    }
+
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_MATERIALIZE] Failed: kernel primitives were not acquired.\n");
+            return NO;
+        }
+        if (!settings_ensure_spotlight_local_var_rw()) {
+            log_user("[ICONSERVICES_MATERIALIZE] Failed: privileged /private/var read access was not acquired.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_MATERIALIZE] No Spotlight UI host is running. Open Spotlight once without searching for the pinned target, then retry.\n");
+            return NO;
+        }
+
+        [d setObject:[NSString stringWithUTF8String:target]
+              forKey:kSettingsSpotlightStock68Target];
+        [d setObject:control[0]
+                ? [NSString stringWithUTF8String:control] : @""
+              forKey:kSettingsSpotlightStock68Control];
+        [d setObject:[NSString stringWithUTF8String:fingerprint]
+              forKey:kSettingsSpotlightStock68Fingerprint];
+        [d setObject:@"running" forKey:kSettingsSpotlightStock68Status];
+        [d setInteger:pid forKey:kSettingsSpotlightStock68PID];
+        [d setObject:@(proc) forKey:kSettingsSpotlightStock68Proc];
+        [d setObject:@(task) forKey:kSettingsSpotlightStock68Task];
+        [d setObject:host ?: @"" forKey:kSettingsSpotlightStock68Host];
+        (void)[d synchronize];
+
+        const char *targetCString = target;
+        const char *fingerprintCString = fingerprint;
+        __sync_lock_test_and_set(&g_spotlight_trace_stop_requested, 0);
+        __block ThemerSpotlightStock68MaterializationResult result =
+            ThemerSpotlightStock68MaterializationResultTransportFailed;
+        __block ThemerSpotlightStock68MaterializationReport report = {0};
+        __block BOOL remoteOK = NO;
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(session, ^{
+                    uint64_t pool =
+                        themer_spotlight_remote_autorelease_pool_push();
+                    if (!pool) return;
+                    result = themer_spotlight_stock68_materialize_in_session(
+                        targetCString, fingerprintCString,
+                        &g_spotlight_trace_stop_requested,
+                        &report);
+                    if (remote_call_current_success()) {
+                        themer_spotlight_remote_autorelease_pool_pop(pool);
+                    }
+                    remoteOK = remote_call_current_success() ? YES : NO;
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[ICONSERVICES_MATERIALIZE] remote-exception name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            remoteOK = NO;
+        }
+
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL channelClosed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        BOOL storeRoundTripClosed = result == ThemerSpotlightStock68MaterializationResultStoreRoundTripVerified &&
+            themer_spotlight_stock68_finalize_store_registration_after_clean_close(
+                remoteOK && targetStable && channelClosed && !abandoned, pid, proc, task);
+        if (result == ThemerSpotlightStock68MaterializationResultStoreRoundTripVerified && !storeRoundTripClosed)
+            result = ThemerSpotlightStock68MaterializationResultStoreRegisteredRecoveryRequired;
+        BOOL accepted = result ==
+                ThemerSpotlightStock68MaterializationResultMaterialized ||
+            result ==
+                ThemerSpotlightStock68MaterializationResultAlreadyPresent;
+        success = accepted && remoteOK && targetStable &&
+            channelClosed && !abandoned;
+        if (success) {
+            [d setObject:@"materialized"
+                  forKey:kSettingsSpotlightStock68Status];
+        } else if (storeRoundTripClosed) {
+            [d setObject:@"store-roundtrip-verified" forKey:kSettingsSpotlightStock68Status];
+        } else if (result ==
+                       ThemerSpotlightStock68MaterializationResultStoreRegisteredRecoveryRequired ||
+                   result ==
+                       ThemerSpotlightStock68MaterializationResultRollbackFailed ||
+                   result ==
+                       ThemerSpotlightStock68MaterializationResultIssuedUnmaterializedRecoveryRequired ||
+                   result ==
+                       ThemerSpotlightStock68MaterializationResultStatePresent ||
+                   result ==
+                       ThemerSpotlightStock68MaterializationResultTransportFailed ||
+                   !remoteOK || !targetStable || !channelClosed || abandoned) {
+            [d setObject:@"recovery-required"
+                  forKey:kSettingsSpotlightStock68Status];
+        } else {
+            [d setObject:@"failed" forKey:kSettingsSpotlightStock68Status];
+        }
+        (void)[d synchronize];
+        if (resultOut) *resultOut = result;
+        log_user("[ICONSERVICES_MATERIALIZE] Completed result=%d target=%s fingerprint=%.16s requests=%d newNamed68=%d wrongKey68=%d uuid=%s file=%s rollback=%d/%d recordIdentifiersDecodeStatus=%d decodeNodes=%d decodeMetadata=%d ownership=%d blob=%d/%llu/%llu truncated=%d format=%s sha256=%s blobToken=%d/%d/%d candidate=%d/%d/%d candidateUUID=%s candidatePath=%s candidateFile=%d/%d/%d/%d/%d/%llu store=%d/%d/%d/%s unit=%d/%d/%d/%d index=%llu@%lld/%llu@%lld reconstruct=%d/%d/%d/%d/%d/%d remote=%d stable=%d closed=%d abandoned=%d.%s\n",
+                 result,
+                 target,
+                 fingerprint,
+                 report.requestCount,
+                 report.newNamed68Count,
+                 report.wrongKey68Count,
+                 report.uuid[0] ? report.uuid : "-",
+                 report.storePath[0] ? report.storePath : "-",
+                 report.rollbackAttempted,
+                 report.rollbackVerified,
+                 report.recordIdentifiersDecodeStatus,
+                 report.recordIdentifiersDecodeNodes,
+                 report.recordIdentifiersDecodeMetadata,
+                 report.recordIdentifiersOwnershipVerified,
+                 report.recordIdentifiersBlobCaptured,
+                 (unsigned long long)report.recordIdentifiersBlobTotalLength,
+                 (unsigned long long)report.recordIdentifiersBlobCapturedLength,
+                 report.recordIdentifiersBlobTruncated,
+                 report.recordIdentifiersBlobFormat[0]
+                    ? report.recordIdentifiersBlobFormat : "-",
+                 report.recordIdentifiersBlobSHA256[0]
+                    ? report.recordIdentifiersBlobSHA256 : "-",
+                 report.recordIdentifiersBlobEqualsToken,
+                 report.recordIdentifiersBlobContainsToken,
+                 report.recordIdentifiersTokenContainsBlob,
+                 report.recordIdentifiersCandidateParsed,
+                 report.recordIdentifiersCandidateTokenBound,
+                 report.recordIdentifiersCandidateClassified,
+                 report.recordIdentifiersCandidateUUID[0]
+                    ? report.recordIdentifiersCandidateUUID : "-",
+                 report.recordIdentifiersCandidatePath[0]
+                    ? report.recordIdentifiersCandidatePath : "-",
+                 report.recordIdentifiersCandidateFileExists,
+                 report.recordIdentifiersCandidateFileRegular,
+                 report.recordIdentifiersCandidateFileReadable,
+                 report.recordIdentifiersCandidateFileNonempty,
+                 report.recordIdentifiersCandidateFileExactSize,
+                 (unsigned long long)report.recordIdentifiersCandidateFileSize,
+                 report.recordIdentifiersCandidateStoreLookupABI,
+                 report.recordIdentifiersCandidateStoreLookupAttempted,
+                 report.recordIdentifiersCandidateStoreUnitFound,
+                 report.recordIdentifiersCandidateStoreUnitClass[0]
+                    ? report.recordIdentifiersCandidateStoreUnitClass : "-",
+                 report.recordIdentifiersCandidateStoreUnitABI,
+                 report.recordIdentifiersCandidateStoreUnitUUIDEqual,
+                 report.recordIdentifiersCandidateStoreUnitDataEqual,
+                 report.recordIdentifiersCandidateStoreUnitValidKnown &&
+                    report.recordIdentifiersCandidateStoreUnitValid,
+                 (unsigned long long)report.recordIdentifiersCandidateIndexUUIDOccurrences,
+                 (long long)report.recordIdentifiersCandidateIndexUUIDFirstOffset,
+                 (unsigned long long)report.recordIdentifiersCandidateIndexTokenOccurrences,
+                 (long long)report.recordIdentifiersCandidateIndexTokenFirstOffset,
+                 report.recordIdentifiersCandidateReconstructionAttempted,
+                 report.recordIdentifiersCandidateReconstructionClass,
+                 report.recordIdentifiersCandidateReconstructionUUIDEqual,
+                 report.recordIdentifiersCandidateReconstructionTokenEqual,
+                 report.recordIdentifiersCandidateReconstructionGeometry,
+                 report.recordIdentifiersCandidateReconstructionFileEqual,
+                 remoteOK,
+                 targetStable,
+                 channelClosed,
+                 abandoned,
+                 success
+                    ? " Run Verify Materialized Stock 68 in a fresh session."
+                    : " Do not retry in this Spotlight process; inspect the relevant log.");
+        cyanide_upload_log_milestone(success
+            ? @"spotlight-stock68-materialized"
+            : @"spotlight-stock68-materialization-failed");
+        return success;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_verify_materialized_spotlight_stock68_now(
+    ThemerSpotlightStock68MaterializationResult *resultOut)
+{
+    if (resultOut) {
+        *resultOut = ThemerSpotlightStock68MaterializationResultVerificationFailed;
+    }
+    if (!settings_try_claim_actions_lock(
+            "Verify Spotlight stock68 materialization",
+            "[ICONSERVICES_MATERIALIZE] Another action is already running.")) {
+        return NO;
+    }
+
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    NSString *savedStatus =
+        [d stringForKey:kSettingsSpotlightStock68Status] ?: @"idle";
+    if (![savedStatus isEqualToString:@"materialized"]) {
+        log_user("[ICONSERVICES_MATERIALIZE] Verify rejected: local phase is %s; "
+                 "Emergency Restore must resolve a running/recovery phase "
+                 "before verification. The recorded owner was preserved.\n",
+                 savedStatus.UTF8String ?: "idle");
+        settings_release_actions_lock();
+        return NO;
+    }
+    BOOL blocked = NO;
+    @try {
+        blocked = settings_spotlight_new_work_is_blocked_locked(
+            @"Spotlight stock68 verification");
+    } @catch (NSException *exception) {
+        log_user("[ICONSERVICES_MATERIALIZE] Verification admission check "
+                 "threw name=%s reason=%s; recovery owner was preserved.\n",
+                 exception.name.UTF8String ?: "?",
+                 exception.reason.UTF8String ?: "?");
+        settings_release_actions_lock();
+        return NO;
+    }
+    if (blocked) {
+        if (resultOut) {
+            *resultOut =
+                ThemerSpotlightStock68MaterializationResultStatePresent;
+        }
+        settings_release_actions_lock();
+        return NO;
+    }
+
+    // Persist this before opening the host or issuing a readback.  A process
+    // death during verification therefore leaves an explicit recovery phase.
+    [d setObject:@"running" forKey:kSettingsSpotlightStock68Status];
+    (void)[d synchronize];
+
+    NSDictionary<NSString *, NSData *> *themeData = nil;
+    BOOL themePrepared = NO;
+    @try {
+        themePrepared = settings_spotlight_iconservices_prepare_theme(&themeData);
+    } @catch (NSException *exception) {
+        [d setObject:@"recovery-required"
+              forKey:kSettingsSpotlightStock68Status];
+        (void)[d synchronize];
+        log_user("[ICONSERVICES_MATERIALIZE] Verify theme preparation threw "
+                 "name=%s reason=%s; recovery owner was preserved.\n",
+                 exception.name.UTF8String ?: "?",
+                 exception.reason.UTF8String ?: "?");
+        settings_release_actions_lock();
+        return NO;
+    }
+    if (!themePrepared) {
+        [d setObject:@"recovery-required"
+              forKey:kSettingsSpotlightStock68Status];
+        (void)[d synchronize];
+        settings_release_actions_lock();
+        return NO;
+    }
+    char currentTarget[192] = {0};
+    char currentControl[192] = {0};
+    char currentFingerprint[65] = {0};
+    BOOL targetSelected = NO;
+    @try {
+        targetSelected = themer_spotlight_stock68_select_target(
+            themeData,
+            currentTarget, sizeof(currentTarget),
+            currentControl, sizeof(currentControl),
+            currentFingerprint);
+    } @catch (NSException *exception) {
+        [d setObject:@"recovery-required"
+              forKey:kSettingsSpotlightStock68Status];
+        (void)[d synchronize];
+        log_user("[ICONSERVICES_MATERIALIZE] Verify target selection threw "
+                 "name=%s reason=%s; recovery owner was preserved.\n",
+                 exception.name.UTF8String ?: "?",
+                 exception.reason.UTF8String ?: "?");
+        settings_release_actions_lock();
+        return NO;
+    }
+    if (!targetSelected) {
+        [d setObject:@"recovery-required"
+              forKey:kSettingsSpotlightStock68Status];
+        (void)[d synchronize];
+        settings_release_actions_lock();
+        return NO;
+    }
+    NSString *savedTarget = [d stringForKey:kSettingsSpotlightStock68Target];
+    NSString *savedFingerprint =
+        [d stringForKey:kSettingsSpotlightStock68Fingerprint];
+    if (![savedTarget isEqualToString:
+            [NSString stringWithUTF8String:currentTarget]] ||
+        ![savedFingerprint isEqualToString:
+            [NSString stringWithUTF8String:currentFingerprint]]) {
+        [d setObject:@"recovery-required"
+              forKey:kSettingsSpotlightStock68Status];
+        (void)[d synchronize];
+        log_user("[ICONSERVICES_MATERIALIZE] Verify rejected: theme or target "
+                 "changed since materialization. The recorded owner and "
+                 "recovery phase were preserved; use Emergency Restore.\n");
+        settings_release_actions_lock();
+        return NO;
+    }
+
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready() ||
+            !settings_ensure_spotlight_local_var_rw()) {
+            [d setObject:@"recovery-required"
+                  forKey:kSettingsSpotlightStock68Status];
+            (void)[d synchronize];
+            log_user("[ICONSERVICES_MATERIALIZE] Verification preflight failed.\n");
+            return NO;
+        }
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            [d setObject:@"recovery-required"
+                  forKey:kSettingsSpotlightStock68Status];
+            (void)[d synchronize];
+            log_user("[ICONSERVICES_MATERIALIZE] Verify could not reach the "
+                     "recorded Spotlight host. Recovery remains required; "
+                     "the recorded owner was preserved.\n");
+            return NO;
+        }
+        int expectedPID = (int)[d integerForKey:kSettingsSpotlightStock68PID];
+        uint64_t expectedProc = settings_spotlight_iconservices_u64_default(
+            kSettingsSpotlightStock68Proc);
+        uint64_t expectedTask = settings_spotlight_iconservices_u64_default(
+            kSettingsSpotlightStock68Task);
+        if (pid != expectedPID || proc != expectedProc || task != expectedTask) {
+            BOOL stable = settings_spotlight_target_matches(
+                pid, proc, task, NULL, NULL);
+            BOOL abandoned = NO;
+            (void)settings_spotlight_iconservices_close_session(
+                session, stable, stable, &abandoned);
+            [d setObject:@"recovery-required"
+                  forKey:kSettingsSpotlightStock68Status];
+            (void)[d synchronize];
+            log_user("[ICONSERVICES_MATERIALIZE] Verify rejected: Spotlight "
+                     "host identity changed (expected pid=%d proc=0x%llx "
+                     "task=0x%llx, current pid=%d proc=0x%llx task=0x%llx). "
+                     "The recorded owner was preserved; use Emergency Restore "
+                     "against the old host after its exit is proven.\n",
+                     expectedPID,
+                     (unsigned long long)expectedProc,
+                     (unsigned long long)expectedTask,
+                     pid,
+                     (unsigned long long)proc,
+                     (unsigned long long)task);
+            return NO;
+        }
+
+        const char *currentTargetCString = currentTarget;
+        const char *currentFingerprintCString = currentFingerprint;
+        __block ThemerSpotlightStock68MaterializationResult result =
+            ThemerSpotlightStock68MaterializationResultVerificationFailed;
+        __block ThemerSpotlightStock68MaterializationReport report = {0};
+        __block BOOL remoteOK = NO;
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(session, ^{
+                    uint64_t pool =
+                        themer_spotlight_remote_autorelease_pool_push();
+                    if (!pool) return;
+                    result = themer_spotlight_stock68_verify_in_session(
+                        currentTargetCString, currentFingerprintCString,
+                        &report);
+                    if (remote_call_current_success()) {
+                        themer_spotlight_remote_autorelease_pool_pop(pool);
+                    }
+                    remoteOK = remote_call_current_success() ? YES : NO;
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[ICONSERVICES_MATERIALIZE] verify remote-exception "
+                   "name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            remoteOK = NO;
+        }
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL channelClosed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        BOOL unresolvedGeneration =
+            themer_spotlight_stock68_has_unresolved_generation();
+        BOOL pendingCleanup =
+            themer_spotlight_iconservices_has_pending_recovery();
+        success = result ==
+                ThemerSpotlightStock68MaterializationResultAlreadyPresent &&
+            report.freshVerification && remoteOK && targetStable &&
+            channelClosed && !abandoned && !unresolvedGeneration &&
+            !pendingCleanup;
+        BOOL uncertain = !remoteOK || !targetStable || !channelClosed ||
+                         abandoned ||
+            result == ThemerSpotlightStock68MaterializationResultTransportFailed ||
+            result == ThemerSpotlightStock68MaterializationResultStatePresent ||
+            result == ThemerSpotlightStock68MaterializationResultRollbackFailed ||
+            unresolvedGeneration || pendingCleanup;
+        NSString *finalStatus = success
+            ? @"proven"
+            : uncertain ? @"recovery-required" : @"verification-failed";
+        [d setObject:finalStatus forKey:kSettingsSpotlightStock68Status];
+        (void)[d synchronize];
+        if (resultOut) *resultOut = result;
+        log_user("[ICONSERVICES_MATERIALIZE] Fresh verification result=%d "
+                 "target=%s fingerprint=%.16s uuid=%s file=%s proven=%d "
+                 "remote=%d stable=%d closed=%d abandoned=%d status=%s.\n",
+                 result,
+                 currentTarget,
+                 currentFingerprint,
+                 report.uuid[0] ? report.uuid : "-",
+                 report.storePath[0] ? report.storePath : "-",
+                 report.freshVerification,
+                 remoteOK,
+                 targetStable,
+                 channelClosed,
+                 abandoned,
+                 finalStatus.UTF8String);
+        cyanide_upload_log_milestone(success
+            ? @"spotlight-stock68-verification-pass"
+            : @"spotlight-stock68-verification-failed");
+        return success;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_probe_spotlight_iconservices_now(void)
+{
+    if (!settings_try_claim_actions_lock(
+            "Spotlight IconServices probe",
+            "[ICONSERVICES_LAB] Another action is already running.")) {
+        return NO;
+    }
+
+    // Probe can replace the durable probe selection and therefore cannot run
+    // while any recovery owner or journal is pending.
+    BOOL blocked = NO;
+    @try {
+        blocked = settings_spotlight_new_work_is_blocked_locked(
+            @"Spotlight IconServices probe");
+    } @catch (NSException *exception) {
+        log_user("[ICONSERVICES_LAB] Probe admission check threw name=%s "
+                 "reason=%s; recovery owner was preserved.\n",
+                 exception.name.UTF8String ?: "?",
+                 exception.reason.UTF8String ?: "?");
+        settings_release_actions_lock();
+        return NO;
+    }
+    if (blocked) {
+        settings_release_actions_lock();
+        return NO;
+    }
+
+    NSDictionary<NSString *, NSData *> *themeData = nil;
+    BOOL themePrepared = NO;
+    @try {
+        themePrepared = settings_spotlight_iconservices_prepare_theme(&themeData);
+    } @catch (NSException *exception) {
+        log_user("[ICONSERVICES_LAB] Probe theme preparation threw "
+                 "name=%s reason=%s.\n",
+                 exception.name.UTF8String ?: "?",
+                 exception.reason.UTF8String ?: "?");
+        settings_release_actions_lock();
+        return NO;
+    }
+    if (!themePrepared) {
+        settings_release_actions_lock();
+        return NO;
+    }
+
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_LAB] Failed: kernel primitives were not acquired.\n");
+            return NO;
+        }
+        if (!settings_ensure_spotlight_local_var_rw()) {
+            log_user("[ICONSERVICES_LAB] Failed: privileged /private/var access was not acquired.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_LAB] No Spotlight UI host is running. Open Spotlight once, then run Inspect Original Spotlight Image Bag again.\n");
+            return NO;
+        }
+
+        __sync_lock_test_and_set(&g_spotlight_trace_stop_requested, 0);
+        __block ThemerSpotlightIconServicesProbeResult result =
+            ThemerSpotlightIconServicesProbeResultFailed;
+        __block uint64_t supportedMask = 0;
+        __block BOOL remoteOK = NO;
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(session, ^{
+                    uint64_t pool =
+                        themer_spotlight_remote_autorelease_pool_push();
+                    if (!pool) return;
+                    result = themer_spotlight_iconservices_probe_in_session(
+                        themeData,
+                        &g_spotlight_trace_stop_requested,
+                        &supportedMask);
+                    if (remote_call_current_success()) {
+                        themer_spotlight_remote_autorelease_pool_pop(pool);
+                    }
+                    remoteOK = remote_call_current_success() ? YES : NO;
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[ICONSERVICES_LAB] probe remote-exception name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            remoteOK = NO;
+        }
+
+        uint64_t currentProc = 0;
+        uint64_t currentTask = 0;
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, &currentProc, &currentTask);
+        BOOL abandoned = NO;
+        BOOL channelClosed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        success = result == ThemerSpotlightIconServicesProbeResultReady &&
+                  remoteOK && targetStable && channelClosed && !abandoned;
+        if (success) {
+            settings_spotlight_iconservices_store_probe(
+                supportedMask, pid, proc, task);
+            log_user("[OK][ICONSERVICES_LAB] Probe completed in %s (pid %d); supported mask=0x%llx.%s\n",
+                     host.UTF8String,
+                     pid,
+                     (unsigned long long)supportedMask,
+                     supportedMask
+                         ? " The stock-preserved themed-68 existing-cache-file candidate is ready. Seed only when you are ready to inspect Spotlight, then always run Verify + Restore."
+                         : " Seed is disabled because no genuine stock68 record exists yet. Open and use Spotlight, then run Probe again so the read-only materialization trace can detect one.");
+        } else {
+            BOOL statePresentRecovery = result ==
+                ThemerSpotlightIconServicesProbeResultStatePresent;
+            if (statePresentRecovery && targetStable && remoteOK) {
+                // A probe can encounter an already-mutated host after local
+                // metadata was lost. Recreate only the recovery owner; never
+                // treat this as an ordinary probe failure.
+                settings_spotlight_iconservices_store_armed(
+                    host, pid, proc, task, NO);
+            } else if (!statePresentRecovery) {
+                settings_spotlight_iconservices_reset_local_state(YES);
+            }
+            log_user("[ICONSERVICES_LAB] Probe failed result=%d "
+                     "recovery-required=%d remote=%d stable=%d closed=%d "
+                     "abandoned=%d.%s\n",
+                     result, statePresentRecovery, remoteOK, targetStable,
+                     channelClosed, abandoned,
+                     statePresentRecovery
+                         ? " Existing remote state was preserved; run Emergency Restore."
+                         : "");
+        }
+        cyanide_upload_log_milestone(success
+            ? @"spotlight-iconservices-probe-pass"
+            : @"spotlight-iconservices-probe-failed");
+        return success;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_begin_spotlight_iconservices_now(void)
+{
+    log_user("[ICONSERVICES_MATERIALIZE] Seed is disabled in this diagnostic build. First prove one-target stock68 materialization in a fresh RemoteCall session.\n");
+    return NO;
+
+    NSDictionary<NSString *, NSData *> *themeData = nil;
+    if (!settings_spotlight_iconservices_prepare_theme(&themeData)) return NO;
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if ([d boolForKey:kSettingsSpotlightIconServicesArmed]) {
+        log_user("[ICONSERVICES_LAB] A candidate is already armed. Run Verify + Restore or Emergency Restore first.\n");
+        return NO;
+    }
+
+    ThemerSpotlightIconServicesCandidate candidate =
+        settings_spotlight_iconservices_selected_candidate();
+    uint64_t supportedMask =
+        settings_spotlight_iconservices_u64_default(
+            kSettingsSpotlightIconServicesSupportedMask);
+    uint64_t candidateBit = UINT64_C(1) << (uint64_t)candidate;
+    if ((supportedMask & candidateBit) == 0) {
+        log_user("[ICONSERVICES_LAB] Candidate %s is not supported by the last probe. Run Inspect Original Spotlight Image Bag and select a supported candidate.\n",
+                 themer_spotlight_iconservices_candidate_name(candidate));
+        return NO;
+    }
+    if (!settings_try_claim_actions_lock(
+            "Spotlight IconServices seed",
+            "[ICONSERVICES_LAB] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_LAB] Failed: kernel primitives were not acquired.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_LAB] No Spotlight UI host is running. Open Spotlight once, then try Seed again.\n");
+            return NO;
+        }
+
+        int probePID = (int)[d integerForKey:kSettingsSpotlightIconServicesProbePID];
+        uint64_t probeProc = settings_spotlight_iconservices_u64_default(
+            kSettingsSpotlightIconServicesProbeProc);
+        uint64_t probeTask = settings_spotlight_iconservices_u64_default(
+            kSettingsSpotlightIconServicesProbeTask);
+        if (pid != probePID || proc != probeProc || task != probeTask) {
+            BOOL stable = settings_spotlight_target_matches(
+                pid, proc, task, NULL, NULL);
+            BOOL abandoned = NO;
+            (void)settings_spotlight_iconservices_close_session(
+                session, stable, stable, &abandoned);
+            settings_spotlight_iconservices_reset_local_state(YES);
+            log_user("[ICONSERVICES_LAB] Spotlight host changed since Inspect Original Spotlight Image Bag. Run the probe again before seeding.\n");
+            return NO;
+        }
+
+        __sync_lock_test_and_set(&g_spotlight_trace_stop_requested, 0);
+        __block ThemerSpotlightIconServicesBeginResult result =
+            ThemerSpotlightIconServicesBeginResultStateFailed;
+        __block BOOL remoteOK = NO;
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(session, ^{
+                    uint64_t pool =
+                        themer_spotlight_remote_autorelease_pool_push();
+                    if (!pool) return;
+                    result = themer_spotlight_iconservices_begin_in_session(
+                        candidate,
+                        themeData,
+                        &g_spotlight_trace_stop_requested);
+                    if (remote_call_current_success()) {
+                        themer_spotlight_remote_autorelease_pool_pop(pool);
+                    }
+                    remoteOK = remote_call_current_success() ? YES : NO;
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[ICONSERVICES_LAB] begin remote-exception name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            remoteOK = NO;
+        }
+
+        uint64_t currentProc = 0;
+        uint64_t currentTask = 0;
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, &currentProc, &currentTask);
+        BOOL abandoned = NO;
+        BOOL channelClosed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        BOOL seeded =
+            result == ThemerSpotlightIconServicesBeginResultSeeded;
+        BOOL mutationUncertain =
+            result == ThemerSpotlightIconServicesBeginResultStateFailed;
+        BOOL cleanupUncertain = targetStable &&
+            (mutationUncertain || !remoteOK || !channelClosed || abandoned);
+        BOOL stateArmed = targetStable && (seeded || cleanupUncertain);
+        if (stateArmed) {
+            settings_spotlight_iconservices_store_armed(
+                host, pid, proc, task,
+                seeded && remoteOK && channelClosed && !abandoned);
+        }
+        success = seeded && remoteOK && targetStable &&
+                  channelClosed && !abandoned;
+        if (success) {
+            log_user("[OK][ICONSERVICES_LAB] Seeded candidate %s in %s (pid %d). Dismiss and reopen Spotlight, inspect the logged target/control, then run Verify + Restore.\n",
+                     themer_spotlight_iconservices_candidate_name(candidate),
+                     host.UTF8String,
+                     pid);
+        } else if (stateArmed) {
+            log_user("[ICONSERVICES_LAB] Candidate %s ended with an unhealthy or unverified control channel (seeded=%d result=%d). The run remains armed. Attempt targeted restore only if remote state is present; otherwise respring before another candidate.\n",
+                     themer_spotlight_iconservices_candidate_name(candidate),
+                     seeded,
+                     result);
+        } else {
+            settings_spotlight_iconservices_reset_local_state(NO);
+            log_user("[ICONSERVICES_LAB] Seed stopped result=%d candidate=%s remote=%d stable=%d closed=%d.\n",
+                     result,
+                     themer_spotlight_iconservices_candidate_name(candidate),
+                     remoteOK, targetStable, channelClosed);
+        }
+        cyanide_upload_log_milestone(success
+            ? @"spotlight-iconservices-seeded"
+            : @"spotlight-iconservices-seed-failed");
+        return success;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_verify_spotlight_iconservices_now(
+    ThemerSpotlightIconServicesVerifyResult *resultOut)
+{
+    if (resultOut) {
+        *resultOut = ThemerSpotlightIconServicesVerifyResultNoState;
+    }
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    if (![d boolForKey:kSettingsSpotlightIconServicesArmed]) {
+        log_user("[ICONSERVICES_LAB] No candidate is armed. Run Seed Selected Candidate first.\n");
+        return NO;
+    }
+    if (!settings_try_claim_actions_lock(
+            "Spotlight IconServices verify",
+            "[ICONSERVICES_LAB] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_LAB] Failed: kernel primitives were not acquired.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_LAB] No Spotlight UI host is running. Reopen Spotlight and retry Verify + Restore.\n");
+            return NO;
+        }
+
+        int expectedPID = (int)[d integerForKey:kSettingsSpotlightIconServicesTargetPID];
+        uint64_t expectedProc = settings_spotlight_iconservices_u64_default(
+            kSettingsSpotlightIconServicesTargetProc);
+        uint64_t expectedTask = settings_spotlight_iconservices_u64_default(
+            kSettingsSpotlightIconServicesTargetTask);
+        BOOL phaseOneChannelClean =
+            [d boolForKey:kSettingsSpotlightIconServicesChannelClean];
+        BOOL sameTarget = pid == expectedPID && proc == expectedProc &&
+                          task == expectedTask;
+        if (!sameTarget) {
+            BOOL stable = settings_spotlight_target_matches(
+                pid, proc, task, NULL, NULL);
+            BOOL abandoned = NO;
+            (void)settings_spotlight_iconservices_close_session(
+                session, stable, stable, &abandoned);
+            settings_spotlight_iconservices_reset_local_state(YES);
+            if (resultOut) {
+                *resultOut =
+                    ThemerSpotlightIconServicesVerifyResultHostStateMismatch;
+            }
+            log_user("[ICONSERVICES_LAB] Spotlight host identity changed since Phase 1. The old process state is gone; run Inspect Original Spotlight Image Bag again.\n");
+            return NO;
+        }
+
+        __block ThemerSpotlightIconServicesVerifyResult result =
+            ThemerSpotlightIconServicesVerifyResultNoState;
+        __block BOOL remoteOK = NO;
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(session, ^{
+                    uint64_t pool =
+                        themer_spotlight_remote_autorelease_pool_push();
+                    if (!pool) return;
+                    result =
+                        themer_spotlight_iconservices_verify_and_cleanup_in_session();
+                    if (remote_call_current_success()) {
+                        themer_spotlight_remote_autorelease_pool_pop(pool);
+                    }
+                    remoteOK = remote_call_current_success() ? YES : NO;
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[ICONSERVICES_LAB] verify remote-exception name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            remoteOK = NO;
+        }
+
+        uint64_t currentProc = 0;
+        uint64_t currentTask = 0;
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, &currentProc, &currentTask);
+        BOOL abandoned = NO;
+        BOOL channelClosed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        if (resultOut) *resultOut = result;
+        BOOL callCompleted = remoteOK && targetStable &&
+                             channelClosed && !abandoned;
+        BOOL missingRecoveryState = !phaseOneChannelClean &&
+            result == ThemerSpotlightIconServicesVerifyResultNoState;
+        BOOL cleanupRetryNeeded =
+            result == ThemerSpotlightIconServicesVerifyResultCleanupFailed ||
+            !callCompleted || missingRecoveryState;
+        if (!cleanupRetryNeeded) {
+            settings_spotlight_iconservices_reset_local_state(NO);
+        }
+        success = result ==
+                      ThemerSpotlightIconServicesVerifyResultPersistentHit &&
+                  callCompleted && phaseOneChannelClean;
+        if (success) {
+            log_user("[OK][ICONSERVICES_LAB] The IconServices entry persisted in a fresh session and stock restoration verified. Use the recorded visual observation to decide whether Spotlight consumed it.\n");
+        } else if (cleanupRetryNeeded) {
+            log_user("[ICONSERVICES_LAB] Verification or targeted restoration did not complete. The run remains armed and its recovery metadata was retained.\n");
+        } else {
+            log_user("[ICONSERVICES_LAB] Verification completed with result=%d; stock restoration completed.\n",
+                     result);
+        }
+        cyanide_upload_log_milestone(success
+            ? @"spotlight-iconservices-persistent-hit"
+            : cleanupRetryNeeded
+                ? @"spotlight-iconservices-cleanup-failed"
+                : @"spotlight-iconservices-stock-or-miss");
+        return success;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_restore_spotlight_iconservices_now(void)
+{
+    __sync_lock_test_and_set(&g_spotlight_recovery_host_retired, 0);
+    if (!settings_try_claim_actions_lock(
+            "Spotlight IconServices emergency restore",
+            "[ICONSERVICES_LAB] Another action is already running.")) {
+        return NO;
+    }
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!themer_spotlight_stock68_restore_interrupted_identity_retirement()) {
+            log_user("[ICONSERVICES_RECOVERY] interrupted identity retirement could not be restored exactly; recovery remains armed.\n");
+            return NO;
+        }
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        BOOL locallyArmed =
+            [d boolForKey:kSettingsSpotlightIconServicesArmed];
+        BOOL phaseOneChannelClean =
+            [d boolForKey:kSettingsSpotlightIconServicesChannelClean];
+        NSString *materializationStatus =
+            [d stringForKey:kSettingsSpotlightStock68Status] ?: @"idle";
+        BOOL materializationRecovery =
+            [materializationStatus isEqualToString:@"running"] ||
+            [materializationStatus isEqualToString:@"recovery-required"];
+        ThemerSpotlightStock68JournalSnapshot journal =
+            themer_spotlight_stock68_journal_snapshot();
+        BOOL unresolvedGeneration = journal.present;
+        BOOL generationRecovery = materializationRecovery || unresolvedGeneration;
+        NSString *savedMaterializationTarget =
+            [d stringForKey:kSettingsSpotlightStock68Target] ?: @"";
+        NSString *savedMaterializationFingerprint =
+            [d stringForKey:kSettingsSpotlightStock68Fingerprint] ?: @"";
+        int savedMaterializationPID =
+            (int)[d integerForKey:kSettingsSpotlightStock68PID];
+        uint64_t savedMaterializationProc =
+            settings_spotlight_iconservices_u64_default(
+                kSettingsSpotlightStock68Proc);
+        uint64_t savedMaterializationTask =
+            settings_spotlight_iconservices_u64_default(
+                kSettingsSpotlightStock68Task);
+        BOOL savedMaterializationOwnerKnown =
+            savedMaterializationPID > 0 && savedMaterializationProc != 0 &&
+            savedMaterializationTask != 0 &&
+            savedMaterializationProc != UINT64_MAX &&
+            savedMaterializationTask != UINT64_MAX &&
+            (savedMaterializationProc >> 48) == UINT16_MAX &&
+            (savedMaterializationTask >> 48) == UINT16_MAX;
+        BOOL journalSettingsIdentityBound = !journal.present ||
+            (journal.valid &&
+             savedMaterializationOwnerKnown &&
+             journal.pid == savedMaterializationPID &&
+             [savedMaterializationTarget isEqualToString:
+                 [NSString stringWithUTF8String:journal.targetBundle] ?: @""] &&
+             [savedMaterializationFingerprint isEqualToString:
+                 [NSString stringWithUTF8String:journal.themeFingerprint] ?: @""]);
+        BOOL pendingCleanup =
+            themer_spotlight_iconservices_has_pending_recovery();
+        log_user("[ICONSERVICES_LAB] Emergency begin themedArmed=%d "
+                 "materializationStatus=%s unresolvedGeneration=%d "
+                 "pendingCleanup=%d phaseOneChannelClean=%d journalClass=%d "
+                 "journalVersion=%d journalPid=%d journalTarget=%s "
+                 "journalFingerprint=%s issuedKnown=%d issued=%d\n",
+                 locallyArmed,
+                 materializationStatus.UTF8String ?: "idle",
+                 unresolvedGeneration,
+                 pendingCleanup,
+                 phaseOneChannelClean,
+                 journal.classification,
+                 journal.version,
+                 journal.pid,
+                 journal.targetBundle[0] ? journal.targetBundle : "-",
+                 journal.themeFingerprint[0] ? journal.themeFingerprint : "-",
+                 journal.issuedKnown,
+                 journal.issued);
+
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_LAB] Failed: kernel primitives were not acquired.\n");
+            return NO;
+        }
+
+        // Journal restoration performs privileged local file access.  Acquire
+        // that capability before opening a host or allowing any core cleanup
+        // routine to touch a cache/store journal.
+        if ((pendingCleanup || journal.storeRegistrationPresent) &&
+            !settings_ensure_spotlight_local_var_rw()) {
+            log_user("[ICONSERVICES_LAB] Emergency Restore cannot touch the "
+                     "durable cache/store journal without privileged "
+                     "/private/var access; all recovery metadata was retained.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_LAB] No Spotlight UI host is running. "
+                     "Open Spotlight and run Emergency Restore again; no "
+                     "durable cache/store journal was cleared.\n");
+            return NO;
+        }
+
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL themedOwnerMatches = NO;
+        BOOL materializationOwnerMatches = NO;
+        BOOL themedOwnerGone = YES;
+        BOOL materializationOwnerGone = YES;
+        if (locallyArmed) {
+            int expectedPID =
+                (int)[d integerForKey:kSettingsSpotlightIconServicesTargetPID];
+            uint64_t expectedProc = settings_spotlight_iconservices_u64_default(
+                kSettingsSpotlightIconServicesTargetProc);
+            uint64_t expectedTask = settings_spotlight_iconservices_u64_default(
+                kSettingsSpotlightIconServicesTargetTask);
+            themedOwnerMatches = pid == expectedPID && proc == expectedProc &&
+                                 task == expectedTask;
+            themedOwnerGone = settings_spotlight_owner_exit_proven(
+                expectedPID, expectedProc, expectedTask, NULL, NULL);
+            printf("[ICONSERVICES_LAB] emergency themed-owner "
+                   "matches=%d gone=%d expected=%d/0x%llx/0x%llx "
+                   "current=%d/0x%llx/0x%llx\n",
+                   themedOwnerMatches,
+                   themedOwnerGone,
+                   expectedPID,
+                   (unsigned long long)expectedProc,
+                   (unsigned long long)expectedTask,
+                   pid,
+                   (unsigned long long)proc,
+                   (unsigned long long)task);
+        }
+        if (generationRecovery) {
+            materializationOwnerMatches = savedMaterializationOwnerKnown &&
+                                          pid == savedMaterializationPID &&
+                                          proc == savedMaterializationProc &&
+                                          task == savedMaterializationTask;
+            materializationOwnerGone = savedMaterializationOwnerKnown &&
+                settings_spotlight_owner_exit_proven(
+                    savedMaterializationPID, savedMaterializationProc,
+                    savedMaterializationTask, NULL, NULL);
+            printf("[ICONSERVICES_LAB] emergency materialization-owner "
+                   "matches=%d gone=%d expected=%d/0x%llx/0x%llx "
+                   "current=%d/0x%llx/0x%llx\n",
+                   materializationOwnerMatches,
+                   materializationOwnerGone,
+                   savedMaterializationPID,
+                   (unsigned long long)savedMaterializationProc,
+                   (unsigned long long)savedMaterializationTask,
+                   pid,
+                   (unsigned long long)proc,
+                   (unsigned long long)task);
+        }
+
+        // A new host may be used for no-state journal cleanup only after the
+        // old owner has demonstrably exited.  Never infer this from a mere
+        // host-name match or clear the owner on an unresolved PID drift.
+        BOOL ownerExitProven = (!locallyArmed || themedOwnerGone) &&
+                               (!generationRecovery ||
+                                materializationOwnerGone);
+        // A durable journal without a persisted Settings owner cannot prove
+        // which old host incarnation owned its dictionary. Keep it intact
+        // until a future run has a valid PID/proc/task owner to compare.
+        BOOL noStateJournalOwnerExitProven =
+            (locallyArmed || generationRecovery) && ownerExitProven;
+        if (!targetStable ||
+            (journal.present && !journalSettingsIdentityBound) ||
+            ((locallyArmed && !themedOwnerMatches && !themedOwnerGone) ||
+             (generationRecovery && !materializationOwnerMatches &&
+              !materializationOwnerGone))) {
+            BOOL abandoned = NO;
+            (void)settings_spotlight_iconservices_close_session(
+                session, targetStable, targetStable, &abandoned);
+            log_user("[ICONSERVICES_LAB] Emergency Restore rejected: current "
+                     "Spotlight identity is unstable, the journal does not "
+                     "match its saved owner, or the recorded owner has not "
+                     "exited. Recovery metadata was retained.\n");
+            return NO;
+        }
+
+        __block BOOL restored = NO;
+        __block BOOL remoteStatePresent = NO;
+        __block BOOL remoteMaterializationStatePresent = NO;
+        __block BOOL remoteOK = NO;
+        __block BOOL generationRecoveryProven = !generationRecovery;
+        __block BOOL themedRecoveryAttempted = NO;
+        __block BOOL materializationRecoveryAttempted = NO;
+        __block BOOL storeRegistrationReady = NO;
+        __block BOOL generationAdoptionReady = NO;
+        __block BOOL generationEmptyFirstReady = NO;
+        __block BOOL liveOwnerRetirementDispatched = NO;
+        __block ThemerSpotlightStock68LiveOwnerRetirementResult
+            liveOwnerRetirementResult =
+                ThemerSpotlightStock68LiveOwnerRetirementRejected;
+        __block ThemerSpotlightStock68LiveOwnerRetirementReport
+            liveOwnerRetirementReport = {0};
+        __block RemoteCallTerminalDispatchReport terminalDispatchReport = {0};
+        __block ThemerSpotlightStock68RecoveryInspectionResult
+            generationResolutionResult =
+                ThemerSpotlightStock68RecoveryInspectionRejected;
+        __block ThemerSpotlightStock68RecoveryInspectionReport
+            generationResolutionReport = {0};
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(session, ^{
+                    uint64_t pool =
+                        themer_spotlight_remote_autorelease_pool_push();
+                    if (!pool) return;
+                    remoteStatePresent =
+                        themer_spotlight_iconservices_has_state_in_session()
+                            ? YES : NO;
+                    remoteMaterializationStatePresent =
+                        themer_spotlight_stock68_materialization_has_state_in_session()
+                            ? YES : NO;
+                    if (!remote_call_current_success()) return;
+                    BOOL materializationRestored = !generationRecovery &&
+                        !remoteMaterializationStatePresent;
+                    if (journal.storeRegistrationPresent) {
+                        materializationRecoveryAttempted = YES;
+                        storeRegistrationReady = journal.storeRegistrationValid && !locallyArmed &&
+                            !remoteStatePresent && !pendingCleanup &&
+                            themer_spotlight_stock68_recover_store_registration_in_session(materializationOwnerGone,
+                                savedMaterializationPID, savedMaterializationProc, savedMaterializationTask);
+                        materializationRestored = storeRegistrationReady;
+                    } else if (generationRecovery && remoteMaterializationStatePresent) {
+                        materializationRecoveryAttempted = YES;
+                        BOOL retirementCandidate = materializationOwnerMatches &&
+                            !locallyArmed && !remoteStatePresent &&
+                            !pendingCleanup && journal.classification ==
+                                ThemerSpotlightStock68JournalDispatchPossible;
+                        if (retirementCandidate) {
+                            liveOwnerRetirementResult =
+                                themer_spotlight_stock68_prepare_live_owner_retirement_in_session(
+                                    &journal,
+                                    savedMaterializationPID,
+                                    savedMaterializationProc,
+                                    savedMaterializationTask,
+                                    &liveOwnerRetirementReport);
+                            materializationRestored =
+                                liveOwnerRetirementResult ==
+                                    ThemerSpotlightStock68LiveOwnerRetirementRequired;
+                            if (materializationRestored &&
+                                remote_call_current_success()) {
+                                // Finish all Objective-C recovery work before
+                                // the terminal one-way call. No remote call is
+                                // permitted after this dispatch.
+                                themer_spotlight_remote_autorelease_pool_pop(pool);
+                                pool = 0;
+                                RemoteCallTerminalDispatchStatus dispatchStatus =
+                                    remote_call_dispatch_self_sigkill(
+                                        savedMaterializationPID,
+                                        savedMaterializationProc,
+                                        savedMaterializationTask,
+                                        &terminalDispatchReport);
+                                liveOwnerRetirementDispatched =
+                                    dispatchStatus ==
+                                        RemoteCallTerminalDispatchPossible;
+                                printf("[ICONSERVICES_RECOVERY] retire-dispatch "
+                                       "pid=%d proc=0x%llx task=0x%llx "
+                                       "status=%d session=%d kernel=%d "
+                                       "symbol=%d dispatched=%d "
+                                       "exitProven=0 reason=%s\n",
+                                       savedMaterializationPID,
+                                       (unsigned long long)savedMaterializationProc,
+                                       (unsigned long long)savedMaterializationTask,
+                                       dispatchStatus,
+                                       terminalDispatchReport.sessionBound,
+                                       terminalDispatchReport.liveKernelIdentityBound,
+                                       terminalDispatchReport.killSymbolResolved,
+                                       terminalDispatchReport.oneWayDispatched,
+                                       terminalDispatchReport.reason);
+                                remoteOK = liveOwnerRetirementDispatched;
+                                return;
+                            }
+                        } else {
+                            materializationRestored =
+                                themer_spotlight_stock68_materialization_emergency_restore_in_session()
+                                    ? YES : NO;
+                        }
+                    } else if (generationRecovery && journal.present) {
+                        materializationRecoveryAttempted = YES;
+                        if (journal.classification ==
+                                ThemerSpotlightStock68JournalLegacyIssuedAmbiguous ||
+                            journal.classification ==
+                                ThemerSpotlightStock68JournalDispatchPossible) {
+                            // The interrupted request may already have
+                            // produced the intended genuine stock68 record.
+                            // Resolve it forward only after the core repeats
+                            // the complete topology, identity, file,
+                            // reconstruction, and store-unit proof.  The
+                            // issued journal remains armed until this session
+                            // closes cleanly below.
+                            generationResolutionResult =
+                                themer_spotlight_stock68_resolve_issued_generation_in_session(
+                                    &journal,
+                                    savedMaterializationPID,
+                                    savedMaterializationProc,
+                                    savedMaterializationTask,
+                                    ownerExitProven,
+                                    &generationResolutionReport);
+                            generationAdoptionReady =
+                                generationResolutionResult ==
+                                    ThemerSpotlightStock68RecoveryInspectionCandidateValidated &&
+                                generationResolutionReport.adoptionEligible &&
+                                generationResolutionReport.adoptionPersisted;
+                            generationEmptyFirstReady =
+                                generationResolutionResult ==
+                                    ThemerSpotlightStock68RecoveryInspectionNoCandidate &&
+                                generationResolutionReport.topologyExactlyEmpty;
+                            materializationRestored =
+                                generationAdoptionReady;
+                        } else {
+                            // A no-state unissued journal may be cleared only
+                            // after the core repeats the complete Settings
+                            // owner and healthy-absence proof.
+                            materializationRestored =
+                                journalSettingsIdentityBound &&
+                                themer_spotlight_stock68_recover_no_state_unissued_in_session(
+                                    savedMaterializationTarget.UTF8String,
+                                    savedMaterializationFingerprint.UTF8String,
+                                    savedMaterializationPID,
+                                    savedMaterializationProc,
+                                    savedMaterializationTask,
+                                    ownerExitProven,
+                                    remote_call_current_success());
+                        }
+                    } else if (generationRecovery) {
+                        // A Settings recovery phase without a durable journal
+                        // still requires the recorded owner to have exited.
+                        materializationRestored = ownerExitProven;
+                    }
+                    generationRecoveryProven = !generationRecovery ||
+                        (materializationRestored &&
+                         (storeRegistrationReady || !themer_spotlight_stock68_has_unresolved_generation()));
+
+                    // The IconServices emergency route also owns the
+                    // no-state cache/store journal path.  Run it for a live
+                    // themed state, or for a durable journal only after the
+                    // old owner's PID/proc/task exit is proven.  A live
+                    // materialization dictionary is restored first; if that
+                    // proof fails, do not advance to file cleanup.
+                    BOOL generationDictionaryUnknown = generationRecovery &&
+                                                       !generationRecoveryProven;
+                    BOOL themedRestored = !locallyArmed && !remoteStatePresent &&
+                                          !pendingCleanup &&
+                                          !generationDictionaryUnknown;
+                    BOOL themedCleanupAllowed = !generationDictionaryUnknown &&
+                        materializationRestored &&
+                        (!pendingCleanup ? YES : noStateJournalOwnerExitProven);
+                    if ((remoteStatePresent || pendingCleanup) &&
+                        themedCleanupAllowed) {
+                        themedRecoveryAttempted = YES;
+                        themedRestored =
+                            themer_spotlight_iconservices_emergency_restore_in_session()
+                                ? YES : NO;
+                    } else if (locallyArmed) {
+                        // A missing state bundle is process-resident
+                        // uncertainty. It is resolved only by proving the old
+                        // owner exited and then closing this healthy session.
+                        themedRestored = ownerExitProven &&
+                                          materializationRestored;
+                    }
+                    restored = themedRestored && materializationRestored;
+                    if (remote_call_current_success()) {
+                        themer_spotlight_remote_autorelease_pool_pop(pool);
+                    }
+                    remoteOK = remote_call_current_success() ? YES : NO;
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[ICONSERVICES_LAB] restore remote-exception name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            remoteOK = NO;
+        }
+        if (liveOwnerRetirementDispatched) {
+            uint64_t retirementStartUS = settings_now_us();
+            uint64_t observedProc = 0;
+            uint64_t observedTask = 0;
+            int consecutiveExitProofs = 0;
+            BOOL exitProven = NO;
+            for (int attempt = 0; attempt < 100; attempt++) {
+                if (!kexploit_krw_ready()) break;
+                BOOL sample = settings_spotlight_owner_exit_proven(
+                    savedMaterializationPID,
+                    savedMaterializationProc,
+                    savedMaterializationTask,
+                    &observedProc,
+                    &observedTask);
+                consecutiveExitProofs = sample
+                    ? consecutiveExitProofs + 1 : 0;
+                if (consecutiveExitProofs >= 2) {
+                    exitProven = YES;
+                    break;
+                }
+                usleep(100000);
+            }
+            errno = 0;
+            int absenceProbe = kill(savedMaterializationPID, 0);
+            int absenceErrno = errno;
+            const char *proofReason = exitProven
+                ? (!observedProc ? "pid-absent" :
+                   observedProc != savedMaterializationProc
+                       ? "proc-changed" : "task-changed")
+                : "exit-unproven";
+            // A terminal call forbids any ordinary RC teardown. On proven
+            // death this reclaims local ports without touching the dead task.
+            // On uncertainty it still prevents a destructor from issuing new
+            // calls into a possibly dying owner; all durable barriers remain.
+            @synchronized (settings_rc_lock()) {
+                [session abandonRemoteCall];
+            }
+            printf("[ICONSERVICES_RECOVERY] retire-exit pid=%d "
+                   "expectedProc=0x%llx expectedTask=0x%llx "
+                   "observedProc=0x%llx observedTask=0x%llx "
+                   "probe=%d errno=%d elapsed=%llums proofs=%d "
+                   "exitProven=%d reason=%s journalRetained=%d\n",
+                   savedMaterializationPID,
+                   (unsigned long long)savedMaterializationProc,
+                   (unsigned long long)savedMaterializationTask,
+                   (unsigned long long)observedProc,
+                   (unsigned long long)observedTask,
+                   absenceProbe, absenceErrno,
+                   (unsigned long long)((settings_now_us() -
+                                          retirementStartUS) / 1000ULL),
+                   consecutiveExitProofs, exitProven, proofReason,
+                   themer_spotlight_stock68_has_unresolved_generation());
+            if (exitProven) {
+                __sync_lock_test_and_set(
+                    &g_spotlight_recovery_host_retired, 1);
+                [d setObject:@"recovery-required"
+                      forKey:kSettingsSpotlightStock68Status];
+                (void)[d synchronize];
+                log_user("[ICONSERVICES_RECOVERY] replacement-open "
+                         "oldExitProven=1 awaiting-user-open=1. The exact "
+                         "recorded Spotlight host was retired; open "
+                         "Spotlight without searching for the target and "
+                         "run Emergency Restore again. The journal remains "
+                         "armed.\n");
+            } else {
+                log_user("[ICONSERVICES_RECOVERY] Spotlight owner terminal "
+                         "dispatch was possible, but exact exit was not "
+                         "proven. Recovery remains armed; do not materialize.\n");
+            }
+            return NO;
+        }
+        targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL closed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        if (journal.storeRegistrationPresent) {
+            BOOL storeFinalized = storeRegistrationReady &&
+                themer_spotlight_stock68_finalize_store_registration_after_clean_close(
+                    remoteOK && targetStable && closed && !abandoned, pid, proc, task);
+            generationRecoveryProven = storeFinalized;
+            restored = restored && storeFinalized;
+            log_user("[ICONSERVICES_RECOVERY] store-registration cleanClose=%d cleanup=%d finalized=%d journalPresent=%d\n",
+                remoteOK && targetStable && closed && !abandoned, storeRegistrationReady,
+                storeFinalized, themer_spotlight_stock68_has_unresolved_generation());
+        }
+        BOOL generationAdopted = NO;
+        BOOL emptyIssuedRetired = NO;
+        __block ThemerSpotlightStock68RecoveryInspectionReport
+            secondEmptyReport = {0};
+        if (generationAdoptionReady && remoteOK && targetStable && closed &&
+            !abandoned) {
+            generationAdopted =
+                themer_spotlight_stock68_finalize_resolved_generation_after_clean_close(
+                    &journal, pid);
+            generationRecoveryProven = generationAdopted;
+            if (generationAdopted && !locallyArmed &&
+                !remoteStatePresent && !pendingCleanup) {
+                // The remote phase intentionally treated the still-armed
+                // issued journal as unresolved.  A clean close followed by
+                // the exact finalizer is the last recovery step and now
+                // completes that branch.
+                restored = YES;
+            } else if (!generationAdopted) {
+                restored = NO;
+            }
+            log_user("[ICONSERVICES_RECOVERY] emergency-forward-finalize "
+                     "result=%d eligible=%d persisted=%d currentPid=%d "
+                     "cleanClose=1 finalized=%d journalPresent=%d\n",
+                     generationResolutionResult,
+                     generationResolutionReport.adoptionEligible,
+                     generationResolutionReport.adoptionPersisted,
+                     pid,
+                     generationAdopted,
+                     themer_spotlight_stock68_has_unresolved_generation());
+        }
+        if (generationEmptyFirstReady && remoteOK && targetStable && closed &&
+            !abandoned && !locallyArmed && !pendingCleanup) {
+            // The first NoCandidate observation is never sufficient. Open an
+            // independent RemoteCall session, require the exact same live
+            // host identity and a second complete empty topology, close that
+            // session, and only then present both reports to the local
+            // journal finalizer.
+            NSString *secondHost = nil;
+            int secondPID = 0;
+            uint64_t secondProc = 0;
+            uint64_t secondTask = 0;
+            RemoteCallSession *secondSession =
+                settings_open_spotlight_host_session(
+                    &secondHost, &secondPID, &secondProc, &secondTask);
+            BOOL secondSameTarget = secondSession && secondPID == pid &&
+                secondProc == proc && secondTask == task &&
+                settings_spotlight_target_matches(
+                    secondPID, secondProc, secondTask, NULL, NULL);
+            __block BOOL secondRemoteOK = NO;
+            __block ThemerSpotlightStock68RecoveryInspectionResult
+                secondResult =
+                    ThemerSpotlightStock68RecoveryInspectionTransportFailed;
+            if (secondSameTarget) {
+                @try {
+                    @synchronized (settings_rc_lock()) {
+                        remote_call_with_session(secondSession, ^{
+                            uint64_t pool =
+                                themer_spotlight_remote_autorelease_pool_push();
+                            if (!pool) return;
+                            secondResult =
+                                themer_spotlight_stock68_inspect_recovery_in_session(
+                                    &journal,
+                                    savedMaterializationPID,
+                                    savedMaterializationProc,
+                                    savedMaterializationTask,
+                                    ownerExitProven,
+                                    &secondEmptyReport);
+                            if (remote_call_current_success()) {
+                                themer_spotlight_remote_autorelease_pool_pop(pool);
+                            }
+                            secondRemoteOK =
+                                remote_call_current_success() ? YES : NO;
+                        });
+                    }
+                } @catch (NSException *exception) {
+                    log_user("[ICONSERVICES_RECOVERY] empty-second-session "
+                             "exception name=%s reason=%s; journal retained.\n",
+                             exception.name.UTF8String ?: "?",
+                             exception.reason.UTF8String ?: "?");
+                    secondRemoteOK = NO;
+                }
+            }
+            BOOL secondStable = secondSameTarget &&
+                settings_spotlight_target_matches(
+                    secondPID, secondProc, secondTask, NULL, NULL);
+            BOOL secondAbandoned = NO;
+            BOOL secondClosed = secondSession &&
+                settings_spotlight_iconservices_close_session(
+                    secondSession, secondRemoteOK, secondStable,
+                    &secondAbandoned);
+            BOOL reportsMatch = secondResult ==
+                    ThemerSpotlightStock68RecoveryInspectionNoCandidate &&
+                themer_spotlight_stock68_empty_recovery_reports_match(
+                    &journal, &generationResolutionReport,
+                    &secondEmptyReport);
+            // A clean close cannot stand in for a fresh process/defaults
+            // identity check immediately before the local durable mutation.
+            BOOL finalOwnerStable = settings_spotlight_target_matches(
+                pid, proc, task, NULL, NULL) &&
+                [d integerForKey:kSettingsSpotlightStock68PID] == savedMaterializationPID &&
+                settings_spotlight_iconservices_u64_default(kSettingsSpotlightStock68Proc) == savedMaterializationProc &&
+                settings_spotlight_iconservices_u64_default(kSettingsSpotlightStock68Task) == savedMaterializationTask &&
+                [[d stringForKey:kSettingsSpotlightStock68Target] isEqualToString:savedMaterializationTarget] &&
+                [[d stringForKey:kSettingsSpotlightStock68Fingerprint] isEqualToString:savedMaterializationFingerprint];
+            if (secondRemoteOK && secondStable && secondClosed &&
+                !secondAbandoned && reportsMatch && finalOwnerStable) {
+                emptyIssuedRetired =
+                    themer_spotlight_stock68_finalize_empty_issued_after_clean_sessions(
+                        &journal, &generationResolutionReport,
+                        &secondEmptyReport, pid);
+            }
+            generationRecoveryProven = emptyIssuedRetired;
+            restored = emptyIssuedRetired;
+            log_user("[ICONSERVICES_RECOVERY] empty-two-session-finalize "
+                     "firstEmpty=%d secondResult=%d secondEmpty=%d "
+                     "sameTarget=%d remote=%d stable=%d closed=%d "
+                     "abandoned=%d reportsMatch=%d retired=%d "
+                     "journalPresent=%d\n",
+                     generationResolutionReport.topologyExactlyEmpty,
+                     secondResult,
+                     secondEmptyReport.topologyExactlyEmpty,
+                     secondSameTarget,
+                     secondRemoteOK,
+                     secondStable,
+                     secondClosed,
+                     secondAbandoned,
+                     reportsMatch,
+                     emptyIssuedRetired,
+                     themer_spotlight_stock68_has_unresolved_generation());
+            remoteOK = remoteOK && secondRemoteOK;
+            targetStable = targetStable && secondStable;
+            closed = closed && secondClosed;
+            abandoned = abandoned || secondAbandoned;
+        }
+        BOOL durableRecoveryClear =
+            !themer_spotlight_stock68_has_unresolved_generation() &&
+            !themer_spotlight_iconservices_has_pending_recovery();
+        BOOL unexpectedRemoteMaterializationState =
+            remoteMaterializationStatePresent && !generationRecovery;
+        if (unexpectedRemoteMaterializationState) {
+            [d setObject:@"recovery-required"
+                  forKey:kSettingsSpotlightStock68Status];
+            (void)[d synchronize];
+        }
+        success = restored && generationRecoveryProven && remoteOK &&
+                  targetStable && closed && !abandoned &&
+                  durableRecoveryClear &&
+                  (!locallyArmed || ownerExitProven || themedRecoveryAttempted) &&
+                  (!generationRecovery || ownerExitProven ||
+                   materializationRecoveryAttempted);
+        if (success) {
+            settings_spotlight_iconservices_reset_local_state(NO);
+            if (generationAdopted) {
+                [d setObject:@"materialized"
+                      forKey:kSettingsSpotlightStock68Status];
+                [d setInteger:pid forKey:kSettingsSpotlightStock68PID];
+                [d setObject:@(proc) forKey:kSettingsSpotlightStock68Proc];
+                [d setObject:@(task) forKey:kSettingsSpotlightStock68Task];
+                [d setObject:host ?: @""
+                      forKey:kSettingsSpotlightStock68Host];
+                (void)[d synchronize];
+                log_user("[OK][ICONSERVICES_RECOVERY] Emergency Restore "
+                         "proved and adopted the interrupted genuine stock68 "
+                         "result after a clean channel close. Run Verify "
+                         "Materialized Stock 68 next; no generation request "
+                         "was issued during recovery.\n");
+            } else {
+                settings_spotlight_stock68_clear_local_state();
+                log_user(emptyIssuedRetired
+                    ? "[OK][ICONSERVICES_RECOVERY] Emergency Restore retired "
+                      "the dead-host issued dispatch barrier after two "
+                      "independent exact-empty topology proofs and clean "
+                      "channel closes. Materialize is available again.\n"
+                    : "[OK][ICONSERVICES_LAB] Targeted stock/materialization "
+                      "restoration completed after verified dictionary/process "
+                      "cleanup and a clean control-channel close.\n");
+            }
+            if (journal.classification ==
+                    ThemerSpotlightStock68JournalNoDispatchProven) {
+                log_user("[ICONSERVICES_MATERIALIZE] No-dispatch recovery "
+                         "cleared its transaction journal; the per-PID guard "
+                         "was retained and a fresh Spotlight host is required.\n");
+            }
+        } else if (unexpectedRemoteMaterializationState) {
+            log_user("[ICONSERVICES_LAB] Emergency Restore blocked: a remote "
+                     "materialization dictionary exists without a saved local "
+                     "owner or journal. It was not altered, and future work is "
+                     "blocked until its provenance can be recovered.\n");
+        } else if (generationRecovery && !generationRecoveryProven) {
+            log_user("[ICONSERVICES_LAB] Emergency Restore failed: the durable "
+                     "generation transaction could not be proven safe to clear. "
+                     "Store recovery is unproven; all owners and journals were "
+                     "retained.\n");
+        } else if (pendingCleanup && !themedRecoveryAttempted) {
+            log_user("[ICONSERVICES_LAB] Emergency Restore failed: the "
+                     "pending cache/store journal was not presented to the "
+                     "IconServices emergency route. All recovery metadata was "
+                     "retained.\n");
+        } else if (!remoteOK || !targetStable || !closed || abandoned) {
+            log_user("[ICONSERVICES_LAB] Emergency Restore did not reach a "
+                     "clean, stable channel close. Recovery metadata was "
+                     "retained.\n");
+        } else {
+            log_user("[ICONSERVICES_LAB] Targeted restoration did not verify. "
+                     "Keep the recorded owner and recovery metadata for the "
+                     "next Emergency Restore.\n");
+        }
+        printf("[ICONSERVICES_LAB] emergency completion remoteThemed=%d "
+               "remoteMaterialization=%d themedAttempted=%d "
+               "materializationAttempted=%d ownerExitProven=%d "
+               "generationProven=%d restored=%d durableClear=%d remote=%d "
+               "stable=%d closed=%d abandoned=%d adoptionReady=%d "
+               "adoptionPersisted=%d adopted=%d emptyFirst=%d "
+               "emptyRetired=%d resolution=%d\n",
+               remoteStatePresent,
+               remoteMaterializationStatePresent,
+               themedRecoveryAttempted,
+               materializationRecoveryAttempted,
+               ownerExitProven,
+               generationRecoveryProven,
+               restored,
+               durableRecoveryClear,
+               remoteOK,
+               targetStable,
+               closed,
+               abandoned,
+               generationAdoptionReady,
+               generationResolutionReport.adoptionPersisted,
+               generationAdopted,
+               generationEmptyFirstReady,
+               emptyIssuedRetired,
+               generationResolutionResult);
+        return success;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_inspect_spotlight_generation_recovery_now(
+    ThemerSpotlightStock68RecoveryInspectionResult *resultOut,
+    ThemerSpotlightStock68RecoveryInspectionReport *reportOut)
+{
+    if (resultOut) {
+        *resultOut = ThemerSpotlightStock68RecoveryInspectionRejected;
+    }
+    if (reportOut) memset(reportOut, 0, sizeof(*reportOut));
+    if (!settings_try_claim_actions_lock(
+            "Spotlight issued-generation recovery inspection",
+            "[ICONSERVICES_RECOVERY] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL completed = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+        ThemerSpotlightStock68JournalSnapshot journal =
+            themer_spotlight_stock68_journal_snapshot();
+        int expectedPID =
+            (int)[d integerForKey:kSettingsSpotlightStock68PID];
+        uint64_t expectedProc = settings_spotlight_iconservices_u64_default(
+            kSettingsSpotlightStock68Proc);
+        uint64_t expectedTask = settings_spotlight_iconservices_u64_default(
+            kSettingsSpotlightStock68Task);
+        NSString *expectedTarget =
+            [d stringForKey:kSettingsSpotlightStock68Target] ?: @"";
+        NSString *expectedFingerprint =
+            [d stringForKey:kSettingsSpotlightStock68Fingerprint] ?: @"";
+        NSString *journalTarget = journal.targetBundle[0]
+            ? [NSString stringWithUTF8String:journal.targetBundle] : @"";
+        NSString *journalFingerprint = journal.themeFingerprint[0]
+            ? [NSString stringWithUTF8String:journal.themeFingerprint] : @"";
+        BOOL supportedJournal = journal.valid && journal.present &&
+            (journal.classification ==
+                 ThemerSpotlightStock68JournalLegacyIssuedAmbiguous ||
+             journal.classification ==
+                 ThemerSpotlightStock68JournalDispatchPossible);
+        BOOL ownerKnown = expectedPID > 0 && expectedProc && expectedTask &&
+            expectedProc != UINT64_MAX && expectedTask != UINT64_MAX &&
+            (expectedProc >> 48) == UINT16_MAX &&
+            (expectedTask >> 48) == UINT16_MAX;
+        BOOL identityBound = supportedJournal && ownerKnown &&
+            journal.pid == expectedPID &&
+            [expectedTarget isEqualToString:journalTarget ?: @""] &&
+            [expectedFingerprint isEqualToString:journalFingerprint ?: @""];
+        log_user("[ICONSERVICES_RECOVERY] settings-preflight class=%d "
+                 "version=%d issued=%d journalPid=%d expectedPid=%d "
+                 "ownerKnown=%d identityBound=%d target=%s fingerprint=%s\n",
+                 journal.classification,
+                 journal.version,
+                 journal.issued,
+                 journal.pid,
+                 expectedPID,
+                 ownerKnown,
+                 identityBound,
+                 journal.targetBundle[0] ? journal.targetBundle : "-",
+                 journal.themeFingerprint[0] ? journal.themeFingerprint : "-");
+        if (!identityBound) {
+            log_user("[ICONSERVICES_RECOVERY] Inspection rejected: the issued "
+                     "journal is invalid, unsupported, or does not match the "
+                     "saved PID/target/fingerprint owner. Nothing was changed.\n");
+            return NO;
+        }
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_RECOVERY] Inspection rejected: kernel "
+                     "process identity access is unavailable. Nothing was changed.\n");
+            return NO;
+        }
+        if (!settings_ensure_spotlight_local_var_rw()) {
+            log_user("[ICONSERVICES_RECOVERY] Inspection rejected: read access "
+                     "to the IconServices cache file is unavailable. Nothing was changed.\n");
+            return NO;
+        }
+        BOOL ownerGone = settings_spotlight_owner_exit_proven(
+            expectedPID, expectedProc, expectedTask, NULL, NULL);
+        if (!ownerGone) {
+            log_user("[ICONSERVICES_RECOVERY] Inspection rejected: exit of the "
+                     "recorded Spotlight owner was not proven. Nothing was changed.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_RECOVERY] No Spotlight UI host is running. "
+                     "Open Spotlight without searching for the target, then run "
+                     "the read-only inspection again.\n");
+            return NO;
+        }
+
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        __block ThemerSpotlightStock68RecoveryInspectionResult result =
+            ThemerSpotlightStock68RecoveryInspectionTransportFailed;
+        __block ThemerSpotlightStock68RecoveryInspectionReport report = {0};
+        __block BOOL remoteOK = NO;
+        if (targetStable) {
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(session, ^{
+                        uint64_t pool =
+                            themer_spotlight_remote_autorelease_pool_push();
+                        if (!pool) return;
+                        result =
+                            themer_spotlight_stock68_inspect_recovery_in_session(
+                                &journal, expectedPID, expectedProc,
+                                expectedTask, ownerGone, &report);
+                        if (remote_call_current_success()) {
+                            themer_spotlight_remote_autorelease_pool_pop(pool);
+                        }
+                        remoteOK = remote_call_current_success() ? YES : NO;
+                    });
+                }
+            } @catch (NSException *exception) {
+                log_user("[ICONSERVICES_RECOVERY] remote-exception name=%s "
+                         "reason=%s; journal retained.\n",
+                         exception.name.UTF8String ?: "?",
+                         exception.reason.UTF8String ?: "?");
+                remoteOK = NO;
+            }
+        }
+        targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL closed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        completed = remoteOK && targetStable && closed && !abandoned &&
+            result != ThemerSpotlightStock68RecoveryInspectionRejected &&
+            result != ThemerSpotlightStock68RecoveryInspectionTransportFailed;
+        // This is eligibility of this one clean observation only. Emergency
+        // Restore collects a second independent session before any retirement.
+        BOOL absenceSessionEligible = completed &&
+            themer_spotlight_stock68_empty_recovery_reports_match(&journal, &report, &report);
+        BOOL pendingAbsent = !themer_spotlight_iconservices_has_pending_recovery();
+        log_user("[ICONSERVICES_RECOVERY] read-only-absence sessionEligible=%d "
+                 "identityClass=%d certificatePresent=%d pendingAbsent=%d "
+                 "requiresTwoEmergencySessions=1 journalRetained=1\n",
+                 absenceSessionEligible && pendingAbsent, report.emptyIdentity.identity.classification,
+                 report.emptyIdentity.identity.certificatePresent, pendingAbsent);
+        if (resultOut) *resultOut = result;
+        if (reportOut) *reportOut = report;
+        log_user("[ICONSERVICES_RECOVERY] settings-summary result=%d "
+                 "completed=%d ownerGone=%d currentPid=%d candidateCount=%d "
+                 "candidateIdentity=%d transactionOwnership=%d remote=%d "
+                 "stable=%d closed=%d abandoned=%d reason=%s journalRetained=1\n",
+                 result,
+                 completed,
+                 ownerGone,
+                 report.currentPID,
+                 report.candidateCount,
+                 report.candidateIdentityProven,
+                 report.transactionOwnershipProven,
+                 remoteOK,
+                 targetStable,
+                 closed,
+                 abandoned,
+                 report.reason[0] ? report.reason : "-" );
+        return completed;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+// A one-shot, metadata-only inventory.  Recovery state does not block this
+// action because it does not generate, materialize, register, mutate, replace
+// recovery ownership, persist a status, select a target, or access cache
+// files.  The remote core permits only ABI-gated getter calls followed by
+// Objective-C runtime C metadata enumeration.
+static BOOL settings_inspect_spotlight_store_surface_now(
+    ThemerSpotlightStoreSurfaceInventoryReport *reportOut)
+{
+    if (reportOut) memset(reportOut, 0, sizeof(*reportOut));
+    if (!settings_try_claim_actions_lock(
+            "Spotlight IconServices store registration-surface inventory",
+            "[ICONSERVICES_STORE_SURFACE] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL completed = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        log_user("[ICONSERVICES_STORE_SURFACE] recovery-bypass allowed=1 "
+                 "readOnly=1 generated=0 mutations=0. Existing recovery "
+                 "owners and journals will not be read, changed, or cleared.\n");
+        // Establish only the existing RemoteCall transport.
+        // This inventory deliberately does not request sandbox/file access;
+        // the remote core remains IconServices metadata-only.
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_STORE_SURFACE] Inspection rejected: "
+                     "RemoteCall kernel primitives were not acquired. "
+                     "No IconServices state was changed.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_STORE_SURFACE] No Spotlight UI host is "
+                     "running. Open Spotlight once, then run the read-only "
+                     "store registration-surface inspection again.\n");
+            return NO;
+        }
+
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        __block ThemerSpotlightStoreSurfaceInventoryResult result =
+            ThemerSpotlightStoreSurfaceInventoryTransportFailed;
+        __block ThemerSpotlightStoreSurfaceInventoryReport report = {0};
+        __block BOOL remoteOK = NO;
+        if (targetStable) {
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(session, ^{
+                        uint64_t pool =
+                            themer_spotlight_remote_autorelease_pool_push();
+                        if (!pool) return;
+                        result =
+                            themer_spotlight_iconservices_inspect_store_surface_in_session(
+                                &report);
+                        if (remote_call_current_success()) {
+                            themer_spotlight_remote_autorelease_pool_pop(pool);
+                        }
+                        remoteOK = remote_call_current_success() ? YES : NO;
+                    });
+                }
+            } @catch (NSException *exception) {
+                log_user("[ICONSERVICES_STORE_SURFACE] remote-exception "
+                         "name=%s reason=%s; no recovery state was changed.\n",
+                         exception.name.UTF8String ?: "?",
+                         exception.reason.UTF8String ?: "?");
+                remoteOK = NO;
+            }
+        }
+        targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL closed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        completed = result == ThemerSpotlightStoreSurfaceInventoryComplete &&
+            remoteOK && targetStable && closed && !abandoned;
+        if (reportOut) *reportOut = report;
+        log_user("[ICONSERVICES_STORE_SURFACE] settings-summary result=%d "
+                 "completed=%d host=%s pid=%d classes=%d methods=%d "
+                 "candidates=%d listTruncated=%d candidateTruncated=%d "
+                 "overflow=%d remote=%d stable=%d closed=%d abandoned=%d "
+                 "reason=%s generated=0 mutations=0\n",
+                 result, completed, host.UTF8String ?: "-", pid,
+                 report.classesScanned, report.methodsScanned,
+                 report.candidateCount, report.methodListTruncated,
+                 report.candidateTruncated, report.overflowDetected,
+                 remoteOK, targetStable, closed, abandoned,
+                 report.reason[0] ? report.reason : "-");
+        return completed;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_inspect_spotlight_live_store_state_now(
+    ThemerSpotlightStoreSurfaceInventoryReport *reportOut)
+{
+    if (reportOut) memset(reportOut, 0, sizeof(*reportOut));
+    if (!settings_try_claim_actions_lock(
+            "Spotlight IconServices live store-state inventory",
+            "[ICONSERVICES_STORE_STATE] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL completed = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        log_user("[ICONSERVICES_STORE_STATE] recovery-bypass allowed=1 "
+                 "readOnly=1 generated=0 mutations=0. Existing recovery "
+                 "owners and journals will not be read, changed, or cleared.\n");
+        // Establish only the existing RemoteCall transport.
+        // Remote stat uses the observed host namespace; no sandbox access
+        // is requested and no file contents are opened.
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_STORE_STATE] Inspection rejected: "
+                     "RemoteCall kernel primitives were not acquired. "
+                     "No IconServices state was changed.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_STORE_STATE] No Spotlight UI host is "
+                     "running. Open Spotlight once, then run the read-only "
+                     "live store-state inspection again.\n");
+            return NO;
+        }
+
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        __block ThemerSpotlightStoreSurfaceInventoryResult result =
+            ThemerSpotlightStoreSurfaceInventoryTransportFailed;
+        __block ThemerSpotlightStoreSurfaceInventoryReport report = {0};
+        __block BOOL remoteOK = NO;
+        if (targetStable) {
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(session, ^{
+                        uint64_t pool =
+                            themer_spotlight_remote_autorelease_pool_push();
+                        if (!pool) return;
+                        result =
+                            themer_spotlight_iconservices_inspect_live_store_state_in_session(
+                                &report);
+                        if (remote_call_current_success()) {
+                            themer_spotlight_remote_autorelease_pool_pop(pool);
+                        }
+                        remoteOK = remote_call_current_success() ? YES : NO;
+                    });
+                }
+            } @catch (NSException *exception) {
+                log_user("[ICONSERVICES_STORE_STATE] remote-exception "
+                         "name=%s reason=%s; no recovery state was changed.\n",
+                         exception.name.UTF8String ?: "?",
+                         exception.reason.UTF8String ?: "?");
+                remoteOK = NO;
+            }
+        }
+        targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL closed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        completed = result == ThemerSpotlightStoreSurfaceInventoryComplete &&
+            remoteOK && targetStable && closed && !abandoned;
+        if (reportOut) *reportOut = report;
+        log_user("[ICONSERVICES_STORE_STATE] settings-summary result=%d "
+                 "completed=%d host=%s pid=%d classes=%d methods=%d "
+                 "candidates=%d listTruncated=%d candidateTruncated=%d "
+                 "overflow=%d remote=%d stable=%d closed=%d abandoned=%d "
+                 "reason=%s generated=0 mutations=0\n",
+                 result, completed, host.UTF8String ?: "-", pid,
+                 report.classesScanned, report.methodsScanned,
+                 report.candidateCount, report.methodListTruncated,
+                 report.candidateTruncated, report.overflowDetected,
+                 remoteOK, targetStable, closed, abandoned,
+                 report.reason[0] ? report.reason : "-");
+        return completed;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        // Read-only observer does not reconcile persisted state.
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_inspect_iconservices_agent_writer_state_now(
+    ThemerSpotlightStoreSurfaceInventoryReport *reportOut)
+{
+    if (reportOut) memset(reportOut, 0, sizeof(*reportOut));
+    if (!settings_try_claim_actions_lock(
+            "IconServices agent writer-state inspection",
+            "[ICONSERVICES_WRITER_STATE] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL completed = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        log_user("[ICONSERVICES_WRITER_STATE] recovery-bypass allowed=1 "
+                 "readOnly=1 generated=0 serviceDispatch=0 storeMutations=0 "
+                 "fileMutations=0 recoveryAccess=0. Existing recovery "
+                 "owners and journals will not be read, changed, or cleared.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_WRITER_STATE] Inspection rejected: "
+                     "RemoteCall kernel primitives were not acquired. "
+                     "No IconServices state was changed.\n");
+            return NO;
+        }
+
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session =
+            settings_open_iconservices_agent_session(&pid,&proc,&task);
+        if (!session) {
+            log_user("[ICONSERVICES_WRITER_STATE] No existing "
+                     "iconservicesagent process could be opened. This "
+                     "read-only action did not launch it or dispatch a "
+                     "generation request.\n");
+            return NO;
+        }
+
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid,proc,task,NULL,NULL);
+        __block ThemerSpotlightStoreSurfaceInventoryResult result =
+            ThemerSpotlightStoreSurfaceInventoryTransportFailed;
+        __block ThemerSpotlightStoreSurfaceInventoryReport report = {0};
+        __block BOOL remoteOK = NO;
+        if (targetStable) {
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(session, ^{
+                        uint64_t pool =
+                            themer_spotlight_remote_autorelease_pool_push();
+                        if (!pool) return;
+                        result =
+                            themer_iconservices_inspect_agent_writer_state_in_session(
+                                &report);
+                        if (remote_call_current_success()) {
+                            themer_spotlight_remote_autorelease_pool_pop(pool);
+                        }
+                        remoteOK = remote_call_current_success() ? YES : NO;
+                    });
+                }
+            } @catch (NSException *exception) {
+                log_user("[ICONSERVICES_WRITER_STATE] remote-exception "
+                         "name=%s reason=%s; no IconServices state was "
+                         "changed.\n",
+                         exception.name.UTF8String ?: "?",
+                         exception.reason.UTF8String ?: "?");
+                remoteOK = NO;
+            }
+        }
+        targetStable = settings_spotlight_target_matches(
+            pid,proc,task,NULL,NULL);
+        BOOL abandoned = NO;
+        BOOL closed = settings_spotlight_iconservices_close_session(
+            session,remoteOK,targetStable,&abandoned);
+        completed = result == ThemerSpotlightStoreSurfaceInventoryComplete &&
+            remoteOK && targetStable && closed && !abandoned;
+        if (reportOut) *reportOut = report;
+        log_user("[ICONSERVICES_WRITER_STATE] settings-summary result=%d "
+                 "completed=%d host=iconservicesagent pid=%d words=%d "
+                 "serviceMatches=%d remote=%d stable=%d closed=%d "
+                 "abandoned=%d reason=%s readOnly=1 generated=0 "
+                 "serviceDispatch=0 storeMutations=0 fileMutations=0 "
+                 "recoveryAccess=0\n",
+                 result,completed,pid,report.classesScanned,
+                 report.candidateCount,remoteOK,targetStable,closed,abandoned,
+                 report.reason[0] ? report.reason : "-");
+        return completed;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_release_actions_lock();
+    }
+}
+
+// This action proves the exact object graph that the agent-backed publication
+// path will archive, but it deliberately stops before generateImageWithDescriptor:.
+// It is therefore safe to run while an older materialization recovery journal
+// is armed and never reads, adopts, changes, or clears that journal.
+static BOOL settings_preflight_spotlight_agent_publication_now(
+    ThemerSpotlightAgentPreflightReport *reportOut)
+{
+    if (reportOut) memset(reportOut, 0, sizeof(*reportOut));
+    if (!settings_try_claim_actions_lock(
+            "Spotlight IconServices agent publication preflight",
+            "[ICONSERVICES_AGENT_PREFLIGHT] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL completed = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        log_user("[ICONSERVICES_AGENT_PREFLIGHT] recovery-bypass allowed=1 "
+                 "readOnly=1 generated=0 serviceDispatch=0 storeCalls=0 "
+                 "fileMutations=0 recoveryAccess=0. Existing recovery "
+                 "owners and journals will not be read, changed, or cleared.\n");
+
+        NSDictionary<NSString *, NSData *> *themeData = nil;
+        if (!settings_spotlight_iconservices_prepare_theme(&themeData)) {
+            return NO;
+        }
+        char target[192] = {0};
+        char control[192] = {0};
+        char fingerprint[65] = {0};
+        if (!themer_spotlight_stock68_select_target(
+                themeData,
+                target, sizeof(target),
+                control, sizeof(control),
+                fingerprint)) {
+            log_user("[ICONSERVICES_AGENT_PREFLIGHT] No deterministic themed "
+                     "target could be selected.\n");
+            return NO;
+        }
+        const char *targetCString = target;
+        const char *fingerprintCString = fingerprint;
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_AGENT_PREFLIGHT] Preflight rejected: "
+                     "RemoteCall kernel primitives were not acquired.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_AGENT_PREFLIGHT] No Spotlight UI host is "
+                     "running. Open Spotlight once, then retry.\n");
+            return NO;
+        }
+
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        __block ThemerSpotlightAgentPreflightResult result =
+            ThemerSpotlightAgentPreflightTransportFailed;
+        __block ThemerSpotlightAgentPreflightReport report = {0};
+        __block BOOL remoteOK = NO;
+        if (targetStable) {
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(session, ^{
+                        uint64_t pool =
+                            themer_spotlight_remote_autorelease_pool_push();
+                        if (!pool) return;
+                        result =
+                            themer_spotlight_iconservices_agent_preflight_in_session(
+                                themeData, targetCString,
+                                fingerprintCString, &report);
+                        if (remote_call_current_success()) {
+                            themer_spotlight_remote_autorelease_pool_pop(pool);
+                        }
+                        remoteOK = remote_call_current_success() ? YES : NO;
+                    });
+                }
+            } @catch (NSException *exception) {
+                log_user("[ICONSERVICES_AGENT_PREFLIGHT] remote-exception "
+                         "name=%s reason=%s; serviceDispatch=0 and recovery "
+                         "state unchanged.\n",
+                         exception.name.UTF8String ?: "?",
+                         exception.reason.UTF8String ?: "?");
+                remoteOK = NO;
+            }
+        }
+        targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL closed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        completed = result == ThemerSpotlightAgentPreflightReady &&
+            remoteOK && targetStable && closed && !abandoned;
+        if (reportOut) *reportOut = report;
+        log_user("[ICONSERVICES_AGENT_PREFLIGHT] settings-summary result=%d "
+                 "completed=%d host=%s pid=%d target=%s digestReplaced=%d "
+                 "descriptorPreserved=%d ignoreCache=%d requestBound=%d "
+                 "archive=%d/%llu decoded=%d/%d/%d imageData=%d/%llu/%s "
+                 "remote=%d stable=%d closed=%d abandoned=%d reason=%s "
+                 "generated=0 serviceDispatch=0 storeCalls=0 "
+                 "fileMutations=0 recoveryAccess=0\n",
+                 result, completed, host.UTF8String ?: "-", pid,
+                 target,
+                 report.scratchDigestReplaced,
+                 report.descriptorDigestPreserved,
+                 report.ignoreCacheEnabled,
+                 report.requestInputsBound,
+                 report.archiveCreated,
+                 (unsigned long long)report.archiveLength,
+                 report.decodedRequestVerified,
+                 report.decodedIconVerified,
+                 report.decodedDescriptorVerified,
+                 report.imageDataExact,
+                 (unsigned long long)report.imageDataLength,
+                 report.imageDataSHA256[0] ? report.imageDataSHA256 : "-",
+                 remoteOK, targetStable, closed, abandoned,
+                 report.reason[0] ? report.reason : "-");
+        return completed;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_release_actions_lock();
+    }
+}
+
+// This action borrows an existing Perplexity Spotlight cache entry and proves
+// the scratch response/client conversion without generation or store access.
+static BOOL settings_inspect_spotlight_agent_response_contract_now(
+    ThemerSpotlightAgentResponseContractReport *reportOut)
+{
+    if (reportOut) memset(reportOut, 0, sizeof(*reportOut));
+    if (!settings_try_claim_actions_lock(
+            "Spotlight IconServices agent response contract",
+            "[ICONSERVICES_AGENT_RESPONSE] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL completed = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        log_user("[ICONSERVICES_AGENT_RESPONSE] recovery-bypass allowed=1 cachedDonor=1 "
+                 "readOnly=1 generated=0 serviceDispatch=0 storeCalls=0 "
+                 "fileMutations=0 recoveryAccess=0 scratchResponse=1. Existing "
+                 "recovery owners and journals will not be read, changed, "
+                 "adopted, or cleared.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_AGENT_RESPONSE] Inspection rejected: "
+                     "RemoteCall kernel primitives were not acquired.\n");
+            return NO;
+        }
+
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_AGENT_RESPONSE] No Spotlight UI host is "
+                     "running. Open Spotlight once, return to kslop, then "
+                     "retry.\n");
+            return NO;
+        }
+
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        __block ThemerSpotlightAgentResponseContractResult result =
+            ThemerSpotlightAgentResponseContractTransportFailed;
+        __block ThemerSpotlightAgentResponseContractReport report = {0};
+        __block BOOL remoteOK = NO;
+        if (targetStable) {
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(session, ^{
+                        uint64_t pool =
+                            themer_spotlight_remote_autorelease_pool_push();
+                        if (!pool) return;
+                        result =
+                            themer_spotlight_iconservices_agent_response_contract_in_session(
+                                &report);
+                        if (remote_call_current_success()) {
+                            themer_spotlight_remote_autorelease_pool_pop(pool);
+                        }
+                        remoteOK = remote_call_current_success() ? YES : NO;
+                    });
+                }
+            } @catch (NSException *exception) {
+                log_user("[ICONSERVICES_AGENT_RESPONSE] remote-exception "
+                         "name=%s reason=%s; serviceDispatch=0, persistent "
+                         "state unchanged.\n",
+                         exception.name.UTF8String ?: "?",
+                         exception.reason.UTF8String ?: "?");
+                remoteOK = NO;
+            }
+        }
+        targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL closed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        completed =
+            result == ThemerSpotlightAgentResponseContractReady &&
+            remoteOK && targetStable && closed && !abandoned;
+        if (reportOut) *reportOut = report;
+        log_user("[ICONSERVICES_AGENT_RESPONSE] settings-summary result=%d "
+                 "completed=%d host=%s pid=%d syncABI=%d completionABI=%d "
+                 "abiMismatch=%d firstFailure=%s manager=%d cacheProof=%d "
+                 "donor=%d/%s dataStable=%d memoized=%d "
+                 "response=%d/%d image=%d/%d/%s "
+                 "source=%llu logical=%llu/%s responseData=%llu padding=%llu "
+                 "uuid=%s token=%llu "
+                 "remote=%d stable=%d closed=%d abandoned=%d reason=%s "
+                 "readOnly=1 generated=0 serviceDispatch=0 storeCalls=0 "
+                 "fileMutations=0 recoveryAccess=0 scratchResponse=1\n",
+                 result, completed, host.UTF8String ?: "-", pid,
+                 report.clientSyncABI, report.clientCompletionABI,
+                 report.abiMismatch,
+                 report.firstFailureStage[0] ? report.firstFailureStage : "-",
+                 report.managerProvenInitialized,
+                 report.cacheLookupStaticProof, report.donorFound,
+                 report.donorClass[0] ? report.donorClass : "-",
+                 report.donorDataIvarStable, report.donorDataMemoized,
+                 report.responseConstructed, report.responseFieldsVerified,
+                 report.returnedImageConstructed,
+                 report.returnedImageFieldsVerified,
+                 report.returnedImageClass[0]
+                    ? report.returnedImageClass : "-",
+                 (unsigned long long)report.sourceDataLength,
+                 (unsigned long long)report.logicalDataLength,
+                 report.logicalDataSHA256[0]
+                    ? report.logicalDataSHA256 : "-",
+                 (unsigned long long)report.responseDataLength,
+                 (unsigned long long)report.responsePaddingLength,
+                 report.responseUUID[0] ? report.responseUUID : "-",
+                 (unsigned long long)report.validationTokenLength,
+                 remoteOK, targetStable, closed, abandoned,
+                 report.reason[0] ? report.reason : "-");
+        return completed;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_publish_spotlight_agent_now(
+    ThemerSpotlightAgentPreflightReport *reportOut)
+{
+    if (reportOut) memset(reportOut, 0, sizeof(*reportOut));
+    if (!settings_try_claim_actions_lock(
+            "Spotlight IconServices agent publication",
+            "[ICONSERVICES_AGENT_PUBLISH] Another action is already running.")) {
+        return NO;
+    }
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (settings_spotlight_new_work_is_blocked_locked(
+                @"Spotlight agent publication") ||
+            themer_spotlight_agent_publication_has_state()) {
+            log_user("[ICONSERVICES_AGENT_PUBLISH] Admission rejected: "
+                     "recovery or an earlier agent publication transaction "
+                     "is present. No service request was issued.\n");
+            return NO;
+        }
+        NSDictionary<NSString *, NSData *> *themeData = nil;
+        if (!settings_spotlight_iconservices_prepare_theme(&themeData)) {
+            return NO;
+        }
+        char target[192] = {0};
+        char control[192] = {0};
+        char fingerprint[65] = {0};
+        if (!themer_spotlight_stock68_select_target(
+                themeData, target, sizeof(target),
+                control, sizeof(control), fingerprint)) {
+            log_user("[ICONSERVICES_AGENT_PUBLISH] No deterministic themed "
+                     "target could be selected.\n");
+            return NO;
+        }
+        const char *targetCString = target;
+        const char *fingerprintCString = fingerprint;
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[ICONSERVICES_AGENT_PUBLISH] RemoteCall kernel "
+                     "primitives were not acquired.\n");
+            return NO;
+        }
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_AGENT_PUBLISH] No Spotlight UI host is "
+                     "running. Open Spotlight without searching for the "
+                     "target, then retry.\n");
+            return NO;
+        }
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        __block ThemerSpotlightAgentPreflightResult result =
+            ThemerSpotlightAgentPreflightTransportFailed;
+        __block ThemerSpotlightAgentPreflightReport report = {0};
+        __block BOOL remoteOK = NO;
+        if (targetStable) {
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(session, ^{
+                        uint64_t pool =
+                            themer_spotlight_remote_autorelease_pool_push();
+                        if (!pool) return;
+                        result =
+                            themer_spotlight_iconservices_agent_publish_in_session(
+                                themeData, targetCString,
+                                fingerprintCString, &report);
+                        if (remote_call_current_success()) {
+                            themer_spotlight_remote_autorelease_pool_pop(pool);
+                        }
+                        remoteOK = remote_call_current_success() ? YES : NO;
+                    });
+                }
+            } @catch (NSException *exception) {
+                log_user("[ICONSERVICES_AGENT_PUBLISH] remote-exception "
+                         "name=%s reason=%s. The publication transaction "
+                         "remains armed if dispatch became possible.\n",
+                         exception.name.UTF8String ?: "?",
+                         exception.reason.UTF8String ?: "?");
+                remoteOK = NO;
+            }
+        }
+        targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL closed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        BOOL finalized =
+            result == ThemerSpotlightAgentPreflightReady &&
+            report.serviceResponseVerified &&
+            report.cacheReadbackVerified &&
+            themer_spotlight_agent_publication_finalize_after_clean_close(
+                report.transaction,
+                remoteOK && targetStable && closed && !abandoned);
+        success = finalized &&
+            themer_spotlight_agent_publication_is_published();
+        if (reportOut) *reportOut = report;
+        log_user("[ICONSERVICES_AGENT_PUBLISH] settings-summary result=%d "
+                 "success=%d host=%s pid=%d target=%s transaction=%s "
+                 "dispatchPossible=%d response=%d/%llu/%s finalized=%d "
+                 "canonical=%d/%d geometry=%d pixelExact=%d cache=%d/%d "
+                 "published=%d remote=%d stable=%d closed=%d abandoned=%d "
+                 "reason=%s directStoreCalls=0\n",
+                 result, success, host.UTF8String ?: "-", pid, target,
+                 report.transaction[0] ? report.transaction : "-",
+                 report.serviceDispatchPossible,
+                 report.serviceResponseVerified,
+                 (unsigned long long)report.serviceResponseLength,
+                 report.serviceResponseSHA256[0]
+                    ? report.serviceResponseSHA256 : "-",
+                 finalized,
+                 report.canonicalIconRegistered,
+                 report.canonicalIconRetained,
+                 report.responseGeometryVerified,
+                 report.responsePixelsExact,
+                 report.cachePublished,
+                 report.cacheReadbackVerified,
+                 themer_spotlight_agent_publication_is_published(),
+                 remoteOK, targetStable, closed, abandoned,
+                 report.reason[0] ? report.reason : "-");
+        return success;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_restore_spotlight_agent_publication_now(
+    ThemerSpotlightAgentPreflightReport *reportOut)
+{
+    if (reportOut) memset(reportOut, 0, sizeof(*reportOut));
+    if (!settings_try_claim_actions_lock(
+            "Restore Spotlight IconServices agent publication",
+            "[ICONSERVICES_AGENT_RESTORE] Another action is already running.")) {
+        return NO;
+    }
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!themer_spotlight_agent_publication_has_state()) {
+            log_user("[ICONSERVICES_AGENT_RESTORE] No agent publication "
+                     "transaction is present. No service request was issued.\n");
+            return YES;
+        }
+        if (settings_spotlight_new_work_is_blocked_locked(
+                @"Spotlight agent stock restore")) {
+            log_user("[ICONSERVICES_AGENT_RESTORE] Another recovery owner "
+                     "must be resolved before stock can be republished.\n");
+            return NO;
+        }
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            return NO;
+        }
+        NSString *host = nil;
+        int pid = 0;
+        uint64_t proc = 0;
+        uint64_t task = 0;
+        RemoteCallSession *session = settings_open_spotlight_host_session(
+            &host, &pid, &proc, &task);
+        if (!session) {
+            log_user("[ICONSERVICES_AGENT_RESTORE] No Spotlight UI host is "
+                     "running. Open Spotlight, then retry stock restore.\n");
+            return NO;
+        }
+        BOOL targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        __block ThemerSpotlightAgentPreflightResult result =
+            ThemerSpotlightAgentPreflightTransportFailed;
+        __block ThemerSpotlightAgentPreflightReport report = {0};
+        __block BOOL remoteOK = NO;
+        if (targetStable) {
+            @try {
+                @synchronized (settings_rc_lock()) {
+                    remote_call_with_session(session, ^{
+                        uint64_t pool =
+                            themer_spotlight_remote_autorelease_pool_push();
+                        if (!pool) return;
+                        result =
+                            themer_spotlight_iconservices_agent_restore_in_session(
+                                &report);
+                        if (remote_call_current_success()) {
+                            themer_spotlight_remote_autorelease_pool_pop(pool);
+                        }
+                        remoteOK = remote_call_current_success() ? YES : NO;
+                    });
+                }
+            } @catch (NSException *exception) {
+                log_user("[ICONSERVICES_AGENT_RESTORE] remote-exception "
+                         "name=%s reason=%s. Restore remains armed.\n",
+                         exception.name.UTF8String ?: "?",
+                         exception.reason.UTF8String ?: "?");
+                remoteOK = NO;
+            }
+        }
+        targetStable = settings_spotlight_target_matches(
+            pid, proc, task, NULL, NULL);
+        BOOL abandoned = NO;
+        BOOL closed = settings_spotlight_iconservices_close_session(
+            session, remoteOK, targetStable, &abandoned);
+        BOOL finalized =
+            result == ThemerSpotlightAgentPreflightReady &&
+            report.serviceResponseVerified &&
+            themer_spotlight_agent_restore_finalize_after_clean_close(
+                report.transaction,
+                remoteOK && targetStable && closed && !abandoned);
+        success = finalized &&
+            !themer_spotlight_agent_publication_has_state();
+        if (reportOut) *reportOut = report;
+        log_user("[ICONSERVICES_AGENT_RESTORE] settings-summary result=%d "
+                 "success=%d host=%s pid=%d target=%s transaction=%s "
+                 "dispatchPossible=%d response=%d/%llu/%s finalized=%d "
+                 "journalPresent=%d remote=%d stable=%d closed=%d "
+                 "abandoned=%d reason=%s directStoreCalls=0\n",
+                 result, success, host.UTF8String ?: "-", pid,
+                 report.targetBundle[0] ? report.targetBundle : "-",
+                 report.transaction[0] ? report.transaction : "-",
+                 report.serviceDispatchPossible,
+                 report.serviceResponseVerified,
+                 (unsigned long long)report.serviceResponseLength,
+                 report.serviceResponseSHA256[0]
+                    ? report.serviceResponseSHA256 : "-",
+                 finalized,
+                 themer_spotlight_agent_publication_has_state(),
+                 remoteOK, targetStable, closed, abandoned,
+                 report.reason[0] ? report.reason : "-");
+        return success;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_release_actions_lock();
+    }
+}
+
+static void settings_spotlight_cache_proof_reset_local_state(void)
+{
+    g_spotlight_cache_proof_armed = 0;
+    g_spotlight_cache_proof_target_pid = 0;
+    g_spotlight_cache_proof_target_proc = 0;
+    g_spotlight_cache_proof_target_task = 0;
+    g_spotlight_cache_proof_channel_clean = 0;
+}
+
+static BOOL settings_begin_spotlight_cache_proof_now(void)
+{
+    if (!settings_device_supported()) {
+        log_user("[SPOTLIGHT_PROOF] This device/version is not supported.\n");
+        return NO;
+    }
+    if (g_spotlight_cache_proof_armed) {
+        log_user("[SPOTLIGHT_PROOF] A proof seed is already armed. Run Verify + Restore before starting another proof.\n");
+        return NO;
+    }
+    if (!settings_snowboardlite_has_selected_theme()) {
+        log_user("[SPOTLIGHT_PROOF] Pick or import a SnowBoard Remix theme first.\n");
+        return NO;
+    }
+    NSDictionary<NSString *, NSData *> *themeData =
+        settings_sbl_selected_theme_data();
+    if (themeData.count == 0) {
+        log_user("[SPOTLIGHT_PROOF] The selected theme did not contain usable icon data.\n");
+        return NO;
+    }
+    if (!settings_try_claim_actions_lock(
+            "Spotlight cache proof seed",
+            "[SPOTLIGHT_PROOF] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[SPOTLIGHT_PROOF] Failed: kernel primitives were not acquired. Please try again.\n");
+            cyanide_upload_log_milestone(@"spotlight-cache-proof-krw-failed");
+            return NO;
+        }
+
+        NSString *spotlightHost = nil;
+        int spotlightPID = 0;
+        uint64_t spotlightProc = 0;
+        uint64_t spotlightTask = 0;
+        RemoteCallSession *spotlightSession =
+            settings_open_spotlight_host_session(
+                &spotlightHost, &spotlightPID,
+                &spotlightProc, &spotlightTask);
+        if (!spotlightSession) {
+            log_user("[SPOTLIGHT_PROOF] No Spotlight UI host is running. Open Spotlight once, then try Seed again.\n");
+            return NO;
+        }
+
+        __sync_lock_test_and_set(&g_spotlight_trace_stop_requested, 0);
+        __block ThemerSpotlightProofBeginResult beginResult =
+            ThemerSpotlightProofBeginResultStateFailed;
+        __block BOOL remoteOK = NO;
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(spotlightSession, ^{
+                    uint64_t pool =
+                        themer_spotlight_remote_autorelease_pool_push();
+                    if (!pool) return;
+                    beginResult = themer_spotlight_proof_begin_in_session(
+                        themeData, &g_spotlight_trace_stop_requested);
+                    if (remote_call_current_success()) {
+                        themer_spotlight_remote_autorelease_pool_pop(pool);
+                    }
+                    remoteOK = remote_call_current_success() ? YES : NO;
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[SPOTLIGHT_PROOF] seed remote-exception name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            remoteOK = NO;
+        }
+
+        uint64_t currentProc = 0;
+        uint64_t currentTask = 0;
+        BOOL targetStable = settings_spotlight_target_matches(
+            spotlightPID, spotlightProc, spotlightTask,
+            &currentProc, &currentTask);
+        BOOL seeded =
+            beginResult == ThemerSpotlightProofBeginResultSeeded &&
+            remoteOK && targetStable;
+
+        BOOL channelClosedCleanly = ![spotlightSession hasLocalState];
+        BOOL channelAbandoned = NO;
+        if (!channelClosedCleanly) {
+            @synchronized (settings_rc_lock()) {
+                if (remoteOK && targetStable) {
+                    (void)[spotlightSession destroyRemoteCall];
+                    channelClosedCleanly = ![spotlightSession hasLocalState];
+                }
+                if (!channelClosedCleanly) {
+                    [spotlightSession abandonRemoteCall];
+                    channelAbandoned = YES;
+                }
+            }
+        }
+
+        if (seeded) {
+            g_spotlight_cache_proof_target_pid = spotlightPID;
+            g_spotlight_cache_proof_target_proc = spotlightProc;
+            g_spotlight_cache_proof_target_task = spotlightTask;
+            g_spotlight_cache_proof_channel_clean =
+                channelClosedCleanly && !channelAbandoned;
+            g_spotlight_cache_proof_armed = 1;
+        } else {
+            settings_spotlight_cache_proof_reset_local_state();
+        }
+
+        if (!seeded) {
+            switch (beginResult) {
+                case ThemerSpotlightProofBeginResultNoVisibleThemedIcon:
+                    log_user("[SPOTLIGHT_PROOF] No eligible themed Spotlight app could be materialized for the proof. Check the proof log and try again.\n");
+                    break;
+                case ThemerSpotlightProofBeginResultSeedFailed:
+                    log_user("[SPOTLIGHT_PROOF] The selected cache identity could not be seeded and verified. No persistence claim was recorded.\n");
+                    break;
+                case ThemerSpotlightProofBeginResultStateFailed:
+                    log_user("[SPOTLIGHT_PROOF] The cache seed state could not be committed safely. Check the log before retrying.\n");
+                    break;
+                case ThemerSpotlightProofBeginResultSeeded:
+                    log_user("[SPOTLIGHT_PROOF] The seed was written, but the host or RemoteCall channel became unstable. Respring before treating a later result as valid.\n");
+                    break;
+            }
+            cyanide_upload_log_milestone(@"spotlight-cache-proof-seed-failed");
+            return NO;
+        }
+
+        if (!g_spotlight_cache_proof_channel_clean) {
+            log_user("[SPOTLIGHT_PROOF] The cache seed was committed, but the Phase 1 control channel could not be destroyed cleanly. Verify + Restore can still clean the cache, but this run cannot prove control-channel independence.\n");
+            cyanide_upload_log_milestone(
+                @"spotlight-cache-proof-seed-channel-warning");
+            return NO;
+        }
+
+        log_user("[OK][SPOTLIGHT_PROOF] One Spotlight cache identity was seeded in %s (pid %d), with a second app left untouched when available. Dismiss and reopen Spotlight, confirm the selected app/control shown in the log, then run Verify + Restore.\n",
+                 spotlightHost.UTF8String,
+                 spotlightPID);
+        cyanide_upload_log_milestone(@"spotlight-cache-proof-seeded");
+        success = YES;
+        return YES;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static BOOL settings_verify_spotlight_cache_proof_now(
+    ThemerSpotlightProofVerifyResult *resultOut)
+{
+    if (resultOut) {
+        *resultOut = ThemerSpotlightProofVerifyResultNoState;
+    }
+    if (!settings_device_supported()) {
+        log_user("[SPOTLIGHT_PROOF] This device/version is not supported.\n");
+        return NO;
+    }
+    if (!g_spotlight_cache_proof_armed ||
+        g_spotlight_cache_proof_target_pid <= 0) {
+        log_user("[SPOTLIGHT_PROOF] No Phase 1 seed is armed. Run Seed first.\n");
+        return NO;
+    }
+    if (!settings_try_claim_actions_lock(
+            "Spotlight cache proof verify",
+            "[SPOTLIGHT_PROOF] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL success = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[SPOTLIGHT_PROOF] Failed: kernel primitives were not acquired. Please try again.\n");
+            cyanide_upload_log_milestone(@"spotlight-cache-proof-verify-krw-failed");
+            return NO;
+        }
+
+        NSString *spotlightHost = nil;
+        int spotlightPID = 0;
+        uint64_t spotlightProc = 0;
+        uint64_t spotlightTask = 0;
+        RemoteCallSession *spotlightSession =
+            settings_open_spotlight_host_session(
+                &spotlightHost, &spotlightPID,
+                &spotlightProc, &spotlightTask);
+        if (!spotlightSession) {
+            log_user("[SPOTLIGHT_PROOF] No Spotlight UI host is running. Reopen Spotlight and run Verify + Restore again.\n");
+            return NO;
+        }
+
+        int expectedPID = g_spotlight_cache_proof_target_pid;
+        uint64_t expectedProc = g_spotlight_cache_proof_target_proc;
+        uint64_t expectedTask = g_spotlight_cache_proof_target_task;
+        BOOL phaseOneChannelClean =
+            g_spotlight_cache_proof_channel_clean != 0;
+        BOOL sameTarget =
+            spotlightPID == expectedPID &&
+            spotlightProc == expectedProc &&
+            spotlightTask == expectedTask;
+        if (!sameTarget) {
+            uint64_t currentProc = 0;
+            uint64_t currentTask = 0;
+            BOOL currentTargetStable = settings_spotlight_target_matches(
+                spotlightPID, spotlightProc, spotlightTask,
+                &currentProc, &currentTask);
+            @synchronized (settings_rc_lock()) {
+                if (currentTargetStable) {
+                    (void)[spotlightSession destroyRemoteCall];
+                } else {
+                    [spotlightSession abandonRemoteCall];
+                }
+            }
+            log_user("[SPOTLIGHT_PROOF] Host identity changed since Phase 1: expected pid=%d proc=0x%llx task=0x%llx, current pid=%d proc=0x%llx task=0x%llx. The old process state is gone; start again from Seed.\n",
+                     expectedPID,
+                     (unsigned long long)expectedProc,
+                     (unsigned long long)expectedTask,
+                     spotlightPID,
+                     (unsigned long long)spotlightProc,
+                     (unsigned long long)spotlightTask);
+            settings_spotlight_cache_proof_reset_local_state();
+            if (resultOut) {
+                *resultOut =
+                    ThemerSpotlightProofVerifyResultHostStateMismatch;
+            }
+            cyanide_upload_log_milestone(
+                @"spotlight-cache-proof-host-changed");
+            return NO;
+        }
+
+        __block ThemerSpotlightProofVerifyResult result =
+            ThemerSpotlightProofVerifyResultNoState;
+        __block BOOL remoteOK = NO;
+        @try {
+            @synchronized (settings_rc_lock()) {
+                remote_call_with_session(spotlightSession, ^{
+                    uint64_t pool =
+                        themer_spotlight_remote_autorelease_pool_push();
+                    if (!pool) return;
+                    result =
+                        themer_spotlight_proof_verify_and_cleanup_in_session();
+                    if (remote_call_current_success()) {
+                        themer_spotlight_remote_autorelease_pool_pop(pool);
+                    }
+                    remoteOK = remote_call_current_success() ? YES : NO;
+                });
+            }
+        } @catch (NSException *exception) {
+            printf("[SPOTLIGHT_PROOF] verify remote-exception name=%s reason=%s\n",
+                   exception.name.UTF8String ?: "?",
+                   exception.reason.UTF8String ?: "?");
+            remoteOK = NO;
+        }
+
+        uint64_t currentProc = 0;
+        uint64_t currentTask = 0;
+        BOOL targetStable = settings_spotlight_target_matches(
+            spotlightPID, spotlightProc, spotlightTask,
+            &currentProc, &currentTask);
+        BOOL channelClosedCleanly = ![spotlightSession hasLocalState];
+        BOOL channelAbandoned = NO;
+        if (!channelClosedCleanly) {
+            @synchronized (settings_rc_lock()) {
+                if (remoteOK && targetStable) {
+                    (void)[spotlightSession destroyRemoteCall];
+                    channelClosedCleanly = ![spotlightSession hasLocalState];
+                }
+                if (!channelClosedCleanly) {
+                    [spotlightSession abandonRemoteCall];
+                    channelAbandoned = YES;
+                }
+            }
+        }
+
+        if (resultOut) *resultOut = result;
+        BOOL callCompleted = remoteOK && targetStable &&
+                             channelClosedCleanly && !channelAbandoned;
+        BOOL cleanupRetryNeeded =
+            result == ThemerSpotlightProofVerifyResultCleanupFailed ||
+            !callCompleted;
+        if (!cleanupRetryNeeded) {
+            settings_spotlight_cache_proof_reset_local_state();
+        }
+
+        if (!callCompleted) {
+            log_user("[SPOTLIGHT_PROOF] Verification or RemoteCall teardown did not complete cleanly. The proof remains armed for another cleanup attempt; respring if the host becomes unavailable.\n");
+            cyanide_upload_log_milestone(
+                @"spotlight-cache-proof-verify-channel-failed");
+            return NO;
+        }
+
+        switch (result) {
+            case ThemerSpotlightProofVerifyResultThemedHit:
+                if (!phaseOneChannelClean) {
+                    log_user("[SPOTLIGHT_PROOF] The themed cache entry survived, but Phase 1 left an abandoned control channel. The cache was restored, but this run is not accepted as a no-resident proof.\n");
+                    cyanide_upload_log_milestone(
+                        @"spotlight-cache-proof-hit-channel-warning");
+                    return NO;
+                }
+                log_user("[OK][SPOTLIGHT_PROOF] Verdict: the themed SearchUI cache entry survived dismissal/reopen in %s (pid %d). The captured stock image was written back and proof state was cleared.\n",
+                         spotlightHost.UTF8String,
+                         spotlightPID);
+                cyanide_upload_log_milestone(
+                    @"spotlight-cache-proof-pass");
+                success = YES;
+                return YES;
+            case ThemerSpotlightProofVerifyResultStockOrMiss:
+                log_user("[SPOTLIGHT_PROOF] Verdict: Spotlight returned stock or missed the themed cache entry after reopen. The captured stock image was restored; inspect [SPOTLIGHT_PROOF] for cache/generation details.\n");
+                cyanide_upload_log_milestone(
+                    @"spotlight-cache-proof-stock-or-miss");
+                return NO;
+            case ThemerSpotlightProofVerifyResultHostStateMismatch:
+                log_user("[SPOTLIGHT_PROOF] Verdict: the retained proof state did not belong to this host process. Start again from Seed.\n");
+                cyanide_upload_log_milestone(
+                    @"spotlight-cache-proof-state-mismatch");
+                return NO;
+            case ThemerSpotlightProofVerifyResultInconclusive:
+                log_user("[SPOTLIGHT_PROOF] Verdict: no conclusive cache readback was available. The captured stock image was restored; inspect the proof log.\n");
+                cyanide_upload_log_milestone(
+                    @"spotlight-cache-proof-inconclusive");
+                return NO;
+            case ThemerSpotlightProofVerifyResultNoState:
+                log_user("[SPOTLIGHT_PROOF] No process-resident proof state was found. Start again from Seed.\n");
+                cyanide_upload_log_milestone(
+                    @"spotlight-cache-proof-no-state");
+                return NO;
+            case ThemerSpotlightProofVerifyResultCleanupFailed:
+                log_user("[SPOTLIGHT_PROOF] Cache verification ran, but the targeted stock restore did not verify. The proof remains armed so Verify + Restore can be retried; respring is the final cleanup fallback.\n");
+                cyanide_upload_log_milestone(
+                    @"spotlight-cache-proof-cleanup-failed");
+                return NO;
+        }
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+    return success;
+}
+
+static __attribute__((unused)) void
+settings_schedule_snowboardlite_spotlight_opportunistic_reapply(
+    NSString *reason)
+{
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults boolForKey:kSettingsSnowBoardLiteEnabled] ||
+        !settings_snowboardlite_has_selected_theme() ||
+        !settings_tweak_is_applied(kSettingsSnowBoardLiteEnabled) ||
+        !g_kexploit_done || !kexploit_krw_ready() ||
+        g_settings_actions_running || settings_cleanup_in_progress()) {
+        return;
+    }
+    if (__sync_lock_test_and_set(
+            &g_spotlight_opportunistic_apply_running, 1)) {
+        return;
+    }
+
+    NSString *reasonCopy = [reason copy] ?: @"lifecycle event";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        BOOL actionsClaimed = NO;
+        @try {
+            NSUserDefaults *currentDefaults =
+                NSUserDefaults.standardUserDefaults;
+            if (![currentDefaults boolForKey:kSettingsSnowBoardLiteEnabled] ||
+                !settings_snowboardlite_has_selected_theme() ||
+                !settings_tweak_is_applied(kSettingsSnowBoardLiteEnabled) ||
+                !g_kexploit_done || !kexploit_krw_ready() ||
+                settings_cleanup_in_progress()) {
+                return;
+            }
+
+            uint64_t currentProc = 0;
+            uint64_t currentTask = 0;
+            NSArray<NSString *> *hostCandidates = @[
+                @"Spotlight",
+                @"SpotlightUIService",
+                @"SearchUIService",
+            ];
+            for (NSString *candidate in hostCandidates) {
+                uint64_t proc = proc_find_by_name(candidate.UTF8String);
+                if (!proc || proc == UINT64_MAX) continue;
+                uint64_t task = proc_task(proc);
+                if (!task || task == UINT64_MAX) continue;
+                currentProc = proc;
+                currentTask = task;
+                break;
+            }
+
+            if (!currentProc || !currentTask) {
+                if (g_spotlight_last_applied_pid != 0) {
+                    g_spotlight_last_applied_pid = 0;
+                    g_spotlight_last_applied_proc = 0;
+                    g_spotlight_last_applied_task = 0;
+                }
+                printf("[SPOTLIGHT] opportunistic-deferred reason=%s "
+                       "host=not-running\n",
+                       reasonCopy.UTF8String);
+                return;
+            }
+
+            if (g_spotlight_last_applied_pid > 0 &&
+                g_spotlight_last_applied_proc == currentProc &&
+                g_spotlight_last_applied_task == currentTask) {
+                printf("[SPOTLIGHT] opportunistic-skip reason=%s "
+                       "host=unchanged pid=%d proc=0x%llx task=0x%llx\n",
+                       reasonCopy.UTF8String,
+                       g_spotlight_last_applied_pid,
+                       (unsigned long long)currentProc,
+                       (unsigned long long)currentTask);
+                return;
+            }
+
+            if (!settings_try_claim_actions_lock(
+                    "SnowBoard Remix Spotlight opportunistic reapply",
+                    NULL)) {
+                return;
+            }
+            actionsClaimed = YES;
+
+            if (settings_cleanup_in_progress() ||
+                !g_kexploit_done || !kexploit_krw_ready()) {
+                return;
+            }
+
+            NSDictionary<NSString *, NSData *> *themeData =
+                settings_sbl_selected_theme_data();
+            if (themeData.count == 0) {
+                printf("[SPOTLIGHT] opportunistic-deferred reason=%s "
+                       "theme-data=empty\n",
+                       reasonCopy.UTF8String);
+                return;
+            }
+
+            log_user("[SPOTLIGHT] Host identity changed after %s; "
+                     "reinstalling the complete canonical source set.\n",
+                     reasonCopy.UTF8String);
+            BOOL applied = settings_apply_snowboardlite_spotlight_data(
+                themeData, NO);
+            if (!applied) {
+                log_user("[SPOTLIGHT] Opportunistic host refresh was deferred; "
+                         "open Spotlight and use Apply Theme Permanently.\n");
+            }
+        } @finally {
+            if (actionsClaimed) settings_release_actions_lock();
+            __sync_lock_release(&g_spotlight_opportunistic_apply_running);
+        }
+    });
+}
+
+static BOOL settings_diagnose_snowboardlite_spotlight_now(void)
+{
+    if (!settings_device_supported()) {
+        log_user("[SPOTLIGHT] This device/version is not supported.\n");
+        return NO;
+    }
+    if (!settings_snowboardlite_has_selected_theme()) {
+        log_user("[SPOTLIGHT] Pick or import a SnowBoard Remix theme first.\n");
+        return NO;
+    }
+    NSDictionary<NSString *, NSData *> *themeData =
+        settings_sbl_selected_theme_data();
+    if (themeData.count == 0) {
+        log_user("[SPOTLIGHT] The selected theme did not contain usable icon data.\n");
+        return NO;
+    }
+    if (!settings_try_claim_actions_lock(
+            "SnowBoard Remix Spotlight apply",
+            "[SPOTLIGHT] Another action is already running.")) {
+        return NO;
+    }
+
+    BOOL ok = NO;
+    @try {
+        log_session_begin();
+        cyanide_start_session_uploads();
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[SPOTLIGHT] Failed: kernel primitives were not acquired. Please try again.\n");
+            cyanide_upload_log_milestone(@"spotlight-canonical-krw-failed");
+            return NO;
+        }
+        ok = settings_apply_snowboardlite_spotlight_data(themeData, NO);
+        cyanide_upload_log_milestone(
+            ok ? @"spotlight-canonical-installed"
+               : @"spotlight-canonical-warning");
+        return ok;
+    } @finally {
+        cyanide_stop_session_uploads();
+        log_session_end();
+        settings_reconcile_applied_from_defaults();
+        settings_release_actions_lock();
+    }
+}
+
+static __attribute__((unused)) void
+settings_run_snowboardlite_spotlight_diagnostic_action(void)
+{
+    __block UIBackgroundTaskIdentifier bgTask = [[UIApplication sharedApplication]
+        beginBackgroundTaskWithName:@"Spotlight Canonical Icon Apply"
+                  expirationHandler:^{
+        __sync_lock_test_and_set(&g_spotlight_trace_stop_requested, 1);
+        log_user("[SPOTLIGHT] Background time expired; stopping canonical icon installation.\n");
+        UIBackgroundTaskIdentifier expiredTask = bgTask;
+        bgTask = UIBackgroundTaskInvalid;
+        if (expiredTask != UIBackgroundTaskInvalid) {
+            [[UIApplication sharedApplication] endBackgroundTask:expiredTask];
+        }
+    }];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        BOOL ok = settings_diagnose_snowboardlite_spotlight_now();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (bgTask != UIBackgroundTaskInvalid) {
+                [[UIApplication sharedApplication] endBackgroundTask:bgTask];
+                bgTask = UIBackgroundTaskInvalid;
+            }
+            NSString *message = ok
+                ? @"Spotlight icon sources installed for the current process."
+                : @"Spotlight icon installation failed — open Spotlight and check the log.";
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:PackageQueueDidChangeNotification
+                              object:[PackageQueue sharedQueue]];
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil
+                            userInfo:@{
+                                kSettingsActionsDidCompleteSuccessKey: @(ok),
+                                kSettingsActionsDidCompleteMessageKey: message
+                            }];
+            cyanide_upload_log_if_enabled();
+        });
+    });
+}
+
+static __attribute__((unused)) void
+settings_run_spotlight_cache_proof_action(BOOL verify)
+{
+    NSString *taskName = verify
+        ? @"Spotlight Cache Proof Verify"
+        : @"Spotlight Cache Proof Seed";
+    __block UIBackgroundTaskIdentifier bgTask = [[UIApplication sharedApplication]
+        beginBackgroundTaskWithName:taskName
+                  expirationHandler:^{
+        __sync_lock_test_and_set(&g_spotlight_trace_stop_requested, 1);
+        log_user("[SPOTLIGHT_PROOF] Background time expired; stopping the current proof phase.\n");
+        UIBackgroundTaskIdentifier expiredTask = bgTask;
+        bgTask = UIBackgroundTaskInvalid;
+        if (expiredTask != UIBackgroundTaskInvalid) {
+            [[UIApplication sharedApplication] endBackgroundTask:expiredTask];
+        }
+    }];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        ThemerSpotlightProofVerifyResult result =
+            ThemerSpotlightProofVerifyResultNoState;
+        BOOL ok = verify
+            ? settings_verify_spotlight_cache_proof_now(&result)
+            : settings_begin_spotlight_cache_proof_now();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (bgTask != UIBackgroundTaskInvalid) {
+                [[UIApplication sharedApplication] endBackgroundTask:bgTask];
+                bgTask = UIBackgroundTaskInvalid;
+            }
+            NSString *message = nil;
+            if (!verify) {
+                message = ok
+                    ? @"Spotlight proof seed recorded. Dismiss and reopen Spotlight, inspect the selected app and control, then run Verify + Restore."
+                    : @"Spotlight proof seed was not completed. Check the activity log.";
+            } else if (ok) {
+                message = @"Spotlight cache persistence proof passed. The stock image was restored.";
+            } else if (result ==
+                       ThemerSpotlightProofVerifyResultCleanupFailed) {
+                message = @"Verification ran, but stock restoration needs another attempt. Run Verify + Restore again or respring.";
+            } else {
+                message = @"Spotlight cache persistence proof did not pass. Check the activity log for the verdict.";
+            }
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:PackageQueueDidChangeNotification
+                              object:[PackageQueue sharedQueue]];
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil
+                            userInfo:@{
+                                kSettingsActionsDidCompleteSuccessKey: @(ok),
+                                kSettingsActionsDidCompleteMessageKey: message
+                            }];
+            cyanide_upload_log_if_enabled();
+        });
+    });
+}
+
+typedef NS_ENUM(NSInteger, SettingsSpotlightIconServicesAction) {
+    SettingsSpotlightIconServicesActionProbe = 0,
+    SettingsSpotlightIconServicesActionSeed = 1,
+    SettingsSpotlightIconServicesActionVerifyRestore = 2,
+    SettingsSpotlightIconServicesActionEmergencyRestore = 3,
+    SettingsSpotlightIconServicesActionMaterializeStock68 = 4,
+    SettingsSpotlightIconServicesActionVerifyMaterializedStock68 = 5,
+    SettingsSpotlightIconServicesActionInspectGenerationRecovery = 6,
+    SettingsSpotlightIconServicesActionInspectStoreSurface = 7,
+    SettingsSpotlightIconServicesActionInspectLiveStoreState = 8,
+    SettingsSpotlightIconServicesActionAgentPublicationPreflight = 9,
+    SettingsSpotlightIconServicesActionAgentPublish = 10,
+    SettingsSpotlightIconServicesActionAgentRestore = 11,
+    SettingsSpotlightIconServicesActionInspectAgentWriter = 12,
+    SettingsSpotlightIconServicesActionInspectAgentResponse = 13,
+};
+
+static void settings_run_spotlight_iconservices_action(
+    SettingsSpotlightIconServicesAction action)
+{
+    NSString *taskName = nil;
+    switch (action) {
+        case SettingsSpotlightIconServicesActionProbe:
+            taskName = @"Spotlight IconServices Probe";
+            break;
+        case SettingsSpotlightIconServicesActionSeed:
+            taskName = @"Spotlight IconServices Seed";
+            break;
+        case SettingsSpotlightIconServicesActionVerifyRestore:
+            taskName = @"Spotlight IconServices Verify and Restore";
+            break;
+        case SettingsSpotlightIconServicesActionEmergencyRestore:
+            taskName = @"Spotlight IconServices Emergency Restore";
+            break;
+        case SettingsSpotlightIconServicesActionMaterializeStock68:
+            taskName = @"Materialize Genuine Spotlight Stock 68";
+            break;
+        case SettingsSpotlightIconServicesActionVerifyMaterializedStock68:
+            taskName = @"Verify Materialized Spotlight Stock 68";
+            break;
+        case SettingsSpotlightIconServicesActionInspectGenerationRecovery:
+            taskName = @"Inspect Issued Generation Recovery (Read Only)";
+            break;
+        case SettingsSpotlightIconServicesActionInspectLiveStoreState:
+            taskName = @"Inspect Live Store State (Read Only)";
+            break;
+        case SettingsSpotlightIconServicesActionInspectStoreSurface:
+            taskName = @"Inspect Store Registration Surface (Read Only)";
+            break;
+        case SettingsSpotlightIconServicesActionAgentPublicationPreflight:
+            taskName = @"Preflight Agent Publication (Read Only)";
+            break;
+        case SettingsSpotlightIconServicesActionAgentPublish:
+            taskName = @"Publish via IconServices Agent (One Target)";
+            break;
+        case SettingsSpotlightIconServicesActionAgentRestore:
+            taskName = @"Restore Stock via IconServices Agent";
+            break;
+        case SettingsSpotlightIconServicesActionInspectAgentWriter:
+            taskName = @"Inspect IconServices Agent Writer (Read Only)";
+            break;
+        case SettingsSpotlightIconServicesActionInspectAgentResponse:
+            taskName = @"Prove Cached Donor Response (Read Only)";
+            break;
+    }
+
+    __block UIBackgroundTaskIdentifier bgTask = [[UIApplication sharedApplication]
+        beginBackgroundTaskWithName:taskName
+                  expirationHandler:^{
+        __sync_lock_test_and_set(&g_spotlight_trace_stop_requested, 1);
+        log_user("[ICONSERVICES_LAB] Background time expired; stopping the current lab phase.\n");
+        UIBackgroundTaskIdentifier expiredTask = bgTask;
+        bgTask = UIBackgroundTaskInvalid;
+        if (expiredTask != UIBackgroundTaskInvalid) {
+            [[UIApplication sharedApplication] endBackgroundTask:expiredTask];
+        }
+    }];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        ThemerSpotlightIconServicesVerifyResult verifyResult =
+            ThemerSpotlightIconServicesVerifyResultNoState;
+        ThemerSpotlightStock68MaterializationResult materializationResult =
+            ThemerSpotlightStock68MaterializationResultTransportFailed;
+        ThemerSpotlightStock68RecoveryInspectionResult inspectionResult =
+            ThemerSpotlightStock68RecoveryInspectionRejected;
+        ThemerSpotlightStock68RecoveryInspectionReport inspectionReport = {0};
+        ThemerSpotlightStoreSurfaceInventoryReport storeSurfaceReport = {0};
+        ThemerSpotlightAgentPreflightReport agentPreflightReport = {0};
+        ThemerSpotlightAgentResponseContractReport agentResponseReport = {0};
+        BOOL ok = NO;
+        log_user("[ICONSERVICES_LAB] action-begin action=%s\n",
+                 taskName.UTF8String ?: "unknown");
+        switch (action) {
+            case SettingsSpotlightIconServicesActionProbe:
+                ok = settings_probe_spotlight_iconservices_now();
+                break;
+            case SettingsSpotlightIconServicesActionSeed:
+                ok = settings_begin_spotlight_iconservices_now();
+                break;
+            case SettingsSpotlightIconServicesActionVerifyRestore:
+                ok = settings_verify_spotlight_iconservices_now(&verifyResult);
+                break;
+            case SettingsSpotlightIconServicesActionEmergencyRestore:
+                ok = settings_restore_spotlight_iconservices_now();
+                break;
+            case SettingsSpotlightIconServicesActionMaterializeStock68:
+                ok = settings_materialize_spotlight_stock68_now(
+                    &materializationResult);
+                break;
+            case SettingsSpotlightIconServicesActionVerifyMaterializedStock68:
+                ok = settings_verify_materialized_spotlight_stock68_now(
+                    &materializationResult);
+                break;
+            case SettingsSpotlightIconServicesActionInspectGenerationRecovery:
+                ok = settings_inspect_spotlight_generation_recovery_now(
+                    &inspectionResult, &inspectionReport);
+                break;
+            case SettingsSpotlightIconServicesActionInspectLiveStoreState:
+                ok = settings_inspect_spotlight_live_store_state_now(&storeSurfaceReport);
+                break;
+            case SettingsSpotlightIconServicesActionInspectStoreSurface:
+                ok = settings_inspect_spotlight_store_surface_now(
+                    &storeSurfaceReport);
+                break;
+            case SettingsSpotlightIconServicesActionAgentPublicationPreflight:
+                ok = settings_preflight_spotlight_agent_publication_now(
+                    &agentPreflightReport);
+                break;
+            case SettingsSpotlightIconServicesActionAgentPublish:
+                ok = settings_publish_spotlight_agent_now(
+                    &agentPreflightReport);
+                break;
+            case SettingsSpotlightIconServicesActionAgentRestore:
+                ok = settings_restore_spotlight_agent_publication_now(
+                    &agentPreflightReport);
+                break;
+            case SettingsSpotlightIconServicesActionInspectAgentWriter:
+                ok = settings_inspect_iconservices_agent_writer_state_now(
+                    &storeSurfaceReport);
+                break;
+            case SettingsSpotlightIconServicesActionInspectAgentResponse:
+                ok = settings_inspect_spotlight_agent_response_contract_now(
+                    &agentResponseReport);
+                break;
+        }
+        if (action == SettingsSpotlightIconServicesActionVerifyRestore) {
+            log_user("[ICONSERVICES_LAB] action-complete action=%s ok=%d "
+                     "verifyResult=%d\n",
+                     taskName.UTF8String ?: "unknown", ok, verifyResult);
+        } else if (action == SettingsSpotlightIconServicesActionMaterializeStock68 ||
+                   action == SettingsSpotlightIconServicesActionVerifyMaterializedStock68) {
+            log_user("[ICONSERVICES_LAB] action-complete action=%s ok=%d "
+                     "materializationResult=%d\n",
+                     taskName.UTF8String ?: "unknown", ok,
+                     materializationResult);
+        } else if (action ==
+                       SettingsSpotlightIconServicesActionInspectGenerationRecovery) {
+            log_user("[ICONSERVICES_LAB] action-complete action=%s ok=%d "
+                     "inspectionResult=%d candidateCount=%d "
+                     "candidateIdentity=%d transactionOwnership=%d\n",
+                     taskName.UTF8String ?: "unknown", ok,
+                     inspectionResult,
+                     inspectionReport.candidateCount,
+                     inspectionReport.candidateIdentityProven,
+                     inspectionReport.transactionOwnershipProven);
+        } else if (action ==
+                       SettingsSpotlightIconServicesActionInspectAgentWriter) {
+            log_user("[ICONSERVICES_LAB] action-complete action=%s ok=%d "
+                     "writerResult=%d words=%d serviceMatches=%d\n",
+                     taskName.UTF8String ?: "unknown", ok,
+                     storeSurfaceReport.result,
+                     storeSurfaceReport.classesScanned,
+                     storeSurfaceReport.candidateCount);
+        } else if (action ==
+                       SettingsSpotlightIconServicesActionInspectAgentResponse) {
+            log_user("[ICONSERVICES_LAB] action-complete action=%s ok=%d "
+                     "responseResult=%d donor=%d response=%d/%d "
+                     "image=%d/%d firstFailure=%s readOnly=1 generated=0 "
+                     "serviceDispatch=0 storeCalls=0 fileMutations=0 "
+                     "recoveryAccess=0\n",
+                     taskName.UTF8String ?: "unknown", ok,
+                     agentResponseReport.result,
+                     agentResponseReport.donorFound,
+                     agentResponseReport.responseConstructed,
+                     agentResponseReport.responseFieldsVerified,
+                     agentResponseReport.returnedImageConstructed,
+                     agentResponseReport.returnedImageFieldsVerified,
+                     agentResponseReport.firstFailureStage[0]
+                        ? agentResponseReport.firstFailureStage : "-");
+        } else if (action ==
+                       SettingsSpotlightIconServicesActionInspectStoreSurface) {
+            log_user("[ICONSERVICES_LAB] action-complete action=%s ok=%d "
+                     "storeSurfaceResult=%d classes=%d methods=%d candidates=%d "
+                     "truncated=%d/%d overflow=%d\n",
+                     taskName.UTF8String ?: "unknown", ok,
+                     storeSurfaceReport.result,
+                     storeSurfaceReport.classesScanned,
+                     storeSurfaceReport.methodsScanned,
+                     storeSurfaceReport.candidateCount,
+                     storeSurfaceReport.methodListTruncated,
+                     storeSurfaceReport.candidateTruncated,
+                     storeSurfaceReport.overflowDetected);
+        } else if (action ==
+                       SettingsSpotlightIconServicesActionEmergencyRestore) {
+            log_user("[ICONSERVICES_LAB] action-complete action=%s ok=%d "
+                     "hostRetired=%d\n",
+                     taskName.UTF8String ?: "unknown", ok,
+                     g_spotlight_recovery_host_retired != 0);
+        } else if (action ==
+                       SettingsSpotlightIconServicesActionAgentPublicationPreflight ||
+                   action == SettingsSpotlightIconServicesActionAgentPublish ||
+                   action == SettingsSpotlightIconServicesActionAgentRestore) {
+            log_user("[ICONSERVICES_LAB] action-complete action=%s ok=%d "
+                     "agentResult=%d decoded=%d/%d/%d dispatch=%d "
+                     "response=%d transaction=%s\n",
+                     taskName.UTF8String ?: "unknown", ok,
+                     agentPreflightReport.result,
+                     agentPreflightReport.decodedRequestVerified,
+                     agentPreflightReport.decodedIconVerified,
+                     agentPreflightReport.decodedDescriptorVerified,
+                     agentPreflightReport.serviceDispatchPossible,
+                     agentPreflightReport.serviceResponseVerified,
+                     agentPreflightReport.transaction[0]
+                        ? agentPreflightReport.transaction : "-");
+        } else {
+            log_user("[ICONSERVICES_LAB] action-complete action=%s ok=%d\n",
+                     taskName.UTF8String ?: "unknown", ok);
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (bgTask != UIBackgroundTaskInvalid) {
+                [[UIApplication sharedApplication] endBackgroundTask:bgTask];
+                bgTask = UIBackgroundTaskInvalid;
+            }
+            NSString *message = nil;
+            switch (action) {
+                case SettingsSpotlightIconServicesActionProbe:
+                    if (ok) {
+                        uint64_t mask =
+                            settings_spotlight_iconservices_u64_default(
+                                kSettingsSpotlightIconServicesSupportedMask);
+                        message = mask
+                            ? @"The mixed candidate is ready. It keeps the genuine stock 40-point entry and adds only an ownership-safe themed 68-point entry. Run Seed once, reopen Spotlight, record themed, stock, or blank, then Verify + Restore."
+                            : @"The mixed stock-40/themed-68 candidate did not pass the copied-restore, ownership, geometry, or exact-route gates. Preserve the complete IconServices log.";
+                    } else {
+                        message = @"IconServices object discovery did not complete. Check the activity log.";
+                    }
+                    break;
+                case SettingsSpotlightIconServicesActionSeed:
+                    message = ok
+                        ? @"The genuine stock 40 plus retained-themed 68 bag was seeded. Dismiss and reopen Spotlight, record whether the target is themed, stock, or blank, then run Verify + Restore."
+                        : @"The retained-CG themed bag was not cleanly seeded. Check the activity log and recovery state.";
+                    break;
+                case SettingsSpotlightIconServicesActionVerifyRestore:
+                    if (ok) {
+                        message = @"The stock-preserved themed-68 store payload persisted, the original dictionary was restored, and the temporary store unit was removed. Compare this with the recorded visible result.";
+                    } else if (verifyResult ==
+                               ThemerSpotlightIconServicesVerifyResultCleanupFailed) {
+                        message = @"Verification ran, but targeted stock restoration did not verify. The run remains armed; inspect the activity log and use Emergency Restore.";
+                    } else if (verifyResult ==
+                               ThemerSpotlightIconServicesVerifyResultHostStateMismatch) {
+                        message = @"The Spotlight host changed, so this run cannot be compared. The recorded owner was preserved; use Emergency Restore after the old host exit is proven.";
+                    } else if (verifyResult ==
+                               ThemerSpotlightIconServicesVerifyResultNoState) {
+                        message = @"No remote recovery state was found. The recorded recovery metadata was preserved; use Emergency Restore and inspect the activity log before another candidate.";
+                    } else if (verifyResult ==
+                               ThemerSpotlightIconServicesVerifyResultPersistentHit) {
+                        message = @"The themed entry persisted, but Phase 1 did not end through a clean independent channel. Restoration completed; do not classify this run as working.";
+                    } else {
+                        message = @"Verification completed without a persistent hit. Check the activity log for the readback and restore verdicts.";
+                    }
+                    break;
+                case SettingsSpotlightIconServicesActionEmergencyRestore:
+                    if (g_spotlight_recovery_host_retired != 0) {
+                        message = @"The exact failed Spotlight host was retired. Open Spotlight once without searching for the target, return to kslop, and run Emergency Restore again. No reboot is required; recovery remains armed until the replacement-host proof completes.";
+                    } else if (ok) {
+                        NSString *resolvedStatus =
+                            [NSUserDefaults.standardUserDefaults
+                                stringForKey:kSettingsSpotlightStock68Status];
+                        message = [resolvedStatus isEqualToString:@"materialized"]
+                            ? @"Emergency Restore proved and adopted the interrupted genuine stock68 result. Run Verify Materialized Stock 68 next; recovery issued no new generation request."
+                            : @"Emergency Restore completed and cleared the recovery barrier. Materialize Genuine Spotlight Stock 68 is available again. Use a fresh Spotlight host before issuing another generation request.";
+                    } else {
+                        ThemerSpotlightStock68JournalSnapshot journal =
+                            themer_spotlight_stock68_journal_snapshot();
+                        message = journal.classification ==
+                                ThemerSpotlightStock68JournalLegacyIssuedAmbiguous
+                            ? @"Emergency Restore could not prove one exact genuine stock68 result for forward adoption. The issued journal remains armed; copy the relevant recovery log."
+                            : journal.classification ==
+                                ThemerSpotlightStock68JournalDispatchPossible
+                            ? @"Emergency Restore could not prove one exact genuine stock68 result for forward adoption. The dispatch journal remains armed; copy the relevant recovery log."
+                            : @"Targeted restoration did not verify. Recovery metadata was retained; inspect the activity log before taking another action.";
+                    }
+                    break;
+                case SettingsSpotlightIconServicesActionMaterializeStock68:
+                    if (ok) {
+                        message = materializationResult ==
+                                ThemerSpotlightStock68MaterializationResultAlreadyPresent
+                            ? @"The pinned target already had a genuine stock68 record. Run fresh-session verification next."
+                            : @"One genuine stock68 record was materialized for the pinned target. Run fresh-session verification next; themed Seed remains disabled.";
+                    } else if (materializationResult ==
+                               ThemerSpotlightStock68MaterializationResultWrongDescriptorRolledBack ||
+                               materializationResult ==
+                               ThemerSpotlightStock68MaterializationResultAmbiguousRolledBack) {
+                        message = @"Generation changed the wrong or an ambiguous descriptor topology. The exact original dictionary was restored; inspect the activity log before another action.";
+                    } else if (materializationResult ==
+                               ThemerSpotlightStock68MaterializationResultRollbackFailed) {
+                        message = @"Materialization rollback did not verify. Recovery remains required; use Emergency Restore against the recorded Spotlight owner and inspect the activity log.";
+                    } else if (materializationResult ==
+                               ThemerSpotlightStock68MaterializationResultStoreRoundTripVerified) {
+                        message = @"The generated record passed a high-level store write, exact readback, and targeted removal. Cleanup and the control-channel close verified. The named stock68 dictionary remains empty; this result does not enable Seed.";
+                    } else if (materializationResult ==
+                               ThemerSpotlightStock68MaterializationResultStoreRegisteredRecoveryRequired) {
+                        message = @"The store registration diagnostic requires recovery. Its journal retains the exact transaction identity; use Emergency Restore to restore the dictionary and verify targeted store cleanup before another action.";
+                    } else if (materializationResult ==
+                               ThemerSpotlightStock68MaterializationResultIssuedUnmaterializedRecoveryRequired) {
+                        message = @"The generation request returned a coherent image while the exact empty dictionary stayed unchanged. Recovery remains required because store cleanup was not proven; use Emergency Restore before another action.";
+                    } else if (materializationResult ==
+                               ThemerSpotlightStock68MaterializationResultStatePresent) {
+                        message = @"Materialization is blocked by existing recovery state. Inspect the journal classification in the relevant log; an ambiguous issued journal cannot be cleared by this build.";
+                    } else {
+                        message = @"The one-target stock68 materialization proof did not pass. Recovery metadata was retained; copy the relevant log before another action.";
+                    }
+                    break;
+                case SettingsSpotlightIconServicesActionVerifyMaterializedStock68:
+                    if (ok) {
+                        message = @"Fresh-session verification found the exact same stock68 UUID, token, named descriptor, and cache file. The materialization mechanism is proven for this target; themed Seed remains disabled in this build.";
+                    } else {
+                        ThemerSpotlightStock68JournalSnapshot journal =
+                            themer_spotlight_stock68_journal_snapshot();
+                        message = journal.classification ==
+                                ThemerSpotlightStock68JournalLegacyIssuedAmbiguous
+                            ? @"Fresh-session verification did not prove the exact materialized identity. A legacy issued journal remains ambiguous; copy the relevant log. This build cannot clear that journal."
+                            : journal.classification ==
+                                ThemerSpotlightStock68JournalDispatchPossible
+                            ? @"Fresh-session verification did not prove the exact materialized identity. Dispatch may have reached generation; copy the relevant log. Store cleanup remains unproven."
+                            : @"Fresh-session verification did not prove the exact materialized identity. Recovery metadata or a durable store journal was retained; inspect the activity log before another action.";
+                    }
+                    break;
+                case SettingsSpotlightIconServicesActionInspectGenerationRecovery:
+                    if (!ok) {
+                        message = @"The read-only recovery inspection did not complete through a stable Spotlight session. The journal and recovery owner were preserved.";
+                    } else if (inspectionResult ==
+                               ThemerSpotlightStock68RecoveryInspectionNoCandidate) {
+                        message = @"The read-only recovery inspection found no authoritative named 68-point record. The issued journal remains armed; copy the relevant log for the next recovery step.";
+                    } else if (inspectionResult ==
+                               ThemerSpotlightStock68RecoveryInspectionAmbiguous) {
+                        message = @"The read-only recovery inspection found ambiguous or incomplete candidate state. Nothing was removed and the issued journal remains armed; copy the relevant log.";
+                    } else if (inspectionResult ==
+                               ThemerSpotlightStock68RecoveryInspectionCandidateValidated) {
+                        message = inspectionReport.transactionOwnershipProven
+                            ? @"The recovery candidate and its transaction ownership were validated. No cleanup was performed by this read-only action; copy the relevant log."
+                            : @"A current 68-point candidate and store unit were validated, but this old journal still does not bind its UUID to the failed request. Nothing was removed; copy the relevant log.";
+                    } else {
+                        message = @"The read-only recovery inspection was rejected. Nothing was changed; inspect the relevant log.";
+                    }
+                    break;
+                case SettingsSpotlightIconServicesActionInspectLiveStoreState:
+                    message = ok ? @"Live store-state capture completed. Copy Relevant Log for the lifecycle fingerprint and candidate readback." : @"Live store-state capture was partial or failed. Copy Relevant Log for distinct ABI, nil, and transport observations. Generation and mutations remained zero.";
+                    break;
+                case SettingsSpotlightIconServicesActionInspectAgentWriter:
+                    message = ok
+                        ? @"The read-only inspection captured iconservicesagent's actual mutable cache, store, index, and candidate files. Copy Relevant Log for the writer-state fingerprint and candidate readback."
+                        : @"The read-only writer inspection was partial or failed. Copy Relevant Log for service discovery, ABI, candidate-file, and transport evidence. No generation or mutation was issued.";
+                    break;
+                case SettingsSpotlightIconServicesActionInspectAgentResponse:
+                    if (ok) {
+                        message = @"The cached Perplexity donor was reproduced through a scratch ISGenerationResponse and scratch IFImage with exact logical bytes, UUID, token, geometry, and pixels. No generation, service, store, file, or recovery action occurred; copy Relevant Log.";
+                    } else if (agentResponseReport.result ==
+                               ThemerSpotlightAgentResponseContractSourceUnavailable) {
+                        message = @"No already-cached Perplexity Spotlight donor was available. This is a clean read-only cache miss; open Perplexity through Spotlight and retry. Nothing was generated or mutated.";
+                    } else {
+                        message = @"The cached-donor scratch-response proof stopped at its first ABI or verification failure. No generation, service dispatch, store call, file mutation, or recovery access occurred; copy Relevant Log.";
+                    }
+                    break;
+                case SettingsSpotlightIconServicesActionInspectStoreSurface:
+                    if (ok) {
+                        message = @"The read-only store registration-surface inventory completed through a stable Spotlight session. Copy Relevant Log for the ABI gates and candidate selector metadata.";
+                    } else if (storeSurfaceReport.result ==
+                               ThemerSpotlightStoreSurfaceInventoryPartial) {
+                        message = @"The store registration-surface inventory was partial or truncated, so it was not accepted as complete. No generation, mutation, file operation, or recovery-state change was performed; copy the relevant log.";
+                    } else if (storeSurfaceReport.result ==
+                               ThemerSpotlightStoreSurfaceInventoryABIRejected) {
+                        message = @"A required getter ABI did not exactly match the accepted object-return encoding. The inventory stopped before that getter was invoked; copy the relevant log.";
+                    } else {
+                        message = @"The read-only store registration-surface inventory did not complete through a stable Spotlight session. No generation, mutation, file operation, or recovery-state change was performed; copy the relevant log.";
+                    }
+                    break;
+                case SettingsSpotlightIconServicesActionAgentPublicationPreflight:
+                    message = ok
+                        ? @"The agent request survived secure coding with the target bundle digest, exact themed image bytes, and ignoreCache descriptor intact. No service request or store mutation was issued; copy Relevant Log for the proof."
+                        : @"The read-only agent publication preflight did not prove the complete secure-coded request graph. No service request or store mutation was issued; copy Relevant Log for the rejected ABI or mismatched field.";
+                    break;
+                case SettingsSpotlightIconServicesActionAgentPublish:
+                    message = ok
+                        ? @"The themed icon is now the strongly retained canonical icon for the target digest, and the verified IconServices agent response was installed in its live image cache. Search for the target in Spotlight, then copy Relevant Log. No store, index, or icon file was modified."
+                        : @"Agent publication did not complete its response, canonical-retention, cache-readback, and clean-close gates. Do not retry while its v2 transaction is armed; copy Relevant Log and use Restore Stock via IconServices Agent.";
+                    break;
+                case SettingsSpotlightIconServicesActionAgentRestore:
+                    message = ok
+                        ? @"The process-resident publication is gone. If the recorded Spotlight process was still alive, a verified stock agent response was installed into the retained cache before its strong association was released; otherwise process exit had already removed the effect. The v2 journal is cleared."
+                        : @"Stock restoration did not complete all cache-readback, association-release, and clean-close gates. The v2 recovery journal remains armed; copy Relevant Log and do not run Publish again.";
+                    break;
+            }
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:PackageQueueDidChangeNotification
+                              object:[PackageQueue sharedQueue]];
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil
+                            userInfo:@{
+                                kSettingsActionsDidCompleteSuccessKey: @(ok),
+                                kSettingsActionsDidCompleteMessageKey: message ?: @"IconServices lab phase finished."
+                            }];
+            cyanide_upload_log_if_enabled();
+        });
+    });
+}
+
 static void settings_run_nano_apply_action(void)
 {
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
@@ -3000,6 +10500,63 @@ static void settings_run_nano_clear_action(void)
             [[NSNotificationCenter defaultCenter]
                 postNotificationName:kSettingsActionsDidCompleteNotification
                               object:nil];
+        });
+    });
+}
+
+static void settings_run_font_changer_action(UIViewController *host, BOOL apply)
+{
+    __weak UIViewController *weakHost = host;
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        BOOL ok = settings_apply_font_changer_now(apply);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIViewController *strongHost = weakHost;
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil
+                            userInfo:@{
+                                kSettingsActionsDidCompleteSuccessKey: @(ok),
+                                kSettingsActionsDidCompleteMessageKey: ok
+                                    ? @"Font change complete. Respringing now."
+                                    : @"Font change failed — check the log."
+                            }];
+            if (ok && strongHost) {
+                settings_begin_system_edit_respring(strongHost);
+            }
+        });
+    });
+}
+
+static void settings_run_legacy_font_app_restore_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(0, 0), ^{
+        BOOL ok = NO;
+        if (!settings_try_claim_actions_lock("Legacy App Font Restore",
+                                             "[APP-FONT] Another action is already running.")) {
+            ok = NO;
+        } else {
+            @try {
+                if (!settings_ensure_kexploit()) {
+                    log_user("[APP-FONT] Failed: kernel primitives were not acquired. Please try running chain again.\n");
+                    ok = NO;
+                } else {
+                    ok = font_changer_restore_legacy_app_backups();
+                }
+            } @finally {
+                settings_release_actions_lock();
+            }
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil
+                            userInfo:@{
+                                kSettingsActionsDidCompleteSuccessKey: @(ok),
+                                kSettingsActionsDidCompleteMessageKey: ok
+                                    ? @"Legacy app fonts restored. Force quit and reopen affected apps."
+                                    : @"Legacy app font restore failed or changed nothing. Check the log."
+                            }];
         });
     });
 }
@@ -3130,6 +10687,7 @@ static void settings_start_statbar_live_loop(void)
         NSUInteger failures = 0;
         uint64_t nextTickUS = settings_now_us();
         BOOL pausedForSleep = NO;
+        BOOL pausedForAppChurn = NO;
 
         printf("[SETTINGS] StatBar live loop started interval=%uus background=%uus max=%lu\n",
                kStatBarLiveIntervalUS,
@@ -3143,10 +10701,11 @@ static void settings_start_statbar_live_loop(void)
                    !g_statbar_live_stop_requested &&
                    tick < kStatBarLiveMaxTicks) {
                 useconds_t intervalUS = settings_statbar_live_interval_us();
-                if (!settings_statbar_screen_awake()) {
+                if (!settings_statbar_can_poll_springboard()) {
                     if (!pausedForSleep) {
                         pausedForSleep = YES;
-                        printf("[SETTINGS] StatBar paused while screen is asleep\n");
+                        printf("[SETTINGS] StatBar paused while %s\n",
+                               settings_statbar_pause_reason());
                     }
                     settings_live_loop_sleep_interruptible(0,
                                                            intervalUS,
@@ -3157,6 +10716,28 @@ static void settings_start_statbar_live_loop(void)
                 if (pausedForSleep) {
                     pausedForSleep = NO;
                     printf("[SETTINGS] StatBar resumed after screen wake\n");
+                }
+
+                uint64_t appChurnRemainingUS = 0;
+                if (settings_statbar_app_churn_pause_remaining(&appChurnRemainingUS)) {
+                    if (!pausedForAppChurn) {
+                        pausedForAppChurn = YES;
+                        printf("[SETTINGS] StatBar paused during app install/update churn\n");
+                    }
+                    useconds_t sleepUS = intervalUS;
+                    if (appChurnRemainingUS < (uint64_t)sleepUS) {
+                        sleepUS = (useconds_t)appChurnRemainingUS;
+                    }
+                    if (sleepUS < 100000) sleepUS = 100000;
+                    settings_live_loop_sleep_interruptible(0,
+                                                           sleepUS,
+                                                           &g_statbar_live_stop_requested);
+                    nextTickUS = settings_now_us();
+                    continue;
+                }
+                if (pausedForAppChurn) {
+                    pausedForAppChurn = NO;
+                    printf("[SETTINGS] StatBar resumed after app churn\n");
                 }
 
                 uint64_t tickStartUS = settings_now_us();
@@ -3174,6 +10755,7 @@ static void settings_start_statbar_live_loop(void)
                                                   [d boolForKey:kSettingsStatBarShowCPU],
                                                   [d boolForKey:kSettingsStatBarShowLabels],
                                                   [d boolForKey:kSettingsStatBarNetworkOnly]);
+                    settings_note_springboard_remote_call_result_locked("StatBar live", ok);
                 }
 
                 if (tick == 0) {
@@ -3239,7 +10821,22 @@ static void settings_start_statbar_live_loop(void)
             }
             if (failures > 0)
                 cyanide_upload_log_milestone(@"statbar-live-exited-failed");
+            BOOL restartAfterRollover =
+                tick >= kStatBarLiveMaxTicks &&
+                [d boolForKey:kSettingsStatBarEnabled] &&
+                !settings_cleanup_in_progress() &&
+                !g_statbar_live_stop_requested &&
+                failures == 0 &&
+                g_springboard_rc_ready;
             __sync_lock_release(&g_statbar_live_running);
+            if (restartAfterRollover) {
+                printf("[SETTINGS] StatBar live loop rolling over cleanly after %lu ticks\n",
+                       (unsigned long)tick);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)NSEC_PER_SEC),
+                               dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                    settings_start_statbar_live_loop();
+                });
+            }
         }
     });
 }
@@ -3257,21 +10854,34 @@ static void settings_apply_statbar_once_async(const char *reason)
         if (settings_cleanup_in_progress()) return;
         bool ok = false;
         (void)settings_refresh_screen_awake_state(reason ?: "statbar apply");
-        if (!settings_screen_awake_cached()) {
-            printf("[SETTINGS] StatBar lifecycle apply%s%s skipped: screen asleep\n",
-                   reason ? ": " : "", reason ?: "");
+        if (!settings_statbar_can_poll_springboard()) {
+            printf("[SETTINGS] StatBar lifecycle apply%s%s skipped: %s\n",
+                   reason ? ": " : "", reason ?: "",
+                   settings_statbar_pause_reason());
+            settings_start_statbar_live_loop();
+            return;
+        }
+        uint64_t appChurnRemainingUS = 0;
+        if (settings_statbar_app_churn_pause_remaining(&appChurnRemainingUS)) {
+            printf("[SETTINGS] StatBar lifecycle apply%s%s skipped: app churn remaining=%llums\n",
+                   reason ? ": " : "", reason ?: "",
+                   (unsigned long long)(appChurnRemainingUS / 1000ULL));
             settings_start_statbar_live_loop();
             return;
         }
         @synchronized (settings_rc_lock()) {
             if (settings_cleanup_in_progress() ||
                 ![d boolForKey:kSettingsStatBarEnabled] ||
-                !g_springboard_rc_ready) return;
+                !g_springboard_rc_ready) {
+                return;
+            }
+            if (!settings_statbar_can_poll_springboard()) return;
             ok = statbar_apply_in_session([d boolForKey:kSettingsStatBarCelsius],
                                           [d boolForKey:kSettingsStatBarShowNet],
                                           [d boolForKey:kSettingsStatBarShowCPU],
                                           [d boolForKey:kSettingsStatBarShowLabels],
                                           [d boolForKey:kSettingsStatBarNetworkOnly]);
+            settings_note_springboard_remote_call_result_locked("StatBar lifecycle", ok);
         }
         // Only log lifecycle applies that change result; a clean success on
         // every foreground/background flip is noise.
@@ -3298,6 +10908,7 @@ static void settings_start_nsbar_live_loop(void)
         NSUInteger tick = 0;
         NSUInteger failures = 0;
         BOOL pausedForSleep = NO;
+        BOOL pausedForAppChurn = NO;
         @try {
             while ([d boolForKey:kSettingsNSBarEnabled] &&
                    !settings_cleanup_in_progress() &&
@@ -3320,7 +10931,29 @@ static void settings_start_nsbar_live_loop(void)
                     printf("[SETTINGS] NSBar resumed after screen wake\n");
                 }
 
+                uint64_t appChurnRemainingUS = 0;
+                if (settings_nsbar_app_churn_pause_remaining(&appChurnRemainingUS)) {
+                    if (!pausedForAppChurn) {
+                        pausedForAppChurn = YES;
+                        printf("[SETTINGS] NSBar paused during app install/update churn\n");
+                    }
+                    useconds_t sleepUS = intervalUS;
+                    if (appChurnRemainingUS < (uint64_t)sleepUS) {
+                        sleepUS = (useconds_t)appChurnRemainingUS;
+                    }
+                    if (sleepUS < 100000) sleepUS = 100000;
+                    settings_live_loop_sleep_interruptible(0,
+                                                           sleepUS,
+                                                           &g_nsbar_live_stop_requested);
+                    continue;
+                }
+                if (pausedForAppChurn) {
+                    pausedForAppChurn = NO;
+                    printf("[SETTINGS] NSBar resumed after app churn\n");
+                }
+
                 bool ok = false;
+                uint64_t tickStartUS = settings_now_us();
                 @synchronized (settings_rc_lock()) {
                     if (settings_cleanup_in_progress() ||
                         ![d boolForKey:kSettingsNSBarEnabled] ||
@@ -3328,10 +10961,15 @@ static void settings_start_nsbar_live_loop(void)
                     ok = nsbar_apply_in_session((NSBarPosition)[d integerForKey:kSettingsNSBarPosition]);
                     settings_mark_tweak_applied(kSettingsNSBarEnabled,
                                                 ok && [d boolForKey:kSettingsNSBarEnabled]);
+                    settings_note_springboard_remote_call_result_locked("NSBar live", ok);
                 }
-                if (tick == 0 || !ok) {
-                    printf("[SETTINGS] NSBar live tick=%lu result=%d\n",
-                           (unsigned long)tick, ok);
+                uint64_t tickElapsedUS = tickStartUS ? settings_now_us() - tickStartUS : 0;
+                if (tick == 0 || !ok || tickElapsedUS > 500000ULL) {
+                    printf("[SETTINGS] NSBar live tick=%lu result=%d elapsed=%llums failures=%lu\n",
+                           (unsigned long)tick,
+                           ok,
+                           (unsigned long long)(tickElapsedUS / 1000ULL),
+                           (unsigned long)failures);
                 }
                 failures = ok ? 0 : failures + 1;
                 if (failures >= settings_live_failure_limit(3)) break;
@@ -3367,6 +11005,15 @@ static void settings_apply_nsbar_once_async(const char *reason)
             settings_start_nsbar_live_loop();
             return;
         }
+        uint64_t appChurnRemainingUS = 0;
+        if (settings_nsbar_app_churn_pause_remaining(&appChurnRemainingUS)) {
+            printf("[SETTINGS] NSBar lifecycle apply%s%s skipped: app churn remaining=%llums\n",
+                   reason ? ": " : "", reason ?: "",
+                   (unsigned long long)(appChurnRemainingUS / 1000ULL));
+            settings_start_nsbar_live_loop();
+            return;
+        }
+        uint64_t applyStartUS = settings_now_us();
         @synchronized (settings_rc_lock()) {
             if (settings_cleanup_in_progress() ||
                 ![d boolForKey:kSettingsNSBarEnabled] ||
@@ -3374,9 +11021,12 @@ static void settings_apply_nsbar_once_async(const char *reason)
             ok = nsbar_apply_in_session((NSBarPosition)[d integerForKey:kSettingsNSBarPosition]);
             settings_mark_tweak_applied(kSettingsNSBarEnabled,
                                         ok && [d boolForKey:kSettingsNSBarEnabled]);
+            settings_note_springboard_remote_call_result_locked("NSBar lifecycle", ok);
         }
-        printf("[SETTINGS] NSBar lifecycle apply%s%s result=%d\n",
-               reason ? ": " : "", reason ?: "", ok);
+        uint64_t applyElapsedUS = applyStartUS ? settings_now_us() - applyStartUS : 0;
+        printf("[SETTINGS] NSBar lifecycle apply%s%s result=%d elapsed=%llums\n",
+               reason ? ": " : "", reason ?: "", ok,
+               (unsigned long long)(applyElapsedUS / 1000ULL));
         settings_start_nsbar_live_loop();
         settings_notify_package_queue_changed_async();
     });
@@ -3425,6 +11075,7 @@ static void settings_start_nicebarlite_live_loop(void)
                     ok = settings_apply_nicebarlite_from_defaults_locked(d);
                     settings_mark_tweak_applied(kSettingsNiceBarLiteEnabled,
                                                 ok && [d boolForKey:kSettingsNiceBarLiteEnabled]);
+                    settings_note_springboard_remote_call_result_locked("NiceBar Lite live", ok);
                 }
                 if (tick == 0 || !ok) {
                     printf("[SETTINGS] NiceBar Lite live tick=%lu result=%d\n",
@@ -3472,6 +11123,7 @@ static void settings_apply_nicebarlite_once_async(const char *reason)
             ok = settings_apply_nicebarlite_from_defaults_locked(d);
             settings_mark_tweak_applied(kSettingsNiceBarLiteEnabled,
                                         ok && [d boolForKey:kSettingsNiceBarLiteEnabled]);
+            settings_note_springboard_remote_call_result_locked("NiceBar Lite lifecycle", ok);
         }
         printf("[SETTINGS] NiceBar Lite lifecycle apply%s%s result=%d\n",
                reason ? ": " : "", reason ?: "", ok);
@@ -3501,16 +11153,19 @@ static void settings_start_livewp_live_loop(void)
                    !settings_cleanup_in_progress() &&
                    !g_livewp_live_stop_requested &&
                    tick < kLiveWPLiveMaxTicks) {
+                bool ok = false;
                 @synchronized (settings_rc_lock()) {
                     if (settings_cleanup_in_progress() ||
                         ![d boolForKey:kSettingsLiveWPEnabled] ||
                         !g_springboard_rc_ready) break;
                     if (settings_livewp_should_play()) {
-                        (void)livewp_resume_in_session();
-                        (void)livewp_repair_in_session();
+                        bool resumed = livewp_resume_in_session();
+                        bool repaired = livewp_repair_in_session();
+                        ok = resumed && repaired;
                     } else {
-                        (void)livewp_pause_in_session();
+                        ok = livewp_pause_in_session();
                     }
+                    settings_note_springboard_remote_call_result_locked("LiveWP live", ok);
                 }
                 tick++;
                 settings_live_loop_sleep_interruptible(0,
@@ -3539,6 +11194,7 @@ static void settings_pause_livewp_for_sleep_async(const char *reason)
                 !g_springboard_rc_ready) return;
             if (settings_livewp_should_play()) return;
             bool ok = livewp_pause_in_session();
+            settings_note_springboard_remote_call_result_locked("LiveWP pause", ok);
             printf("[SETTINGS] LiveWP pause%s%s result=%d\n",
                    reason ? ": " : "", reason ?: "", ok);
         }
@@ -3562,6 +11218,7 @@ static void settings_resume_livewp_after_wake_async(const char *reason)
             }
             ok = livewp_resume_in_session();
             if (ok) settings_mark_tweak_applied(kSettingsLiveWPEnabled, YES);
+            settings_note_springboard_remote_call_result_locked("LiveWP resume", ok);
         }
         printf("[SETTINGS] LiveWP resume%s%s result=%d\n",
                reason ? ": " : "", reason ?: "", ok);
@@ -3641,6 +11298,7 @@ static void settings_start_rssi_live_loop(void)
                     }
                     ok = rssidisplay_apply_in_session([d boolForKey:kSettingsRSSIDisplayWifi],
                                                       [d boolForKey:kSettingsRSSIDisplayCell]);
+                    settings_note_springboard_remote_call_result_locked("RSSI live", ok);
                 }
 
                 uint64_t tickEndUS = settings_now_us();
@@ -3723,6 +11381,7 @@ static void settings_apply_rssi_once_async(const char *reason)
                 !g_springboard_rc_ready) return;
             ok = rssidisplay_apply_in_session([d boolForKey:kSettingsRSSIDisplayWifi],
                                               [d boolForKey:kSettingsRSSIDisplayCell]);
+            settings_note_springboard_remote_call_result_locked("RSSI lifecycle", ok);
         }
         printf("[SETTINGS] RSSI lifecycle apply%s%s result=%d\n",
                reason ? ": " : "", reason ?: "", ok);
@@ -3820,6 +11479,7 @@ static void settings_start_axonlite_live_loop(void)
                         continue;
                     }
                     ok = axonlite_apply_in_session();
+                    settings_note_springboard_remote_call_result_locked("Axon Lite live", ok);
                 }
 
                 if (tick == 0) {
@@ -4128,6 +11788,7 @@ static void settings_start_notificationisland_live_loop(void)
                         break;
                     }
                     ok = notificationisland_tick_in_session();
+                    settings_note_springboard_remote_call_result_locked("Notification Island live", ok);
                 }
 
                 if (tick == 0) {
@@ -4181,179 +11842,20 @@ static void settings_start_notificationisland_live_loop(void)
 
 static void settings_start_themer_live_loop(void)
 {
-    if (!settings_device_supported()) return;
-    if (settings_cleanup_in_progress()) return;
-
-    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-    if (![d boolForKey:kSettingsThemerEnabled] &&
-        ![d boolForKey:kSettingsSnowBoardLiteEnabled]) return;
-    if (!g_springboard_rc_ready) return;
-    if (settings_themer_dynamic_updates_blocked_by_stage(d)) {
-        settings_note_themer_stage_conflict(YES);
-        return;
+    static volatile int loggedAlready = 0;
+    if (__sync_bool_compare_and_swap(&loggedAlready, 0, 1)) {
+        printf("[SETTINGS] Themer dynamic live loop disabled; SnowBoard Remix now uses one-shot static paints\n");
     }
-
-    if (__sync_lock_test_and_set(&g_themer_live_running, 1)) {
-        static volatile int loggedAlready = 0;
-        if (__sync_bool_compare_and_swap(&loggedAlready, 0, 1)) {
-            printf("[SETTINGS] Themer dynamic live loop already running\n");
-        }
-        return;
-    }
-
-    if (settings_cleanup_in_progress()) {
-        __sync_lock_release(&g_themer_live_running);
-        return;
-    }
-
-    g_themer_live_stop_requested = 0;
-    dispatch_async(dispatch_get_global_queue(0, 0), ^{
-        NSUInteger tick = 0;
-        NSUInteger failures = 0;
-        NSInteger iosMajor = [[NSProcessInfo processInfo] operatingSystemVersion].majorVersion;
-        NSUInteger maxTicks = (iosMajor > 0 && iosMajor < 26)
-            ? kThemerLegacyLiveMaxTicks
-            : kThemerLiveMaxTicks;
-
-        printf("[SETTINGS] Themer dynamic live loop started interval=%uus background=%uus max=%lu iosMajor=%ld\n",
-               kThemerLiveIntervalUS,
-               kThemerLiveBackgroundIntervalUS,
-               (unsigned long)maxTicks,
-               (long)iosMajor);
-
-        @try {
-            // Start with a sleep so we don't pile a tick on top of the
-            // initial Run apply that just completed.
-            settings_live_loop_sleep_interruptible(0,
-                                                   settings_live_interval(kThemerLiveIntervalUS,
-                                                                          kThemerLiveBackgroundIntervalUS),
-                                                   &g_themer_live_stop_requested);
-            while (([d boolForKey:kSettingsThemerEnabled] ||
-                    [d boolForKey:kSettingsSnowBoardLiteEnabled]) &&
-                   !settings_themer_dynamic_updates_blocked_by_stage(d) &&
-                   !settings_cleanup_in_progress() &&
-                   !g_themer_live_stop_requested &&
-                   tick < maxTicks) {
-                useconds_t intervalUS = settings_live_interval(kThemerLiveIntervalUS,
-                                                               kThemerLiveBackgroundIntervalUS);
-                bool ok = false;
-
-                @synchronized (settings_rc_lock()) {
-                    if (g_themer_live_stop_requested) break;
-                    if (!g_springboard_rc_ready) {
-                        printf("[SETTINGS] Themer dynamic loop has no SpringBoard RemoteCall session\n");
-                        failures++;
-                        break;
-                    }
-                    if (!g_kexploit_done || g_settings_actions_running) {
-                        // Wait for actions to finish before next tick.
-                        ok = true;
-                    } else {
-                        ok = themer_repaint_dynamic_cached_views_in_session();
-                    }
-                }
-
-                if (tick == 0) {
-                    printf("[SETTINGS] Themer dynamic live first tick result=%d\n", ok);
-                }
-                failures = ok ? 0 : failures + 1;
-
-                tick++;
-                if ((![d boolForKey:kSettingsThemerEnabled] &&
-                     ![d boolForKey:kSettingsSnowBoardLiteEnabled]) ||
-                    settings_themer_dynamic_updates_blocked_by_stage(d) ||
-                    g_themer_live_stop_requested ||
-                    tick >= maxTicks) break;
-
-                intervalUS = settings_live_interval(kThemerLiveIntervalUS,
-                                                    kThemerLiveBackgroundIntervalUS);
-                settings_live_loop_sleep_interruptible(0, intervalUS,
-                                                       &g_themer_live_stop_requested);
-            }
-        } @finally {
-            if (settings_themer_dynamic_updates_blocked_by_stage(d)) {
-                settings_note_themer_stage_conflict(YES);
-            }
-            printf("[SETTINGS] Themer dynamic live loop exited ticks=%lu enabled=%d failures=%lu stop=%d\n",
-                   (unsigned long)tick,
-                   [d boolForKey:kSettingsThemerEnabled] || [d boolForKey:kSettingsSnowBoardLiteEnabled],
-                   (unsigned long)failures,
-                   g_themer_live_stop_requested);
-            __sync_lock_release(&g_themer_live_running);
-        }
-    });
 }
 
 static void settings_schedule_themer_repair_burst_internal(const char *reason, BOOL force)
 {
     (void)force;
-    if (!settings_device_supported()) return;
-    if (settings_cleanup_in_progress()) return;
-
-    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-    if (![d boolForKey:kSettingsThemerEnabled] &&
-        ![d boolForKey:kSettingsSnowBoardLiteEnabled]) return;
-    if (!g_springboard_rc_ready) return;
-    if (settings_themer_dynamic_updates_blocked_by_stage(d)) {
-        settings_note_themer_stage_conflict(force);
-        return;
-    }
-
-    __sync_add_and_fetch(&g_themer_repair_generation, 1);
-    if (__sync_lock_test_and_set(&g_themer_repair_running, 1)) return;
-
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        uint64_t seenGeneration = g_themer_repair_generation;
-        NSUInteger tick = 0;
-        NSUInteger quietTicks = 0;
-
-        printf("[SETTINGS] Themer dynamic repair burst started%s%s\n",
+    static volatile int loggedAlready = 0;
+    if (__sync_bool_compare_and_swap(&loggedAlready, 0, 1)) {
+        printf("[SETTINGS] Themer repair bursts disabled%s%s\n",
                reason ? ": " : "", reason ?: "");
-
-        @try {
-            while (([d boolForKey:kSettingsThemerEnabled] ||
-                    [d boolForKey:kSettingsSnowBoardLiteEnabled]) &&
-                   !settings_themer_dynamic_updates_blocked_by_stage(d) &&
-                   !settings_cleanup_in_progress() &&
-                   !g_themer_live_stop_requested &&
-                   tick < 1) {
-                settings_live_loop_sleep_interruptible(0,
-                                                       tick == 0
-                                                           ? kThemerRepairInitialDelayUS
-                                                           : kThemerRepairIntervalUS,
-                                                       &g_themer_live_stop_requested);
-                if (g_themer_live_stop_requested) break;
-
-                bool ok = false;
-                @synchronized (settings_rc_lock()) {
-                    if (!g_springboard_rc_ready || !g_kexploit_done ||
-                        g_settings_actions_running) {
-                        ok = true;
-                    } else {
-                        ok = themer_repaint_dynamic_cached_views_in_session();
-                    }
-                }
-
-                tick++;
-                uint64_t currentGeneration = g_themer_repair_generation;
-                if (currentGeneration != seenGeneration) {
-                    seenGeneration = currentGeneration;
-                    quietTicks = 0;
-                } else {
-                    quietTicks++;
-                    if (quietTicks >= 2) break;
-                }
-
-                if (tick == 1) {
-                    printf("[SETTINGS] Themer dynamic repair first repaint=%d\n", ok);
-                }
-            }
-        } @finally {
-            printf("[SETTINGS] Themer dynamic repair burst exited ticks=%lu\n",
-                   (unsigned long)tick);
-            __sync_lock_release(&g_themer_repair_running);
-        }
-    });
+    }
 }
 
 static void settings_schedule_themer_repair_burst(const char *reason)
@@ -4403,6 +11905,7 @@ static void settings_apply_axonlite_once_async(const char *reason)
                 return;
             }
             ok = axonlite_apply_in_session();
+            settings_note_springboard_remote_call_result_locked("Axon Lite lifecycle", ok);
         }
         printf("[SETTINGS] Axon Lite lifecycle apply%s%s result=%d\n",
                reason ? ": " : "", reason ?: "", ok);
@@ -4418,8 +11921,7 @@ void settings_application_did_enter_background(void)
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     BOOL themerLiveNeeded = g_springboard_rc_ready &&
         !settings_themer_dynamic_updates_blocked_by_stage(d) &&
-        ([d boolForKey:kSettingsThemerEnabled] ||
-         [d boolForKey:kSettingsSnowBoardLiteEnabled]);
+        [d boolForKey:kSettingsThemerEnabled];
     BOOL anyLiveLoopNeeded =
         ([d boolForKey:kSettingsAxonLiteEnabled]    && g_springboard_rc_ready) ||
         (settings_rssi_install_allowed() && [d boolForKey:kSettingsRSSIDisplayEnabled] && g_springboard_rc_ready) ||
@@ -4430,7 +11932,8 @@ void settings_application_did_enter_background(void)
         themerLiveNeeded ||
         ([d boolForKey:kSettingsLiveWPEnabled]      && g_springboard_rc_ready) ||
         (settings_notificationisland_install_allowed() && [d boolForKey:kSettingsNotificationIslandEnabled] && g_springboard_rc_ready) ||
-        (settings_typebanner_install_allowed() && [d boolForKey:kSettingsTypeBannerEnabled]);
+        (settings_typebanner_install_allowed() && [d boolForKey:kSettingsTypeBannerEnabled]) ||
+        CNDIconServicesConsumerLifecycleIsRunning();
     if (anyLiveLoopNeeded) {
         if ([d boolForKey:kSettingsKeepAlive]) {
             ds_keepalive_apply_enabled(YES);
@@ -4522,6 +12025,7 @@ static BOOL settings_key_is_sbc(NSString *key)
 {
     return [key isEqualToString:kSettingsSBCEnabled] ||
            [key isEqualToString:kSettingsSBCDockIcons] ||
+           [key isEqualToString:kSettingsSBCDockAutofillBundleIDs] ||
            [key isEqualToString:kSettingsSBCCols] ||
            [key isEqualToString:kSettingsSBCRows] ||
            [key isEqualToString:kSettingsSBCHideLabels];
@@ -5237,6 +12741,7 @@ static void settings_schedule_live_apply_for_key(NSString *key)
             settings_apply_nsbar_once_async("live settings");
         } else if (![d boolForKey:kSettingsNSBarEnabled]) {
             g_nsbar_live_stop_requested = 1;
+            g_nsbar_app_churn_pause_until_us = 0;
             settings_mark_tweak_applied(kSettingsNSBarEnabled, NO);
             settings_notify_package_queue_changed_async();
             if (g_springboard_rc_ready) {
@@ -5397,6 +12902,7 @@ static void settings_schedule_live_apply_for_key(NSString *key)
             });
         } else if (![d boolForKey:kSettingsStatBarEnabled]) {
             g_statbar_live_stop_requested = 1;
+            g_statbar_app_churn_pause_until_us = 0;
             settings_mark_tweak_applied(kSettingsStatBarEnabled, NO);
             settings_notify_package_queue_changed_async();
             settings_end_statbar_background_task_async("StatBar disabled");
@@ -5497,12 +13003,22 @@ static void settings_schedule_live_apply_for_key(NSString *key)
         if (generation != g_sbc_live_apply_generation) return;
         if (settings_cleanup_in_progress()) return;
 
+        BOOL closedNonLiveRemoteCall = NO;
         @synchronized (settings_rc_lock()) {
             if (settings_cleanup_in_progress() || !g_springboard_rc_ready) return;
             bool ok = settings_apply_sbc_from_defaults_locked(d);
             settings_mark_tweak_applied(kSettingsSBCEnabled,
                                         ok && [d boolForKey:kSettingsSBCEnabled]);
             printf("[SETTINGS] live SBC apply result=%d\n", ok);
+            if (!settings_has_persistent_springboard_remote_call_user() &&
+                g_springboard_rc_ready) {
+                settings_destroy_springboard_remote_call_locked_internal_ex(
+                    "SBC one-shot apply complete", YES, YES);
+                closedNonLiveRemoteCall = g_springboard_rc_ready == 0;
+            }
+        }
+        if (closedNonLiveRemoteCall) {
+            log_user("[OK] SpringBoard channel released — SBC dock/layout state was committed.\n");
         }
         settings_notify_package_queue_changed_async();
     });
@@ -5519,6 +13035,7 @@ void settings_register_defaults(void)
 
         kSettingsSBCEnabled:    @NO,
         kSettingsSBCDockIcons:  @(kSBCDefaultDockIcons),
+        kSettingsSBCDockAutofillBundleIDs: @[],
         kSettingsSBCCols:       @(kSBCDefaultCols),
         kSettingsSBCRows:       @(kSBCDefaultRows),
         kSettingsSBCHideLabels: @(kSBCDefaultHideLabels),
@@ -5627,7 +13144,29 @@ void settings_register_defaults(void)
 
         kSettingsSnowBoardLiteEnabled: @NO,
         kSettingsSnowBoardLiteSelectedThemeID: @"",
-
+        kSettingsSnowBoardRemixSelectedThemeID: @"",
+        kSettingsSnowBoardRemixDebugThreeAppLimit: @YES,
+        kSettingsSnowBoardRemixInstallConsumerMappings: @NO,
+        kSettingsSpotlightIconServicesCandidate:
+            @(ThemerSpotlightIconServicesCandidateCanonicalMixedBag),
+        kSettingsSpotlightIconServicesSupportedMask: @0,
+        kSettingsSpotlightIconServicesProbePID: @0,
+        kSettingsSpotlightIconServicesProbeProc: @0,
+        kSettingsSpotlightIconServicesProbeTask: @0,
+        kSettingsSpotlightIconServicesArmed: @NO,
+        kSettingsSpotlightIconServicesTargetPID: @0,
+        kSettingsSpotlightIconServicesTargetProc: @0,
+        kSettingsSpotlightIconServicesTargetTask: @0,
+        kSettingsSpotlightIconServicesTargetHost: @"",
+        kSettingsSpotlightIconServicesChannelClean: @NO,
+        kSettingsSpotlightStock68Target: @"",
+        kSettingsSpotlightStock68Control: @"",
+        kSettingsSpotlightStock68Fingerprint: @"",
+        kSettingsSpotlightStock68Status: @"idle",
+        kSettingsSpotlightStock68PID: @0,
+        kSettingsSpotlightStock68Proc: @0,
+        kSettingsSpotlightStock68Task: @0,
+        kSettingsSpotlightStock68Host: @"",
         kSettingsLiveWPEnabled: @NO,
         kSettingsLiveWPVideoPath: @"",
 
@@ -5640,6 +13179,8 @@ void settings_register_defaults(void)
         kSettingsNanoMinPairingChipID: @(kNanoDefaultMinPairingChipID),
         kSettingsNanoMinQuickSwitch:   @(kNanoDefaultMinQuickSwitch),
     }];
+    settings_migrate_snowboard_remix_preferences(defaults);
+    [defaults synchronize];
     if (!cyanide_private_tweaks_available()) {
         BOOL changed = NO;
         NSArray<NSString *> *privateKeys = @[
@@ -5751,7 +13292,10 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL notificationIslandEnabled = settings_notificationisland_install_allowed() && [d boolForKey:kSettingsNotificationIslandEnabled];
             BOOL appSwitcherGridEnabled = [d boolForKey:kSettingsAppSwitcherGridEnabled];
             BOOL themerEnabled = [d boolForKey:kSettingsThemerEnabled];
-            BOOL snowboardLiteEnabled = [d boolForKey:kSettingsSnowBoardLiteEnabled];
+            // SnowBoard Remix is an explicit IconServices transaction. The
+            // legacy preference remains readable for migration only and must
+            // never make Run open a SpringBoard session.
+            BOOL snowboardLiteEnabled = NO;
             BOOL liveWPEnabled = [d boolForKey:kSettingsLiveWPEnabled];
             BOOL layoutExtrasEnabled = [d boolForKey:kSettingsLayoutExtrasEnabled];
             BOOL stageStripEnabled = settings_stagestrip_install_allowed() && [d boolForKey:kSettingsStageStripEnabled];
@@ -5767,7 +13311,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             BOOL runNotificationIsland = settings_notificationisland_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsNotificationIslandEnabled, springBoardPendingOnly);
             BOOL runAppSwitcherGrid = settings_enabled_tweak_should_run(d, kSettingsAppSwitcherGridEnabled, springBoardPendingOnly);
             BOOL runThemer = settings_enabled_tweak_should_run(d, kSettingsThemerEnabled, springBoardPendingOnly);
-            BOOL runSnowBoardLite = settings_enabled_tweak_should_run(d, kSettingsSnowBoardLiteEnabled, springBoardPendingOnly);
+            BOOL runSnowBoardLite = NO;
             BOOL runLiveWP = settings_enabled_tweak_should_run(d, kSettingsLiveWPEnabled, springBoardPendingOnly);
             BOOL runLayoutExtras = settings_enabled_tweak_should_run(d, kSettingsLayoutExtrasEnabled, springBoardPendingOnly);
             BOOL runStageStrip = settings_stagestrip_install_allowed() && settings_enabled_tweak_should_run(d, kSettingsStageStripEnabled, springBoardPendingOnly);
@@ -5777,7 +13321,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 settings_note_themer_stage_conflict(YES);
             }
             BOOL cleanupDisabledSpringBoardTweaks = settings_disabled_applied_springboard_cleanup_needed(d);
-            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runAppSwitcherGrid || runThemer || runSnowBoardLite || runLiveWP || runStageStrip || cleanupDisabledSpringBoardTweaks;
+            BOOL needsSpringBoardWork = runSBC || runDarkTweaks || runStatBar || runNSBar || runNiceBarLite || runRSSI || runAxonLite || runGravityLite || runLayoutExtras || runTypeBanner || runNotificationIsland || runAppSwitcherGrid || runThemer || runLiveWP || runStageStrip || cleanupDisabledSpringBoardTweaks;
             BOOL runSandboxEscape = [d boolForKey:kSettingsRunSandboxEscape] && (!pendingOnly || needsSpringBoardWork);
             // TypeBanner prewarms its hidden SpringBoard window during Apply
             // and reuses the open SpringBoard session for text-only updates.
@@ -5836,8 +13380,14 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             cyanide_upload_log_milestone(@"run-plan");
 
             if (!hasRunWork) {
-                if (!statBarEnabled) g_statbar_live_stop_requested = 1;
-                if (!nsBarEnabled) g_nsbar_live_stop_requested = 1;
+                if (!statBarEnabled) {
+                    g_statbar_live_stop_requested = 1;
+                    g_statbar_app_churn_pause_until_us = 0;
+                }
+                if (!nsBarEnabled) {
+                    g_nsbar_live_stop_requested = 1;
+                    g_nsbar_app_churn_pause_until_us = 0;
+                }
                 if (!niceBarLiteEnabled) g_nicebarlite_live_stop_requested = 1;
                 if (!rssiEnabled) g_rssi_live_stop_requested = 1;
                 if (!axonLiteEnabled) g_axonlite_live_stop_requested = 1;
@@ -5881,8 +13431,14 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                     // not run SpringBoard tweak stop paths or clear applied
                     // package state; enabled tweaks are reapplied below.
                     settings_destroy_springboard_remote_call_locked_internal("switching to thermalmonitord", NO);
-                    NSString *lvl = [d stringForKey:kSettingsPowercuffLevel] ?: @"nominal";
-                    bool ok = powercuff_apply(lvl.UTF8String);
+                    bool ok = false;
+                    if (g_springboard_rc_ready || remote_call_has_local_state()) {
+                        log_user("[WARN] Powercuff skipped: the SpringBoard channel could not be safely closed. Respring before retrying.\n");
+                        printf("[SETTINGS] Powercuff target switch blocked by retained SpringBoard RemoteCall state\n");
+                    } else {
+                        NSString *lvl = [d stringForKey:kSettingsPowercuffLevel] ?: @"nominal";
+                        ok = powercuff_apply(lvl.UTF8String);
+                    }
                     settings_mark_tweak_applied(kSettingsPowercuffEnabled,
                                                 ok && [d boolForKey:kSettingsPowercuffEnabled]);
                     log_user("%s Powercuff %s through thermalmonitord.\n",
@@ -6002,18 +13558,28 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                     }
 
                     if (runSnowBoardLite) {
-                        settings_progress(&step, total, "Applying SnowBoard Lite theme");
-                        bool ok = settings_apply_snowboardlite_from_defaults_locked(d);
+                        settings_progress(&step, total, "Applying SnowBoard Remix theme");
+                        bool ok = false;
+                        if (!kexploit_krw_ready()) {
+                            log_user("[SBR] Full apply skipped: kernel primitives failed post-acquisition validation.\n");
+                        } else {
+                            // Match the supplied backup lifecycle: keep the
+                            // producer/cache transaction on the existing
+                            // SpringBoard session without a new remote pool.
+                            ok = settings_apply_springboard_guarded(
+                                "SnowBoard Remix",
+                                kSettingsSpringBoardRCSafeTimeoutFloorMS,
+                                ^bool{
+                                    return settings_apply_snowboardlite_from_defaults_locked(d);
+                                });
+                        }
                         settings_mark_tweak_applied(kSettingsSnowBoardLiteEnabled,
                                                     ok && [d boolForKey:kSettingsSnowBoardLiteEnabled]);
-                        printf("[SETTINGS] SnowBoard Lite result=%d\n", ok);
-                        log_user("%s SnowBoard Lite %s.\n",
+                        printf("[SETTINGS] SnowBoard Remix result=%d\n", ok);
+                        log_user("%s SnowBoard Remix %s.\n",
                                  ok ? "[OK]" : "[WARN]",
                                  ok ? "theme applied" : "did not apply cleanly");
                         cyanide_upload_log_milestone(ok ? @"snowboard-lite-applied" : @"snowboard-lite-warning");
-                        if (ok) {
-                            settings_start_themer_live_loop();
-                        }
                     }
 
                     if (runGravityLite) {
@@ -6023,7 +13589,9 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         settings_stop_gravity_motion();
                         gravitylite_stop_in_session();
                         GravityLiteConfig glConfig = settings_gravitylite_config_from_defaults(d);
-                        bool ok = gravitylite_apply_in_session(glConfig);
+                        bool ok = settings_apply_springboard_guarded("Gravity Lite", 1500, ^bool{
+                            return gravitylite_apply_in_session(glConfig);
+                        });
                         settings_mark_tweak_applied(kSettingsGravityLiteEnabled,
                                                     ok && [d boolForKey:kSettingsGravityLiteEnabled]);
                         if (ok) {
@@ -6057,7 +13625,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                                                     ok && [d boolForKey:kSettingsStatBarEnabled]);
                         log_user("%s StatBar %s.\n",
                                  ok ? "[OK]" : "[WARN]",
-                                 ok ? "showing thermal + memory overlay" : "did not start cleanly");
+                                 ok ? "showing current + memory overlay" : "did not start cleanly");
                         cyanide_upload_log_milestone(ok ? @"statbar-initial-applied" : @"statbar-initial-failed");
                     }
 
@@ -6177,17 +13745,51 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         // from a prior Run. No-op when the strip was never up.
                         stagestrip_stop_in_session();
                     }
+
+                    if (runThemer || runSnowBoardLite) {
+                        /* SnowBoard Remix refreshes SpringBoard from the
+                         * consumer-mapping session with the VM-proven bounded
+                         * sequence: purge registered icon caches, rebuild
+                         * folder composites, then ask SBHIconManager to
+                         * relayout.  Do not fall back to the retired visible
+                         * view/notification-row walker here.  That path emits
+                         * hundreds of synchronous RemoteCall messages and can
+                         * watchdog SpringBoard during a full Run. */
+                        printf("[SETTINGS] Final icon theme repair already handled by the bounded SpringBoard consumer refresh\n");
+                    }
+
+                    if (g_springboard_rc_ready) {
+                        // Diagnostic only: a timed-out synthetic call may still
+                        // return later. Never turn the Run tail into a destructive
+                        // heartbeat/abandon path.
+                        RemoteCallDebugSnapshot postRun = {0};
+                        BOOL postRunHealthy =
+                            remote_call_copy_debug_snapshot(&postRun) &&
+                            postRun.hasLocalState &&
+                            postRun.success &&
+                            postRun.pid > 0 &&
+                            remote_call_current_pid() == postRun.pid;
+                        if (!postRunHealthy) {
+                            settings_log_springboard_remote_call_snapshot_locked(
+                                "post-run unhealthy channel retained", &postRun);
+                            log_user("[WARN] SpringBoard channel became unhealthy during Run. kslop retained it rather than tearing down a possibly returning call; respring before retrying.\n");
+                            cyanide_upload_log_milestone(
+                                @"springboard-remote-call-post-run-retained");
+                        }
+                    }
                 }
 
                 if (runStatBar) {
                     settings_start_statbar_live_loop();
                 } else if (!statBarEnabled) {
                     g_statbar_live_stop_requested = 1;
+                    g_statbar_app_churn_pause_until_us = 0;
                 }
                 if (runNSBar) {
                     settings_start_nsbar_live_loop();
                 } else if (!nsBarEnabled) {
                     g_nsbar_live_stop_requested = 1;
+                    g_nsbar_app_churn_pause_until_us = 0;
                 }
                 if (runNiceBarLite) {
                     settings_start_nicebarlite_live_loop();
@@ -6252,7 +13854,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                         settings_destroy_springboard_remote_call_locked_internal_ex("non-live run complete",
                                                                                    YES,
                                                                                    YES);
-                        closedNonLiveRemoteCall = YES;
+                        closedNonLiveRemoteCall = g_springboard_rc_ready == 0;
                     }
                 }
                 if (closedNonLiveRemoteCall) {
@@ -6334,66 +13936,118 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionAppSwitcherGrid,
     SectionIPADecryptor,
     SectionFastLockXLite,
+    SectionFontChanger,
     SectionCount,
 };
 
 typedef NS_ENUM(NSInteger, RootSection) {
-    RootSectionChangelog = 0,
-    RootSectionPatreon,
-    RootSectionExperimental,
-    RootSectionActions,
-    RootSectionTweakBundles,
-    RootSectionInDev,
-    RootSectionSystemBundles,
+    // The Settings root is intentionally limited to actions and app
+    // information. Tweak configuration is opened from Installer package
+    // details, so the old duplicate bundle index is no longer shown here.
+    RootSectionActions = 0,
     RootSectionAbout,
     RootSectionWarning,
     RootSectionCount,
 };
 
-// Loads Cyanide/Changelog.plist (generated at build time by
-// scripts/gen-changelog.sh from the last N release tags). Each entry is a
-// dict with keys "version" (NSString), "date" (ISO yyyy-MM-dd NSString), and
-// "changes" (NSArray<NSString *>). Empty array when the plist is missing or
-// malformed — the "What's New" section silently hides itself in that case.
-static NSArray<NSDictionary *> *settings_changelog_entries(void)
+static NSDictionary<NSString *, id> *settings_snowboard_remix_krw_prerequisite(void)
 {
-    static NSArray<NSDictionary *> *entries = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSString *path = [[NSBundle mainBundle] pathForResource:@"Changelog" ofType:@"plist"];
-        NSArray *raw = path ? [NSArray arrayWithContentsOfFile:path] : nil;
-        NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
-        for (id obj in raw) {
-            if (![obj isKindOfClass:[NSDictionary class]]) continue;
-            NSDictionary *d = (NSDictionary *)obj;
-            NSString *version = d[@"version"];
-            NSArray *changes = d[@"changes"];
-            if (![version isKindOfClass:[NSString class]] || version.length == 0) continue;
-            if (![changes isKindOfClass:[NSArray class]] || changes.count == 0) continue;
-            [out addObject:d];
+    // The vPhone lab uses its explicit root task provider. Physical devices
+    // use Cyanide's local KRW primitives. Never fall through from a vPhone
+    // guest into the physical-device exploit chain.
+    if (remote_call_lab_backend_opted_in()) {
+        if (!kexploit_krw_ready()) {
+            NSString *message =
+                @"The vPhone lab support provider is not armed; no IconServices or presentation operation was started.";
+            log_user("[SBR] %s\n", message.UTF8String);
+            return @{
+                @"ok": @NO,
+                @"stage": @"vm-krw-prerequisite",
+                @"message": message,
+            };
         }
-        entries = [out copy];
-    });
-    return entries;
+        log_user("[SBR] vPhone root process resolver and injected RemoteCall route verified; the physical-device exploit chain remains disabled.\n");
+        return nil;
+    }
+    log_user("[SBR] Establishing and validating kernel read/write before IconServices publication and presentation installation.\n");
+    if (!settings_ensure_kexploit()) {
+        NSString *message =
+            @"SnowBoard Remix could not establish kernel read/write; no IconServices operation was started.";
+        log_user("[SBR] %s\n", message.UTF8String);
+        return @{
+            @"ok": @NO,
+            @"stage": @"krw-prerequisite",
+            @"message": message,
+        };
+    }
+    if (!kexploit_krw_ready()) {
+        NSString *message =
+            @"SnowBoard Remix kernel read/write failed final validation; no IconServices operation was started.";
+        log_user("[SBR] %s\n", message.UTF8String);
+        return @{
+            @"ok": @NO,
+            @"stage": @"krw-prerequisite",
+            @"message": message,
+        };
+    }
+    log_user("[SBR] Kernel read/write is ready; starting the IconServices batch and platform-appropriate presentation lifecycle.\n");
+    return nil;
 }
 
-// "2026-05-15" -> "May 15". Falls back to the raw string on parse failure.
-static NSString *settings_pretty_date_for_iso(NSString *iso)
+static void settings_run_snowboard_remix_operation(
+    NSString *operationName,
+    BOOL requiresKRW,
+    NSDictionary<NSString *, id> * (^operation)(void))
 {
-    if (!iso.length) return @"";
-    static NSDateFormatter *in = nil;
-    static NSDateFormatter *out = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        in  = [[NSDateFormatter alloc] init];
-        in.dateFormat = @"yyyy-MM-dd";
-        in.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
-        out = [[NSDateFormatter alloc] init];
-        out.dateFormat = @"MMM d";
-        out.locale = [NSLocale currentLocale];
+    if (!operation) return;
+    NSString *name = [operationName copy] ?: @"SnowBoard Remix";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        /* These operations previously existed only in the in-memory activity
+         * view, so an update/exit destroyed exactly the Apply/audit evidence
+         * needed for reinstall diagnosis. Persist one bounded session log in
+         * Documents for every explicit SnowBoard Remix operation. */
+        log_session_begin();
+        NSDictionary<NSString *, id> *result = nil;
+        @try {
+            result = requiresKRW
+                ? settings_snowboard_remix_krw_prerequisite() : nil;
+            if (!result) result = operation();
+        } @catch (NSException *exception) {
+            result = @{
+                @"ok": @NO,
+                @"stage": @"uncaught-exception",
+                @"message": [NSString stringWithFormat:@"%@ raised %@: %@",
+                    name, exception.name ?: @"an exception",
+                    exception.reason ?: @"unknown reason"],
+            };
+        }
+        BOOL ok = [result[@"ok"] boolValue];
+        NSString *message = [result[@"message"] isKindOfClass:NSString.class]
+            ? result[@"message"] : (ok ? @"Operation completed." : @"Operation failed.");
+        log_user("%s %s: %s\n",
+                 ok ? "[OK]" : "[WARN]",
+                 name.UTF8String ?: "SnowBoard Remix",
+                 message.UTF8String ?: "");
+        log_session_end();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Apply/restore changes the durable journal set.  Drop only the
+            // advisory UI snapshot; mutation decisions never consume it.
+            settings_invalidate_snowboard_remix_status_cache();
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:PackageQueueDidChangeNotification
+                              object:[PackageQueue sharedQueue]];
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:kSettingsActionsDidCompleteNotification
+                              object:nil
+                            userInfo:@{
+                                kSettingsActionsDidCompleteSuccessKey: @(ok),
+                                kSettingsActionsDidCompleteMessageKey:
+                                    [NSString stringWithFormat:@"%@ %@",
+                                     name, message]
+                            }];
+            cyanide_upload_log_if_enabled();
+        });
     });
-    NSDate *date = [in dateFromString:iso];
-    return date ? [out stringFromDate:date] : iso;
 }
 
 @interface SettingsViewController () <UIDocumentPickerDelegate, PHPickerViewControllerDelegate>
@@ -6402,9 +14056,10 @@ static NSString *settings_pretty_date_for_iso(NSString *iso)
 @property (nonatomic, assign) BOOL detailMode;
 @property (nonatomic, assign) NSInteger underlyingSection;
 @property (nonatomic, copy)   NSString *bundleTitle;
-@property (nonatomic, assign) BOOL changelogExpanded;
 @property (nonatomic, copy)   NSString *pendingThemeImportMode;
+@property (nonatomic, copy)   NSString *pendingFontImportRole;
 - (void)forceDisableFastLockXLiteForExperimentalGateWithDefaults:(NSUserDefaults *)defaults;
+- (void)presentSBCDockAppPicker;
 @end
 
 // Singleton delegate so MFMailCompose's host VC doesn't need to conform. Lives
@@ -6497,7 +14152,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         cell.textLabel.text = @"Bundle ID → PNG Data";
         cell.detailTextLabel.text =
             @"Make a dictionary plist. Each key is a bundle ID. Each value is raw PNG data. "
-             "Cyanide imports the plist and copies it into Documents/Themes.";
+             "kslop imports the plist and copies it into Documents/Themes.";
     } else {
         cell.selectionStyle = UITableViewCellSelectionStyleDefault;
         if (indexPath.row == 0) {
@@ -6508,7 +14163,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
             cell.detailTextLabel.text = @"Exports the iOS 6 Theme plist. Icons by zagnut531/iOS-6-Icons.";
         } else {
             cell.textLabel.text = @"Share App Info.plist";
-            cell.detailTextLabel.text = @"Exports Cyanide's bundled Info.plist for reference.";
+            cell.detailTextLabel.text = @"Exports kslop's bundled Info.plist for reference.";
         }
         cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     }
@@ -6725,6 +14380,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
                                              selector:@selector(patreonStatusDidChange:)
                                                  name:kCyanidePatreonStatusDidChangeNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(snowBoardRemixStatusesDidRefresh:)
+                                                 name:CNDSnowBoardRemixStatusesDidRefreshNotification
+                                               object:nil];
 
     // Best-effort background refresh of cached patron status when settings
     // opens. A cancelled / expired pledge silently flips the gate off here.
@@ -6790,6 +14449,20 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.tableView reloadData];
     });
+}
+
+- (void)snowBoardRemixStatusesDidRefresh:(NSNotification *)note
+{
+    (void)note;
+    if (!self.isViewLoaded || !self.tableView.window) return;
+    // This notification is delivered on the main queue.  Reloading only the
+    // visible detail section avoids rebuilding unrelated settings rows.
+    if (self.detailMode && self.underlyingSection == SectionSnowBoardLite) {
+        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
+                      withRowAnimation:UITableViewRowAnimationNone];
+    } else if (!self.detailMode) {
+        [self.tableView reloadData];
+    }
 }
 
 - (void)installInstallerReturnButtonIfNeeded
@@ -6908,21 +14581,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         return;
     }
 
-    // Returning from Patreon OAuth can change the Patreon root section row
-    // count (unlinked: 2, linked patron: 3, linked non-patron: 4) before the
-    // status notification's full reload runs. A targeted Quick Actions
-    // reload during that window makes UITableView validate the now-stale
-    // Patreon section and crash with an invalid row-count assertion.
-    if ([self.tableView numberOfSections] > RootSectionPatreon) {
-        NSInteger visiblePatreonRows = [self.tableView numberOfRowsInSection:RootSectionPatreon];
-        NSInteger desiredPatreonRows = [self tableView:self.tableView
-                                numberOfRowsInSection:RootSectionPatreon];
-        if (visiblePatreonRows != desiredPatreonRows) {
-            [self.tableView reloadData];
-            return;
-        }
-    }
-
     NSIndexSet *sections = [NSIndexSet indexSetWithIndex:RootSectionActions];
     [self.tableView reloadSections:sections withRowAnimation:UITableViewRowAnimationNone];
 }
@@ -6941,7 +14599,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     [icon setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
     UILabel *label = [[UILabel alloc] init];
-    label.text = @"Cyanide is a limited tweak environment. Session tweaks reset on reboot, while a few packages intentionally modify local system files and may persist until restored. Backups are best-effort only. Use these tools only where you have permission, understand the legal and service-rule impact, and accept the risk. Live tweaks like StatBar and Axon Lite stop if you force-quit Cyanide. A progress log opens while changes apply; tap Hide to dismiss.";
+    label.text = @"kslop is a limited tweak environment. Session tweaks reset on reboot, while a few packages intentionally modify local system files and may persist until restored. Backups are best-effort only. Use these tools only where you have permission, understand the legal and service-rule impact, and accept the risk. Live tweaks like StatBar and Axon Lite stop if you force-quit kslop. A progress log opens while changes apply; tap Hide to dismiss.";
     label.textColor = UIColor.labelColor;
     label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
     label.numberOfLines = 0;
@@ -6981,12 +14639,31 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (NSArray<NSDictionary *> *)sbcRows
 {
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    NSInteger capacity = settings_sbc_dock_autofill_capacity(d);
+    NSArray<NSString *> *selected = settings_sbc_ordered_dock_bundle_ids(d);
+    NSString *autofillSummary = nil;
+    if (capacity == 0) {
+        autofillSummary = @"Increase Dock icons to 5–7 to add apps to the extra slots.";
+    } else if (selected.count == 0) {
+        autofillSummary = [NSString stringWithFormat:@"No apps selected. Choose up to %ld app%@ for slots 5–%ld.",
+                           (long)capacity,
+                           capacity == 1 ? @"" : @"s",
+                           (long)(4 + capacity)];
+    } else {
+        autofillSummary = [NSString stringWithFormat:@"%lu of %ld extra slot%@ selected. Open the picker to view or change their order.",
+                           (unsigned long)selected.count,
+                           (long)capacity,
+                           capacity == 1 ? @"" : @"s"];
+    }
     return @[
         @{ @"kind": @"stepper", @"key": kSettingsSBCDockIcons,  @"title": @"Dock icons", @"min": @4, @"max": @7, @"default": @(kSBCDefaultDockIcons) },
+        @{ @"kind": @"info", @"title": @"Dock autofill", @"subtitle": autofillSummary },
+        @{ @"kind": @"button", @"title": selected.count > 0 ? @"Change Dock Apps…" : @"Choose Dock Apps…", @"action": @"sbc-dock-autofill" },
         @{ @"kind": @"stepper", @"key": kSettingsSBCCols,       @"title": @"Home columns", @"min": @3, @"max": @7, @"default": @(kSBCDefaultCols) },
         @{ @"kind": @"stepper", @"key": kSettingsSBCRows,       @"title": @"Home rows", @"min": @4, @"max": @8, @"default": @(kSBCDefaultRows) },
         @{ @"kind": @"toggle",  @"key": kSettingsSBCHideLabels, @"title": @"Hide icon labels" },
-        @{ @"kind": @"button",  @"title": @"Reset to Defaults" },
+        @{ @"kind": @"button",  @"title": @"Reset to Defaults", @"action": @"sbc-reset" },
     ];
 }
 
@@ -7099,7 +14776,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 - (NSArray<NSDictionary *> *)statbarRows
 {
     return @[
-        @{ @"kind": @"toggle", @"key": kSettingsStatBarCelsius,     @"title": @"Celsius" },
         @{ @"kind": @"toggle", @"key": kSettingsStatBarShowCPU,     @"title": @"Show CPU %" },
         @{ @"kind": @"toggle", @"key": kSettingsStatBarShowLabels,  @"title": @"Show CPU / RAM labels" },
         @{ @"kind": @"toggle", @"key": kSettingsStatBarShowNet,     @"title": @"Show network speed" },
@@ -7301,7 +14977,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
            @"title": ipadecryptor_has_app_store_account()
                 ? @"Sign In Again…"
                 : @"Sign In to App Store…",
-           @"subtitle": @"Required before Cyanide can request an authenticated IPA download ticket. 2FA is requested after Apple asks for it.",
+           @"subtitle": @"Required before kslop can request an authenticated IPA download ticket. 2FA is requested after Apple asks for it.",
            @"action": @"ipadec-signin" },
         @{ @"kind": @"info",
            @"title": @"Selected App",
@@ -7316,7 +14992,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
            @"title": @"Output Folder",
            @"subtitle": ipadecryptor_default_output_directory().length > 0
                 ? ipadecryptor_default_output_directory()
-                : @"Cyanide Documents/DecryptedIPAs" },
+                : @"kslop Documents/DecryptedIPAs" },
         @{ @"kind": @"button",
            @"title": @"Choose Installed App…",
            @"action": @"ipadec-choose" },
@@ -7390,13 +15066,89 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     BOOL hasSelection = settings_snowboardlite_has_selected_theme();
     NSString *selected = settings_snowboardlite_selected_theme_display_name();
+#if 0
+    // Retired Spotlight/IconServices experiment UI. SnowBoard Remix is a
+    // durable application-bundle operation and has no SearchUI dependency.
+    ThemerSpotlightIconServicesCandidate candidate =
+        settings_spotlight_iconservices_selected_candidate();
+    NSString *candidateName = [NSString stringWithUTF8String:
+        themer_spotlight_iconservices_candidate_name(candidate)];
+    NSUserDefaults *labDefaults = [NSUserDefaults standardUserDefaults];
+    BOOL labArmed =
+        [labDefaults boolForKey:kSettingsSpotlightIconServicesArmed];
+    NSString *materializationStatus =
+        [labDefaults stringForKey:kSettingsSpotlightStock68Status] ?: @"idle";
+    NSString *materializationTarget =
+        [labDefaults stringForKey:kSettingsSpotlightStock68Target] ?: @"";
+    NSString *materializationFingerprint =
+        [labDefaults stringForKey:kSettingsSpotlightStock68Fingerprint] ?: @"";
+    ThemerSpotlightStock68JournalSnapshot journal =
+        themer_spotlight_stock68_journal_snapshot();
+    BOOL unresolvedGeneration =
+        themer_spotlight_stock68_has_unresolved_generation();
+    BOOL pendingCleanup =
+        themer_spotlight_iconservices_has_pending_recovery();
+    BOOL agentPublicationState =
+        themer_spotlight_agent_publication_has_state();
+    BOOL agentPublicationPublished =
+        themer_spotlight_agent_publication_is_published();
+    NSString *fingerprintPrefix = materializationFingerprint.length >= 16
+        ? [materializationFingerprint substringToIndex:16]
+        : materializationFingerprint;
+#endif
+    // Status classification reads two files and validates the saved bundle
+    // path/version.  Keep that exact work off the table-data call stack: the
+    // first render uses the last published snapshot, then one coalesced
+    // background refresh updates the section through the notification below.
+    NSArray<NSDictionary<NSString *, id> *> *remixStatuses =
+        settings_snowboard_remix_cached_statuses();
+    settings_refresh_snowboard_remix_statuses_async();
+    NSUInteger themedCount = 0;
+    NSUInteger recoveryCount = 0;
+    for (NSDictionary<NSString *, id> *status in remixStatuses) {
+        NSString *stage = [status[@"stage"] isKindOfClass:NSString.class]
+            ? status[@"stage"] : @"";
+        if ([stage isEqualToString:@"active"]) themedCount++;
+        else if (![stage isEqualToString:@"restored"] &&
+                 ![stage isEqualToString:@"already-restored"]) recoveryCount++;
+    }
+    NSString *remixStatusSubtitle = remixStatuses.count == 0
+        ? @"No themed-app transactions are journaled."
+        : [NSString stringWithFormat:@"%lu themed app%@; %lu needing recovery.",
+           (unsigned long)themedCount,
+           themedCount == 1 ? @"" : @"s",
+           (unsigned long)recoveryCount];
+    NSDictionary *presentationStatus =
+        CNDIconServicesConsumerLifecycleStatus();
+    NSDictionary *presentationHosts =
+        [presentationStatus[@"hosts"] isKindOfClass:NSDictionary.class]
+            ? presentationStatus[@"hosts"] : @{};
+    NSDictionary *springBoardPresentation =
+        presentationHosts[@"SpringBoard"] ?: @{};
+    NSDictionary *spotlightPresentation =
+        presentationHosts[@"Spotlight"] ?: @{};
+    NSString *presentationSubtitle = nil;
+    if (![presentationStatus[@"running"] boolValue]) {
+        presentationSubtitle = @"Watcher stopped. Existing process mappings, if any, remain marker-gated until their hosts restart.";
+    } else {
+        NSString *springBoardState =
+            [springBoardPresentation[@"installedPID"] intValue] > 1
+                ? @"ready" : (springBoardPresentation[@"lastStage"] ?: @"pending");
+        NSString *spotlightState =
+            [spotlightPresentation[@"installedPID"] intValue] > 1
+                ? @"ready" : (spotlightPresentation[@"lastStage"] ?: @"pending");
+        presentationSubtitle = [NSString stringWithFormat:
+            @"SpringBoard: %@ (PID %d) • Spotlight: %@ (PID %d) • RemoteCall: %@",
+            springBoardState,
+            [springBoardPresentation[@"observedPID"] intValue],
+            spotlightState,
+            [spotlightPresentation[@"observedPID"] intValue],
+            [presentationStatus[@"remoteCallUsed"] boolValue] ? @"yes" : @"no"];
+    }
     NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithArray:@[
         @{ @"kind": @"info",
            @"title": @"Selected Theme",
-           @"subtitle": hasSelection ? selected : @"None selected. Pick or import a theme before running SnowBoard Lite." },
-        @{ @"kind": @"button",
-           @"title": [selected isEqualToString:@"iOS 6 Theme"] ? @"iOS 6 Theme ✓" : @"Use iOS 6 Theme",
-           @"action": @"sbl-select-ios6" },
+           @"subtitle": hasSelection ? selected : @"None selected. Pick or import a theme before applying SnowBoard Remix." },
         @{ @"kind": @"button",
            @"title": @"Import Theme Folder…",
            @"action": @"sbl-import-folder" },
@@ -7408,6 +15160,226 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         [rows addObject:@{ @"kind": @"button",
                            @"title": @"Clear Selected Theme",
                            @"action": @"sbl-clear",
+                           @"destructive": @YES }];
+    }
+    [rows addObjectsFromArray:@[
+        @{ @"kind": @"info",
+           @"title": @"Themed Apps / Status",
+           @"subtitle": remixStatusSubtitle },
+        @{ @"kind": @"info",
+           @"title": @"Transparent Presentation",
+           @"subtitle": presentationSubtitle },
+        @{ @"kind": @"toggle",
+           @"key": kSettingsSnowBoardRemixDebugThreeAppLimit,
+           @"title": @"Debug: Apply 4 Named Apps",
+           @"subtitle": @"When enabled, only Snapchat, Messages, TikTok, and Bitwarden are attempted." },
+        @{ @"kind": @"toggle",
+           @"key": kSettingsSnowBoardRemixInstallConsumerMappings,
+           @"title": @"Transparent Icon Presentation",
+           @"subtitle": @"Enables manually requested presentation mappings. It does not start a watcher; SpringBoard remains one-shot and the explicit watcher monitors Spotlight only." },
+        @{ @"kind": @"button",
+           @"title": @"Start Spotlight Watcher",
+           @"subtitle": @"Explicitly starts PID monitoring for Spotlight only. SpringBoard is never watched and remains available through its separate one-shot repair button.",
+           @"action": @"sbl-start-kernel-consumer-watcher" },
+        @{ @"kind": @"button",
+           @"title": @"Apply SpringBoard Tweaks",
+           @"subtitle": @"Apply SpringBoard transparency, Clock hands, and the bounded Clock/Calendar face-source redirects. Clock launch and return variants remain complete static icons.",
+           @"action": @"sbl-repair-springboard-transparency" },
+        @{ @"kind": @"button",
+           @"title": @"Repair Spotlight Transparency",
+           @"subtitle": @"Apply Spotlight transparency and its independent Clock/Calendar face-source redirects for the current process.",
+           @"action": @"sbl-repair-spotlight-transparency" },
+        @{ @"kind": @"button",
+           @"title": @"Stop Spotlight Watcher",
+           @"subtitle": @"Stops future Spotlight PID monitoring. Existing process-local redirects remain until that host exits.",
+           @"action": @"sbl-stop-kernel-consumer-watcher" },
+        @{ @"kind": @"button",
+           @"title": @"Apply Theme",
+           @"subtitle": @"Replace persistent icon records, including launch and return variants. SpringBoard cache invalidation is temporarily disabled for the current experiment; presentation tweaks remain separate actions.",
+           @"action": @"sbl-apply-permanent",
+           @"tintColor": UIColor.systemGreenColor },
+        @{ @"kind": @"button",
+           @"title": @"Update Repair",
+           @"subtitle": @"Republish descriptors only for newly eligible themed apps or apps whose installed path/version identity changed. Already-current apps remain untouched; SpringBoard cache invalidation is temporarily skipped.",
+           @"action": @"sbl-update-repair",
+           @"tintColor": UIColor.systemOrangeColor },
+        @{ @"kind": @"button",
+           @"title": @"Audit Applied Icon State",
+           @"subtitle": @"Run after Apply to save a local reinstall baseline, reinstall Cyanide as an update, then run again. Compares every journaled Home, folder, switcher, App Library, notification, and transition descriptor UUID, validation token, cache/store hash, plus live SpringBoard identity without refreshing or modifying icons.",
+           @"action": @"sbl-audit-applied-icons" },
+        @{ @"kind": @"button",
+           @"title": @"Restore All Icons",
+           @"subtitle": @"Regenerate and verify each journaled descriptor's stock IconServices response. Recovery clears per app as soon as its persistent records verify.",
+           @"action": @"sbl-restore-all",
+           @"destructive": @YES },
+    ]];
+#if 0
+    [rows addObject:@{ @"kind": @"info",
+                       @"title": @"IconServices Store Registration Surface",
+                       @"subtitle": @"Read-only runtime metadata inventory. It ABI-gates only the manager/cache/store getters, then lists matching selector metadata without invoking it. It refuses while any themed or materialization recovery state is armed." }];
+    [rows addObject:@{ @"kind": @"button",
+                       @"title": @"IconServices Lab: Inspect Store Registration Surface",
+                       @"action": @"sbl-iconservices-inspect-store-surface" }];
+    [rows addObject:@{ @"kind": @"button",
+                       @"title": @"IconServices Lab: Inspect Live Store State (Read Only)",
+                       @"action": @"sbl-iconservices-inspect-live-store-state" }];
+    [rows addObject:@{ @"kind": @"button",
+                       @"title": @"IconServices Lab: Inspect Agent Writer (Read Only)",
+                       @"action": @"sbl-iconservices-inspect-agent-writer" }];
+    [rows addObject:@{ @"kind": @"info",
+                       @"title": @"IconServices Cached Donor Response Proof",
+                       @"subtitle": @"Read-only proof using an already-cached Perplexity Spotlight image. It discovers only an initialized manager, performs one statically-vetted cache lookup, and reconstructs scratch response and IFImage objects; generation, service, store, file, and recovery paths remain untouched." }];
+    [rows addObject:@{ @"kind": @"button",
+                       @"title": @"IconServices Lab: Prove Cached Donor Response (Read Only)",
+                       @"action": @"sbl-iconservices-inspect-agent-response" }];
+    [rows addObject:@{ @"kind": @"info",
+                       @"title": @"Live Lab Bridge",
+                       @"subtitle": cyanide_lab_bridge_is_running()
+                            ? @"RUNNING: authenticated local commands are accepted now and for up to 25 seconds after kslop backgrounds. Other kslop actions stay locked until the bridge stops."
+                            : @"Development-only authenticated local command channel for leased read-only RemoteCall inspection. A bounded 25-second background window supports Spotlight lifecycle capture." }];
+    [rows addObject:@{ @"kind": @"button",
+                       @"title": cyanide_lab_bridge_is_running()
+                            ? @"Stop Live Lab Bridge"
+                            : @"Start Live Lab Bridge",
+                       @"action": @"sbl-iconservices-lab-bridge" }];
+    if (hasSelection) {
+        [rows addObject:@{ @"kind": @"info",
+                           @"title": @"IconServices Agent Publication Path",
+                           @"subtitle": agentPublicationState
+                                ? (agentPublicationPublished
+                                    ? @"PUBLISHED IN SPOTLIGHT MEMORY: the themed icon is retained as the target digest's canonical icon and its verified agent response is cached. This ends when Spotlight exits or Restore releases the association."
+                                    : @"RECOVERY REQUIRED: a v2 in-memory agent publication may be retained. Do not publish again; use Restore Stock via IconServices Agent.")
+                                : @"Publish registers the secure-coded themed icon as the target digest's canonical in-memory icon, retains it in Spotlight, performs one journaled agent generation, and installs the verified response through ISImageCache. No ISStore or file method is used." }];
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": @"IconServices Lab: Preflight Agent Publication (Read Only)",
+                           @"action": @"sbl-iconservices-agent-preflight" }];
+        if (!agentPublicationState) {
+            [rows addObject:@{ @"kind": @"button",
+                               @"title": @"IconServices Lab: Publish via Agent (One Target)",
+                               @"action": @"sbl-iconservices-agent-publish" }];
+        } else {
+            [rows addObject:@{ @"kind": @"button",
+                               @"title": @"IconServices Lab: Restore Stock via Agent",
+                               @"action": @"sbl-iconservices-agent-restore",
+                               @"destructive": @YES }];
+        }
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": @"Repair Clock Icon",
+                           @"action": @"sbl-repair-static-dynamic" }];
+        NSString *materializationSubtitle = nil;
+        if (unresolvedGeneration && pendingCleanup) {
+            materializationSubtitle = @"RECOVERY BLOCKED: generation and cache/store cleanup are pending together. Exact dictionary restoration may still be attempted, but neither journal can clear until each cleanup proof succeeds.";
+        } else if (unresolvedGeneration &&
+                   journal.classification ==
+                       ThemerSpotlightStock68JournalLegacyIssuedAmbiguous) {
+            materializationSubtitle = @"RECOVERY REQUIRED: Emergency Restore will restore the exact dictionary and, when the recorded Spotlight owner is still live, retire only that host. Reopen Spotlight and run Emergency Restore again to finish the replacement-host proof; no reboot is required.";
+        } else if (unresolvedGeneration &&
+                   journal.classification ==
+                       ThemerSpotlightStock68JournalDispatchPossible) {
+            materializationSubtitle = @"RECOVERY REQUIRED: Emergency Restore will restore the exact dictionary and, when the recorded Spotlight owner is still live, retire only that host. Reopen Spotlight and run Emergency Restore again to finish the replacement-host proof; no reboot is required.";
+        } else if (unresolvedGeneration) {
+            materializationSubtitle = [NSString stringWithFormat:
+                @"RECOVERY REQUIRED: %@.",
+                [NSString stringWithUTF8String:
+                    settings_spotlight_stock68_journal_limit(journal)]];
+        } else if (pendingCleanup) {
+            materializationSubtitle = @"RECOVERY REQUIRED: a cache/store cleanup journal is pending. Complete Emergency Restore with privileged local access before materialization.";
+        } else if (labArmed) {
+            materializationSubtitle = [NSString stringWithFormat:
+                @"A legacy themed run is armed (%@). Restore it before materialization.",
+                candidateName ?: @"Unknown"];
+        } else if ([materializationStatus isEqualToString:@"proven"]) {
+            materializationSubtitle = [NSString stringWithFormat:
+                @"PROVEN: %@ — fingerprint %@. Stock-only one-target generation passed; themed Seed remains disabled.",
+                materializationTarget.length ? materializationTarget : @"unknown target",
+                fingerprintPrefix.length ? fingerprintPrefix : @"unknown"];
+        } else if ([materializationStatus isEqualToString:@"materialized"]) {
+            materializationSubtitle = [NSString stringWithFormat:
+                @"Materialized %@ — fingerprint %@. Run fresh-session verification next.",
+                materializationTarget.length ? materializationTarget : @"unknown target",
+                fingerprintPrefix.length ? fingerprintPrefix : @"unknown"];
+        } else if ([materializationStatus isEqualToString:@"running"]) {
+            materializationSubtitle = @"RECOVERY REQUIRED: a materialization or verification phase was interrupted. The saved owner must be bound before exact dictionary or durable store cleanup can proceed.";
+        } else if ([materializationStatus isEqualToString:@"recovery-required"]) {
+            materializationSubtitle = @"RECOVERY REQUIRED: do not retry. The saved owner and any durable store uncertainty must be proven before cleanup can proceed.";
+        } else {
+            materializationSubtitle = @"Stock-only diagnostic: issue one ABI-validated 68-point IconServices generation request for one pinned target without searching for it. No themed data or cache-file writes are used.";
+        }
+        [rows addObject:@{ @"kind": @"info",
+                           @"title": @"Spotlight Stock68 Materialization Lab",
+                           @"subtitle": materializationSubtitle }];
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": @"IconServices Lab: Materialize Genuine Stock 68 (One Target)",
+                           @"action": @"sbl-iconservices-materialize68" }];
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": @"IconServices Lab: Verify Materialized Stock 68",
+                           @"action": @"sbl-iconservices-verify68" }];
+        if (unresolvedGeneration) {
+            [rows addObject:@{
+                @"kind": @"button",
+                @"title": @"IconServices Lab: Inspect Issued Generation Recovery (Read Only)",
+                @"action": @"sbl-iconservices-inspect-recovery"
+            }];
+        }
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": @"IconServices Lab: Emergency Restore",
+                           @"action": @"sbl-iconservices-restore",
+                           @"destructive": @YES }];
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": @"Clear Selected Theme",
+                           @"action": @"sbl-clear",
+                           @"destructive": @YES }];
+    }
+#endif
+    return rows;
+}
+
+- (NSArray<NSDictionary *> *)fontChangerRows
+{
+    NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithArray:@[
+        @{ @"kind": @"info",
+           @"title": @"Selected Family",
+           @"subtitle": font_changer_selected_family_summary() },
+        @{ @"kind": @"info",
+           @"title": @"Regular",
+           @"subtitle": font_changer_role_summary(CNDFontChangerRoleRegular) },
+        @{ @"kind": @"info",
+           @"title": @"Italic",
+           @"subtitle": font_changer_role_summary(CNDFontChangerRoleItalic) },
+        @{ @"kind": @"info",
+           @"title": @"Mono",
+           @"subtitle": font_changer_role_summary(CNDFontChangerRoleMono) },
+        @{ @"kind": @"button",
+           @"title": @"Import Regular Font...",
+           @"action": @"font-import-regular" },
+        @{ @"kind": @"button",
+           @"title": @"Import Italic Font...",
+           @"action": @"font-import-italic" },
+        @{ @"kind": @"button",
+           @"title": @"Import Mono Font...",
+           @"action": @"font-import-mono" },
+        @{ @"kind": @"button",
+           @"title": @"Apply Selected Family",
+           @"action": @"font-apply" },
+        @{ @"kind": @"button",
+           @"title": @"Restore Stock Fonts",
+           @"action": @"font-restore",
+           @"destructive": @YES },
+    ]];
+    if (font_changer_has_any_selected_font()) {
+        [rows insertObject:@{ @"kind": @"button",
+                              @"title": @"Clear Selected Family",
+                              @"action": @"font-clear",
+                              @"destructive": @YES }
+                  atIndex:7];
+    }
+    if (font_changer_has_legacy_app_backups()) {
+        [rows addObject:@{ @"kind": @"info",
+                           @"title": @"Legacy App Font Recovery",
+                           @"subtitle": @"Per-app font overrides are retired. Backups from an older kslop build are still available to restore." }];
+        [rows addObject:@{ @"kind": @"button",
+                           @"title": @"Restore Legacy App Font Backups",
+                           @"action": @"font-app-restore-legacy",
                            @"destructive": @YES }];
     }
     return rows;
@@ -7458,7 +15430,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
            @"subtitle": @"Always On keeps the Face ID retry pulse and unlock request armed in SpringBoard until Disable, Clean Up, or respring." },
         @{ @"kind": @"button",
            @"title": @"Enable Always On",
-           @"subtitle": @"Keeps pickup-to-unlock armed after Cyanide closes.",
+           @"subtitle": @"Keeps pickup-to-unlock armed after kslop closes.",
            @"action": @"fastlockx-enable" },
         @{ @"kind": @"button",
            @"title": @"Disable",
@@ -7490,6 +15462,11 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     NSMutableArray *out = [NSMutableArray array];
     if (section == SectionSBC) {
         [out addObject:@{@"title": @"Dock icons",       @"value": [@([d integerForKey:kSettingsSBCDockIcons])  stringValue]}];
+        NSArray<NSString *> *dockApps = settings_sbc_ordered_dock_bundle_ids(d);
+        [out addObject:@{@"title": @"Dock autofill",
+                         @"value": dockApps.count > 0
+                             ? [NSString stringWithFormat:@"%lu app%@", (unsigned long)dockApps.count, dockApps.count == 1 ? @"" : @"s"]
+                             : @"Off"}];
         [out addObject:@{@"title": @"Home columns",     @"value": [@([d integerForKey:kSettingsSBCCols])        stringValue]}];
         [out addObject:@{@"title": @"Home rows",        @"value": [@([d integerForKey:kSettingsSBCRows])        stringValue]}];
         [out addObject:@{@"title": @"Hide icon labels", @"value": [d boolForKey:kSettingsSBCHideLabels] ? @"On" : @"Off"}];
@@ -7504,7 +15481,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         [out addObject:@{@"title": @"Home scale %",     @"value": [@([d integerForKey:kSettingsLayoutHomeScalePct]) stringValue]}];
         [out addObject:@{@"title": @"Dock scale %",     @"value": [@([d integerForKey:kSettingsLayoutDockScalePct]) stringValue]}];
     } else if (section == SectionStatBar) {
-        [out addObject:@{@"title": @"Celsius",             @"value": [d boolForKey:kSettingsStatBarCelsius]    ? @"On" : @"Off"}];
         [out addObject:@{@"title": @"Show CPU %",          @"value": [d boolForKey:kSettingsStatBarShowCPU]    ? @"On" : @"Off"}];
         [out addObject:@{@"title": @"Show CPU/RAM labels", @"value": [d boolForKey:kSettingsStatBarShowLabels] ? @"On" : @"Off"}];
         [out addObject:@{@"title": @"Show net speed",      @"value": [d boolForKey:kSettingsStatBarShowNet]    ? @"On" : @"Off"}];
@@ -7549,6 +15525,11 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         [out addObject:@{@"title": @"Theme", @"value": settings_themer_selected_theme_display_name()}];
     } else if (section == SectionSnowBoardLite) {
         [out addObject:@{@"title": @"Theme", @"value": settings_snowboardlite_selected_theme_display_name()}];
+    } else if (section == SectionFontChanger) {
+        [out addObject:@{@"title": @"Family", @"value": font_changer_selected_family_summary()}];
+        [out addObject:@{@"title": @"Regular", @"value": font_changer_role_summary(CNDFontChangerRoleRegular)}];
+        [out addObject:@{@"title": @"Italic", @"value": font_changer_role_summary(CNDFontChangerRoleItalic)}];
+        [out addObject:@{@"title": @"Mono", @"value": font_changer_role_summary(CNDFontChangerRoleMono)}];
     } else if (section == SectionLiveWP) {
         [out addObject:@{@"title": @"Video", @"value": settings_livewp_video_detail()}];
     } else if (section == SectionLocationSim) {
@@ -7592,6 +15573,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionLocationSim: return self.locationSimRows;
         case SectionIPADecryptor: return self.ipaDecryptorRows;
         case SectionSnowBoardLite: return self.snowboardLiteRows;
+        case SectionFontChanger: return self.fontChangerRows;
         case SectionLiveWP: return self.liveWPRows;
         default: return @[];
     }
@@ -7624,7 +15606,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"Gravity Lite",       @"icon": @"arrow.down.circle.fill",              @"color": [UIColor systemGreenColor],  @"section": @(SectionGravityLite) },
         @{ @"title": @"App Switcher Grid",  @"icon": @"square.grid.2x2.fill",                @"color": [UIColor systemOrangeColor], @"section": @(SectionAppSwitcherGrid) },
         @{ @"title": @"Location Simulator", @"icon": @"location.fill",                       @"color": [UIColor systemGreenColor],  @"section": @(SectionLocationSim) },
-        @{ @"title": @"SnowBoard Lite",     @"icon": @"square.stack.3d.up.fill",             @"color": [UIColor systemCyanColor],   @"section": @(SectionSnowBoardLite) },
+        @{ @"title": @"SnowBoard Remix",    @"icon": @"square.stack.3d.up.fill",             @"color": [UIColor systemCyanColor],   @"section": @(SectionSnowBoardLite) },
         @{ @"title": @"LiveWP",             @"icon": @"play.rectangle.fill",                 @"color": [UIColor systemPurpleColor], @"section": @(SectionLiveWP) },
         @{ @"title": @"Powercuff",          @"icon": @"bolt.slash.fill",                     @"color": [UIColor systemOrangeColor], @"section": @(SectionPowercuff) },
         @{ @"title": @"SpringBoard Tweaks", @"icon": @"apps.iphone",                         @"color": [UIColor systemIndigoColor], @"section": @(SectionDarkSwordTweaks) },
@@ -7638,6 +15620,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return @[
         @{ @"title": @"OTA Updates",       @"icon": @"icloud.slash.fill",    @"color": [UIColor systemGrayColor],   @"section": @(SectionOTA) },
         @{ @"title": @"Watch Pairing",     @"icon": @"applewatch.radiowaves.left.and.right", @"color": [UIColor systemPurpleColor], @"section": @(SectionNanoRegistry) },
+        @{ @"title": @"Font Changer",      @"icon": @"textformat",           @"color": [UIColor systemIndigoColor], @"section": @(SectionFontChanger) },
     ];
 }
 
@@ -7681,14 +15664,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return [self filterBundles:[self allSystemBundleRows]];
 }
 
-- (NSArray<NSDictionary *> *)bundleRowsForRootSection:(RootSection)section
-{
-    if (section == RootSectionTweakBundles)  return self.tweakBundleRows;
-    if (section == RootSectionInDev)        return self.inDevBundleRows;
-    if (section == RootSectionSystemBundles) return self.systemBundleRows;
-    return @[];
-}
-
 #pragma mark - Table data
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
@@ -7702,27 +15677,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         return (NSInteger)[self rowsForSection:self.underlyingSection].count;
     }
     switch ((RootSection)section) {
-        case RootSectionChangelog: {
-            NSInteger n = (NSInteger)settings_changelog_entries().count;
-            if (n == 0) return 0;
-            return self.changelogExpanded ? n + 2 : 1;
-        }
-        case RootSectionActions:        return 4;
-        case RootSectionTweakBundles:   return (NSInteger)self.tweakBundleRows.count;
-        case RootSectionInDev:         return (NSInteger)self.inDevBundleRows.count;
-        case RootSectionSystemBundles:  return (NSInteger)self.systemBundleRows.count;
-        case RootSectionPatreon: {
-            // Unlinked users get two rows: "Link" (for people who already have
-            // a Patreon account) and "New to Patreon? Sign Up" (jumps to the
-            // creator page so they can join in Safari first). Without the
-            // sign-up affordance, a first-time user has no obvious way to
-            // discover that they need a Patreon account to begin with.
-            if (!cyanide_patreon_is_linked()) return 2;
-            // Linked-but-not-pledging gets an extra "Join Member Tier" row
-            // so users have an obvious in-app path to upgrade.
-            return cyanide_is_patron() ? 3 : 4;
-        }
-        case RootSectionExperimental:   return 1;
+        case RootSectionActions:        return 9;
         case RootSectionAbout:          return 6;
         case RootSectionWarning:        return 0;
         case RootSectionCount:          return 0;
@@ -7734,13 +15689,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     if (self.detailMode) return nil;
     switch ((RootSection)section) {
-        case RootSectionChangelog:      return self.changelogExpanded ? @"What's New" : nil;
         case RootSectionActions:        return @"Quick Actions";
-        case RootSectionTweakBundles:   return self.tweakBundleRows.count   > 0 ? @"Tweaks" : nil;
-        case RootSectionInDev:         return self.inDevBundleRows.count   > 0 ? @"In Development" : nil;
-        case RootSectionSystemBundles:  return self.systemBundleRows.count  > 0 ? @"System" : nil;
-        case RootSectionPatreon:        return @"Patreon";
-        case RootSectionExperimental:   return @"Experimental";
         case RootSectionAbout:          return @"About";
         default:                        return nil;
     }
@@ -7748,35 +15697,13 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
-    if (!self.detailMode) {
-        if ((RootSection)section == RootSectionExperimental) {
-            if (!settings_experimental_access_allowed()) {
-                return @"Early-access for Member tier Patreon supporters.";
-            }
-            return nil;
-        }
-        if ((RootSection)section == RootSectionPatreon) {
-            if (!cyanide_patreon_is_linked()) {
-                return @"Cyanide is free. Patreon supporters get early access "
-                       @"to experimental tweaks. Auth happens in-app.";
-            }
-            NSDate *last = cyanide_patreon_last_refresh_date();
-            if (last) {
-                NSDateFormatter *df = [[NSDateFormatter alloc] init];
-                df.dateStyle = NSDateFormatterMediumStyle;
-                df.timeStyle = NSDateFormatterShortStyle;
-                return [NSString stringWithFormat:@"Last checked %@", [df stringFromDate:last]];
-            }
-            return nil;
-        }
-        return nil;
-    }
+    if (!self.detailMode) return nil;
     NSInteger s = self.underlyingSection;
     if (s == SectionLaunch) {
-        return @"kexploit_opa334 runs once per app lifetime. Keep Alive applies only while Cyanide is minimized; an App Switcher kill still terminates the process.";
+        return @"kexploit_opa334 runs once per app lifetime. Keep Alive applies only while kslop is minimized; an App Switcher kill still terminates the process.";
     }
     if (s == SectionSBC) {
-        return [NSString stringWithFormat:@"Stock iOS defaults: dock %ld, columns %ld, rows %ld.",
+        return [NSString stringWithFormat:@"Stock iOS defaults: dock %ld, columns %ld, rows %ld.\n\nDock autofill moves the selected apps into extra dock slots and commits the resulting icon state permanently. The change is one-shot and does not require kslop or its SpringBoard control session to remain open.",
                 (long)kSBCDefaultDockIcons, (long)kSBCDefaultCols, (long)kSBCDefaultRows];
     }
     if (s == SectionDarkSwordTweaks) {
@@ -7811,7 +15738,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         return @"Underclocks the CPU/GPU via thermalmonitord by simulating thermal pressure. Nominal is the daily-use default. Light, Moderate, and Heavy intentionally underclock the CPU more and can make the device feel laggy, especially on older hardware.";
     }
     if (s == SectionStatBar) {
-        return @"Live overlay. When enabled, StatBar keeps a SpringBoard RemoteCall session open. Refresh rate applies when Cyanide is minimized but the screen is still awake; StatBar pauses while the screen is locked or asleep.";
+        return @"Live overlay. When enabled, StatBar keeps a SpringBoard RemoteCall session open. Refresh rate applies when kslop is minimized but the screen is still awake; StatBar pauses while the screen is locked or asleep.";
     }
     if (s == SectionNSBar) {
         return @"Network speed overlay ported from d1y/cyanide-ios. When enabled, NSBar keeps a SpringBoard RemoteCall session open and refreshes roughly once per second.";
@@ -7823,13 +15750,13 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         return @"Adds a UILabel as a sibling of each STUI signal view (no new UIWindow), refreshed every second. Cellular shows live RSRP dBm (sign implicit). WiFi shows the bar count (0-4); the wifid XPC dBm path crashed SpringBoard in prior tests.";
     }
     if (s == SectionAxonLite) {
-        return @"RemoteCall-only Axon port. It uses a live app-side loop rather than substrate hooks, so it lasts for the active Cyanide SpringBoard session.";
+        return @"RemoteCall-only Axon port. It uses a live app-side loop rather than substrate hooks, so it lasts for the active kslop SpringBoard session.";
     }
     if (s == SectionTypeBanner) {
         return @"Partial TypeMillennium port. Detection runs against imagent using original-thread RemoteCall probes, while SpringBoard renders a prewarmed banner window.";
     }
     if (s == SectionNotificationIsland) {
-        return @"Experimental Dynamic Island notification route. Cyanide polls SpringBoard's active banner request through the shared RemoteCall session, then mirrors it through the app's ActivityKit Live Activity.";
+        return @"Experimental Dynamic Island notification route. kslop polls SpringBoard's active banner request through the shared RemoteCall session, then mirrors it through the app's ActivityKit Live Activity.";
     }
     if (s == SectionAppSwitcherGrid) {
         return @"Runtime patch. It changes SpringBoard's app switcher style in memory, writes no system files, and a respring restores stock. Unsupported builds may glitch the app switcher or crash SpringBoard.";
@@ -7847,13 +15774,16 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         return @"Legacy icon theme engine settings.\n\n"
                @"Pick a theme before running the icon theme engine.\n\n"
                @"Compatibility: when Dynamic Stage Lite is enabled, live icon repair is paused to avoid SpringBoard resprings. The selected theme still applies once.\n\n"
-               @"Custom themes can be a folder of PNG files named by bundle ID, such as com.apple.mobilesafari.png, or a binary plist mapping bundle IDs to PNG data. Import copies the theme into Cyanide's Documents/Themes folder. Theme Format Guide includes examples and plist exports.";
+               @"Custom themes can be a folder of PNG files named by bundle ID, such as com.apple.mobilesafari.png, or a binary plist mapping bundle IDs to PNG data. Import copies the theme into kslop's Documents/Themes folder. Theme Format Guide includes examples and plist exports.";
     }
     if (s == SectionSnowBoardLite) {
-        return @"SnowBoard/IconBundles importer ported from d1y/cyanide-ios. Folder imports are copied into Cyanide's Documents/SnowBoardLite library and applied through the existing icon replacement pipeline.\n\nThe import copies theme assets into Cyanide's local storage so the original theme in Files is not changed.\n\nCompatibility: when Dynamic Stage Lite is enabled, live icon repair is paused to avoid SpringBoard resprings. The selected theme still applies once.";
+        return @"SnowBoard/IconBundles importer ported from d1y/cyanide-ios. Folder imports are copied into kslop's Documents/SnowBoardLite library and its existing manifest remains compatible with older builds.\n\nThe import copies theme assets into kslop's local storage so the original theme in Files is not changed.\n\nSnowBoard Remix catalogs installed apps through one pinned IconServicesAgent session and publishes every matched response into the persistent IconServices store. Transparent presentation is installed once per SpringBoard or Spotlight PID—not once per icon. On physical devices this is a data-only Objective-C method redirect to Apple's stock flat-image branch; it maps no custom executable code and modifies no shared-cache bytes. It does not modify app bundles or LaunchServices registration. Each app retains independent recovery state. Presentation lasts for its host PID, while stored icon responses remain independent of kslop and IconServicesAgent lifetime.";
+    }
+    if (s == SectionFontChanger) {
+        return @"Imports a local font family and overwrites iOS system font files using kslop's KRW-backed system-file overwrite helper.\n\nRegular is required. Italic and Mono are optional. kslop backs up stock fonts before the first overwrite and can restore those backups.\n\nPer-app font overrides are retired. If an older kslop build changed app-bundled fonts, a recovery-only restore action appears while legacy backups remain.\n\nRespring after applying or restoring system fonts.";
     }
     if (s == SectionLiveWP) {
-        return @"Video wallpaper ported from d1y/cyanide-ios. Select an MP4, MOV, or M4V; Cyanide copies it into Documents/LiveWP and plays it in SpringBoard while the RemoteCall session stays alive.";
+        return @"Video wallpaper ported from d1y/cyanide-ios. Select an MP4, MOV, or M4V; kslop copies it into Documents/LiveWP and plays it in SpringBoard while the RemoteCall session stays alive.";
     }
     return nil;
 }
@@ -7862,10 +15792,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     if (!self.detailMode) {
         if ((RootSection)section == RootSectionWarning) return CGFLOAT_MIN;
-        if ((RootSection)section == RootSectionChangelog     && settings_changelog_entries().count == 0) return CGFLOAT_MIN;
-        if ((RootSection)section == RootSectionTweakBundles  && self.tweakBundleRows.count  == 0) return CGFLOAT_MIN;
-        if ((RootSection)section == RootSectionInDev        && self.inDevBundleRows.count  == 0) return CGFLOAT_MIN;
-        if ((RootSection)section == RootSectionSystemBundles && self.systemBundleRows.count == 0) return CGFLOAT_MIN;
     }
     return UITableViewAutomaticDimension;
 }
@@ -7936,157 +15862,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return cell;
 }
 
-- (UITableViewCell *)buildChangelogCellAtRow:(NSInteger)row tableView:(UITableView *)tableView
-{
-    NSArray<NSDictionary *> *entries = settings_changelog_entries();
-    NSDictionary *entry = (row >= 0 && row < (NSInteger)entries.count) ? entries[row] : nil;
-
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"changelog-entry"];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"changelog-entry"];
-    }
-    cell.selectionStyle = UITableViewCellSelectionStyleNone;
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.imageView.image = nil;
-    cell.textLabel.text = nil;
-    for (UIView *v in [cell.contentView.subviews copy]) [v removeFromSuperview];
-
-    NSString *version = entry[@"version"] ?: @"";
-    NSString *date    = settings_pretty_date_for_iso(entry[@"date"]);
-
-    // Version pill
-    UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    versionLabel.text = [NSString stringWithFormat:@" v%@ ", version];
-    versionLabel.font = [UIFont monospacedDigitSystemFontOfSize:12.0 weight:UIFontWeightSemibold];
-    versionLabel.textColor = UIColor.systemBlueColor;
-    versionLabel.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.12];
-    versionLabel.layer.cornerRadius = 4.0;
-    versionLabel.layer.masksToBounds = YES;
-    versionLabel.textAlignment = NSTextAlignmentCenter;
-
-    UILabel *dateLabel = [[UILabel alloc] init];
-    dateLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    dateLabel.text = date;
-    dateLabel.font = [UIFont systemFontOfSize:13.0];
-    dateLabel.textColor = UIColor.tertiaryLabelColor;
-
-    // Build bullet list with hanging indent
-    NSArray *changes = entry[@"changes"];
-    NSMutableArray<NSString *> *lines = [NSMutableArray arrayWithCapacity:changes.count];
-    for (id c in changes) {
-        if (![c isKindOfClass:[NSString class]]) continue;
-        [lines addObject:(NSString *)c];
-    }
-
-    NSMutableParagraphStyle *bulletStyle = [[NSMutableParagraphStyle alloc] init];
-    bulletStyle.headIndent = 14.0;
-    bulletStyle.firstLineHeadIndent = 0.0;
-    bulletStyle.paragraphSpacing = 4.0;
-    bulletStyle.lineBreakMode = NSLineBreakByWordWrapping;
-
-    NSDictionary *bulletAttrs = @{
-        NSFontAttributeName: [UIFont systemFontOfSize:14.0],
-        NSForegroundColorAttributeName: UIColor.labelColor,
-        NSParagraphStyleAttributeName: bulletStyle,
-    };
-    NSDictionary *dotAttrs = @{
-        NSFontAttributeName: [UIFont systemFontOfSize:14.0],
-        NSForegroundColorAttributeName: UIColor.tertiaryLabelColor,
-        NSParagraphStyleAttributeName: bulletStyle,
-    };
-
-    NSMutableAttributedString *body = [[NSMutableAttributedString alloc] init];
-    for (NSUInteger i = 0; i < lines.count; i++) {
-        if (i > 0) [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n"]];
-        [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"›  " attributes:dotAttrs]];
-        [body appendAttributedString:[[NSAttributedString alloc] initWithString:lines[i] attributes:bulletAttrs]];
-    }
-
-    UILabel *bodyLabel = [[UILabel alloc] init];
-    bodyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    bodyLabel.attributedText = body;
-    bodyLabel.numberOfLines = 0;
-
-    [cell.contentView addSubview:versionLabel];
-    [cell.contentView addSubview:dateLabel];
-    [cell.contentView addSubview:bodyLabel];
-
-    UILayoutGuide *m = cell.contentView.layoutMarginsGuide;
-    [NSLayoutConstraint activateConstraints:@[
-        [versionLabel.leadingAnchor  constraintEqualToAnchor:m.leadingAnchor],
-        [versionLabel.topAnchor      constraintEqualToAnchor:m.topAnchor],
-        [dateLabel.leadingAnchor     constraintEqualToAnchor:versionLabel.trailingAnchor constant:8],
-        [dateLabel.centerYAnchor     constraintEqualToAnchor:versionLabel.centerYAnchor],
-        [bodyLabel.leadingAnchor     constraintEqualToAnchor:m.leadingAnchor],
-        [bodyLabel.trailingAnchor    constraintEqualToAnchor:m.trailingAnchor],
-        [bodyLabel.topAnchor         constraintEqualToAnchor:versionLabel.bottomAnchor constant:8],
-        [bodyLabel.bottomAnchor      constraintEqualToAnchor:m.bottomAnchor],
-    ]];
-
-    return cell;
-}
-
-- (UITableViewCell *)buildChangelogFooterCellInTableView:(UITableView *)tableView
-{
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"changelog-footer"];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"changelog-footer"];
-    }
-    cell.imageView.image = nil;
-    cell.textLabel.text = @"See all releases on GitHub";
-    cell.textLabel.font = [UIFont systemFontOfSize:15.0];
-    cell.textLabel.textColor = self.view.tintColor;
-    cell.detailTextLabel.text = nil;
-    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-    return cell;
-}
-
-- (UITableViewCell *)buildChangelogCollapsedCellInTableView:(UITableView *)tableView
-{
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"changelog-collapsed"];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"changelog-collapsed"];
-    }
-    NSArray<NSDictionary *> *entries = settings_changelog_entries();
-    NSDictionary *first = entries.firstObject;
-    NSString *version = first[@"version"] ?: @"";
-    NSInteger count = 0;
-    for (id c in first[@"changes"]) { if ([c isKindOfClass:[NSString class]]) count++; }
-    cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:@"sparkles" color:UIColor.systemYellowColor size:29.0];
-    cell.textLabel.text = [NSString stringWithFormat:@"What's New in v%@", version];
-    cell.textLabel.font = [UIFont systemFontOfSize:17.0];
-    cell.textLabel.textColor = UIColor.labelColor;
-    cell.detailTextLabel.text = [NSString stringWithFormat:@"%ld change%@", (long)count, count == 1 ? @"" : @"s"];
-    cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-    return cell;
-}
-
-- (UITableViewCell *)buildChangelogCollapseCellInTableView:(UITableView *)tableView
-{
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"changelog-collapse"];
-    if (!cell) {
-        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"changelog-collapse"];
-    }
-    cell.imageView.image = nil;
-    cell.textLabel.text = @"Show Less";
-    cell.textLabel.font = [UIFont systemFontOfSize:15.0];
-    cell.textLabel.textColor = self.view.tintColor;
-    cell.textLabel.textAlignment = NSTextAlignmentCenter;
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-    return cell;
-}
-
-- (void)openReleasesPage
-{
-    NSURL *url = [NSURL URLWithString:@"https://github.com/zeroxjf/cyanide/releases"];
-    if (url) [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-}
-
 - (UITableViewCell *)buildDocsCellInTableView:(UITableView *)tableView
 {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"docs"];
@@ -8098,7 +15873,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     cell.textLabel.textColor = UIColor.labelColor;
     cell.textLabel.text = @"Tweak SDK";
     cell.detailTextLabel.textColor = UIColor.secondaryLabelColor;
-    cell.detailTextLabel.text = @"How to write Cyanide tweaks";
+    cell.detailTextLabel.text = @"How to write kslop tweaks";
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
     return cell;
@@ -8231,6 +16006,77 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     [self presentViewController:hint animated:YES completion:nil];
 }
 
+- (void)presentSnowBoardRemixStatusPicker
+{
+    NSArray<NSDictionary<NSString *, id> *> *statuses =
+        settings_snowboard_remix_cached_statuses();
+    if (statuses.count == 0 && [CNDSnowBoardRemix hasRecoveryData]) {
+        // Do not block the tap while validating every journal.  The status
+        // refresh is coalesced with the section's background refresh and the
+        // picker is presented only after its single exact catalog snapshot is
+        // ready.
+        __weak typeof(self) weakSelf = self;
+        [CNDSnowBoardRemix
+            refreshApplicationStatusesInBackgroundWithCompletion:
+            ^(NSArray<NSDictionary<NSString *, id> *> *freshStatuses) {
+                (void)freshStatuses;
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (strongSelf) [strongSelf presentSnowBoardRemixStatusPicker];
+            }];
+        return;
+    }
+    if (statuses.count == 0) {
+        UIAlertController *alert = [UIAlertController
+            alertControllerWithTitle:@"No Themed Apps"
+                             message:@"SnowBoard Remix has no retained application transactions to restore."
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                   style:UIAlertActionStyleDefault
+                                                 handler:nil]];
+        settings_present_controller(alert, self);
+        return;
+    }
+
+    UIAlertController *sheet = [UIAlertController
+        alertControllerWithTitle:@"Themed Apps / Status"
+                         message:@"Select one retained application to regenerate and verify its stock IconServices response. Legacy filesystem journals, if present, keep their original drift protections."
+                  preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    for (NSDictionary<NSString *, id> *status in statuses) {
+        NSString *bundleIdentifier = status[@"bundleIdentifier"];
+        if (![bundleIdentifier isKindOfClass:NSString.class] ||
+            bundleIdentifier.length == 0) continue;
+        NSString *stage = [status[@"stage"] isKindOfClass:NSString.class]
+            ? status[@"stage"] : @"unknown";
+        NSString *name = [status[@"displayName"] isKindOfClass:NSString.class]
+            ? status[@"displayName"] : bundleIdentifier;
+        NSString *title = [NSString stringWithFormat:@"Restore %@ (%@)", name, stage];
+        [sheet addAction:[UIAlertAction actionWithTitle:title
+                                                   style:UIAlertActionStyleDestructive
+                                                 handler:^(__unused UIAlertAction *action) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            [strongSelf presentActivityLogWithCompletion:^{
+                settings_run_snowboard_remix_operation(
+                    [NSString stringWithFormat:@"Restore %@ Icon", name], YES, ^{
+                    return settings_restore_snowboard_remix_bundle(bundleIdentifier);
+                });
+            }];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                               style:UIAlertActionStyleCancel
+                                             handler:nil]];
+    UIPopoverPresentationController *popover = sheet.popoverPresentationController;
+    if (popover) {
+        popover.sourceView = self.view;
+        popover.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                                        CGRectGetMidY(self.view.bounds), 1, 1);
+        popover.permittedArrowDirections = 0;
+    }
+    settings_present_controller(sheet, self);
+}
+
 - (void)presentSnowBoardLiteFolderImporter
 {
     UIAlertController *hint = [UIAlertController
@@ -8254,7 +16100,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     UIAlertController *hint = [UIAlertController
         alertControllerWithTitle:@"Import Theme Archive"
-                         message:@"Pick a ZIP or DEB file that contains an IconBundles directory. Cyanide extracts and imports a local copy."
+                         message:@"Pick a ZIP or DEB file that contains an IconBundles directory. kslop extracts and imports a local copy."
                   preferredStyle:UIAlertControllerStyleAlert];
     [hint addAction:[UIAlertAction actionWithTitle:@"Continue" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         (void)a;
@@ -8300,6 +16146,32 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         pop.permittedArrowDirections = 0;
     }
     [self presentViewController:sheet animated:YES completion:nil];
+}
+
+- (NSArray<UTType *> *)fontChangerDocumentTypes
+{
+    NSMutableArray<UTType *> *types = [NSMutableArray array];
+    if (@available(iOS 14.0, *)) {
+        [types addObject:UTTypeFont];
+    }
+    for (NSString *ext in @[@"ttf", @"otf", @"ttc"]) {
+        UTType *type = [UTType typeWithFilenameExtension:ext];
+        if (type) [types addObject:type];
+    }
+    [types addObject:UTTypeData];
+    return types;
+}
+
+- (void)presentFontChangerImporterForRole:(NSString *)role
+{
+    self.pendingThemeImportMode = @"fontchanger";
+    self.pendingFontImportRole = role;
+    UIDocumentPickerViewController *picker =
+        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:[self fontChangerDocumentTypes]
+                                                                    asCopy:YES];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = NO;
+    [self presentViewController:picker animated:YES completion:nil];
 }
 
 - (void)presentLiveWPPhotosPicker
@@ -8577,7 +16449,9 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     NSURL *url = urls.firstObject;
     if (!url) return;
     NSString *mode = self.pendingThemeImportMode ?: @"themer";
+    NSString *fontRole = self.pendingFontImportRole ?: CNDFontChangerRoleRegular;
     self.pendingThemeImportMode = nil;
+    self.pendingFontImportRole = nil;
 
     BOOL scoped = [url startAccessingSecurityScopedResource];
     BOOL isDir = NO;
@@ -8611,6 +16485,12 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                                              url.lastPathComponent ?: @"Video"]
                 : [NSString stringWithFormat:@"%@ is ready. Toggle LiveWP on and tap Run to apply.",
                                              url.lastPathComponent ?: @"Video"];
+        } else if ([mode isEqualToString:@"fontchanger"]) {
+            ok = !isDir && font_changer_import_font(url, fontRole, &err);
+            successTitle = @"Font Imported";
+            successMessage = [NSString stringWithFormat:@"%@ is ready for the %@ slot.",
+                              url.lastPathComponent ?: @"Font",
+                              font_changer_role_display_name(fontRole)];
         } else if ([mode isEqualToString:@"snowboardlite"]) {
             if (isDir) {
                 ok = settings_sbl_import_folder_theme(url, &err);
@@ -8629,12 +16509,12 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
             }
             successTitle = @"SnowBoard Theme Imported";
             NSString *name = settings_snowboardlite_selected_theme_display_name();
-            successMessage = [NSString stringWithFormat:@"\"%@\" is now selected. Toggle SnowBoard Lite on and tap Run to apply.", name];
+            successMessage = [NSString stringWithFormat:@"\"%@\" is now selected. Use Apply Theme in SnowBoard Remix to apply it.", name];
         } else {
             ok = isDir ? [self importThemerFolderAtURL:url error:&err]
                        : [self importThemerPlistAtURL:url error:&err];
             NSString *name = settings_themer_selected_theme_display_name();
-            successMessage = [NSString stringWithFormat:@"\"%@\" is now selected. Toggle SnowBoard Lite on and tap Run to apply.", name];
+            successMessage = [NSString stringWithFormat:@"\"%@\" is now selected. Use Apply Theme in SnowBoard Remix to apply it.", name];
         }
         if (scoped) [url stopAccessingSecurityScopedResource];
 
@@ -8659,6 +16539,9 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                 }
             } else if ([mode isEqualToString:@"livewp"]) {
                 [self finishLiveWPVideoImportAndSwapIfRunning];
+            } else if ([mode isEqualToString:@"fontchanger"]) {
+                [self reloadSectionOrAll:SectionFontChanger];
+                settings_notify_package_queue_changed_async();
             } else {
                 [self reloadThemerSectionAndQueue];
             }
@@ -8676,6 +16559,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 {
     (void)controller;
     self.pendingThemeImportMode = nil;
+    self.pendingFontImportRole = nil;
 }
 
 - (void)reloadSectionOrAll:(NSInteger)section
@@ -8685,6 +16569,60 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                       withRowAnimation:UITableViewRowAnimationAutomatic];
     } else {
         [self.tableView reloadData];
+    }
+}
+
+- (void)presentSBCDockAppPicker
+{
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSInteger capacity = settings_sbc_dock_autofill_capacity(defaults);
+    if (capacity <= 0) {
+        UIAlertController *alert =
+            [UIAlertController alertControllerWithTitle:@"Increase Dock Size"
+                                                message:@"Set Dock icons to 5, 6, or 7 first. Each icon above four creates one automatic dock slot."
+                                         preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:nil]];
+        settings_present_controller(alert, self);
+        return;
+    }
+
+    NSArray<NSString *> *selected = settings_sbc_ordered_dock_bundle_ids(defaults);
+    __weak typeof(self) weakSelf = self;
+    CNDDockAppPickerViewController *picker =
+        [[CNDDockAppPickerViewController alloc]
+            initWithSelectedBundleIdentifiers:selected
+                                      capacity:(NSUInteger)capacity
+                                    completion:^(NSArray<NSString *> *orderedBundleIdentifiers) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+
+        NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+        NSInteger currentCapacity = settings_sbc_dock_autofill_capacity(d);
+        NSMutableArray<NSString *> *safe = [NSMutableArray array];
+        for (id value in orderedBundleIdentifiers) {
+            if (safe.count >= (NSUInteger)currentCapacity) break;
+            if (![value isKindOfClass:[NSString class]] || [value length] == 0) continue;
+            if (![safe containsObject:value]) [safe addObject:value];
+        }
+        [d setObject:safe forKey:kSettingsSBCDockAutofillBundleIDs];
+        [d synchronize];
+
+        [strongSelf reloadSectionOrAll:SectionSBC];
+        settings_schedule_live_apply_for_key(kSettingsSBCDockAutofillBundleIDs);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(400 * NSEC_PER_MSEC)),
+                       dispatch_get_main_queue(), ^{
+            [strongSelf presentApplyLogIfRunning];
+        });
+    }];
+
+    if (self.navigationController) {
+        [self.navigationController pushViewController:picker animated:YES];
+    } else {
+        UINavigationController *navigation =
+            [[UINavigationController alloc] initWithRootViewController:picker];
+        [self presentViewController:navigation animated:YES completion:nil];
     }
 }
 
@@ -8837,7 +16775,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
                                                                  message:nil
                                                           preferredStyle:UIAlertControllerStyleAlert];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Cyanide";
+        field.placeholder = @"kslop";
         field.text = [d stringForKey:key] ?: @"";
         field.clearButtonMode = UITextFieldViewModeWhileEditing;
     }];
@@ -9010,7 +16948,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 - (void)selectSnowBoardLiteIOS6Theme
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    [d setObject:kSnowBoardLiteThemeBuiltinIOS6 forKey:kSettingsSnowBoardLiteSelectedThemeID];
+    [d setObject:kSnowBoardLiteThemeBuiltinIOS6 forKey:kSettingsSnowBoardRemixSelectedThemeID];
     [d synchronize];
     settings_mark_tweak_applied(kSettingsSnowBoardLiteEnabled, NO);
     settings_notify_package_queue_changed_async();
@@ -9020,15 +16958,198 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
 - (void)clearSnowBoardLiteTheme
 {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    [d setObject:@"" forKey:kSettingsSnowBoardLiteSelectedThemeID];
-    if ([d boolForKey:kSettingsSnowBoardLiteEnabled]) {
-        [d setBool:NO forKey:kSettingsSnowBoardLiteEnabled];
-        g_themer_live_stop_requested = 1;
-    }
+    [d setObject:@"" forKey:kSettingsSnowBoardRemixSelectedThemeID];
+    // Clearing the selection does not restore active transactions. Use the
+    // per-app or Restore All action so journals remain the source of truth.
+    [d setBool:NO forKey:kSettingsSnowBoardLiteEnabled];
     [d synchronize];
     settings_mark_tweak_applied(kSettingsSnowBoardLiteEnabled, NO);
     settings_notify_package_queue_changed_async();
     [self reloadSectionOrAll:SectionSnowBoardLite];
+}
+
+- (void)presentSpotlightIconServicesCandidatePicker
+{
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    uint64_t supportedMask = settings_spotlight_iconservices_u64_default(
+        kSettingsSpotlightIconServicesSupportedMask);
+    if (supportedMask == 0) {
+        BOOL probeCompleted =
+            [d integerForKey:kSettingsSpotlightIconServicesProbePID] > 0;
+        UIAlertController *alert = [UIAlertController
+            alertControllerWithTitle:probeCompleted
+                ? @"No Supported Candidates" : @"Probe Required"
+                             message:probeCompleted
+                ? @"The stock-preserved themed-68 store candidate did not pass the current safety gates. Preserve the full Probe log before retrying."
+                : @"Open Spotlight with the target result visible, then run Inspect Original Spotlight Image Bag before selecting the stock-preserved themed-68 store candidate."
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                 style:UIAlertActionStyleDefault
+                                               handler:nil]];
+        settings_present_controller(alert, self);
+        return;
+    }
+    if ([d boolForKey:kSettingsSpotlightIconServicesArmed]) {
+        UIAlertController *alert = [UIAlertController
+            alertControllerWithTitle:@"Candidate Armed"
+                             message:@"Finish Verify + Restore or Emergency Restore before changing candidates."
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                 style:UIAlertActionStyleDefault
+                                               handler:nil]];
+        settings_present_controller(alert, self);
+        return;
+    }
+
+    ThemerSpotlightIconServicesCandidate selected =
+        settings_spotlight_iconservices_selected_candidate();
+    UIAlertController *sheet = [UIAlertController
+        alertControllerWithTitle:@"Spotlight IconServices Candidate"
+                         message:@"Test exactly one supported cache object with IconServices' named Spotlight descriptor per full seed, observe, verify, and restore cycle."
+                  preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    for (NSInteger raw = 0;
+         raw < ThemerSpotlightIconServicesCandidateCount;
+         raw++) {
+        uint64_t bit = UINT64_C(1) << (uint64_t)raw;
+        if ((supportedMask & bit) == 0) continue;
+        ThemerSpotlightIconServicesCandidate candidate =
+            (ThemerSpotlightIconServicesCandidate)raw;
+        NSString *risk = @"high risk";
+        switch (candidate) {
+            case ThemerSpotlightIconServicesCandidateLocalExistingDescriptor:
+            case ThemerSpotlightIconServicesCandidateCanonicalExistingDescriptor:
+            case ThemerSpotlightIconServicesCandidateCanonicalFactoryClone:
+            case ThemerSpotlightIconServicesCandidateCanonicalInitClone:
+                risk = @"low risk";
+                break;
+            case ThemerSpotlightIconServicesCandidateCanonicalBagSwap:
+            case ThemerSpotlightIconServicesCandidateCanonicalMixedBag:
+                risk = @"medium risk";
+                break;
+            default:
+                break;
+        }
+        NSString *name = [NSString stringWithUTF8String:
+            themer_spotlight_iconservices_candidate_name(candidate)];
+        NSString *title = [NSString stringWithFormat:@"%@%@ — %@",
+            candidate == selected ? @"✓ " : @"",
+            name ?: @"Unknown Candidate",
+            risk];
+        [sheet addAction:[UIAlertAction
+            actionWithTitle:title
+                      style:UIAlertActionStyleDefault
+                    handler:^(__unused UIAlertAction *action) {
+            NSUserDefaults *inner = NSUserDefaults.standardUserDefaults;
+            [inner setInteger:candidate
+                       forKey:kSettingsSpotlightIconServicesCandidate];
+            [inner synchronize];
+            log_user("[ICONSERVICES_LAB] selected candidate=%ld name=%s\n",
+                     (long)candidate,
+                     themer_spotlight_iconservices_candidate_name(candidate));
+            [weakSelf reloadSectionOrAll:SectionSnowBoardLite];
+        }]];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    sheet.popoverPresentationController.sourceView = self.view;
+    sheet.popoverPresentationController.sourceRect = self.view.bounds;
+    settings_present_controller(sheet, self);
+}
+
+- (void)runSpotlightIconServicesVerifyWithTargetObservation:(NSString *)target
+                                          controlObservation:(NSString *)control
+{
+    log_user("[ICONSERVICES_LAB] visual-observation target=%s control=%s\n",
+             target.UTF8String ?: "unclear",
+             control.UTF8String ?: "unclear");
+    [self presentActivityLogWithCompletion:^{
+        settings_run_spotlight_iconservices_action(
+            SettingsSpotlightIconServicesActionVerifyRestore);
+    }];
+}
+
+- (void)presentSpotlightIconServicesControlPromptForTarget:(NSString *)target
+{
+    UIAlertController *sheet = [UIAlertController
+        alertControllerWithTitle:@"Control App Observation"
+                         message:@"Did the logged control app remain stock in Spotlight?"
+                  preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:@"Control Stayed Stock"
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        [weakSelf runSpotlightIconServicesVerifyWithTargetObservation:target
+                                                   controlObservation:@"stock"];
+    }]];
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:@"Control Changed"
+                  style:UIAlertActionStyleDestructive
+                handler:^(__unused UIAlertAction *action) {
+        [weakSelf runSpotlightIconServicesVerifyWithTargetObservation:target
+                                                   controlObservation:@"changed"];
+    }]];
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:@"Unclear"
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        [weakSelf runSpotlightIconServicesVerifyWithTargetObservation:target
+                                                   controlObservation:@"unclear"];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    sheet.popoverPresentationController.sourceView = self.view;
+    sheet.popoverPresentationController.sourceRect = self.view.bounds;
+    settings_present_controller(sheet, self);
+}
+
+- (void)presentSpotlightIconServicesVerifyPrompt
+{
+    if (![[NSUserDefaults standardUserDefaults]
+            boolForKey:kSettingsSpotlightIconServicesArmed]) {
+        UIAlertController *alert = [UIAlertController
+            alertControllerWithTitle:@"No Armed Candidate"
+                             message:@"Run Seed Selected Candidate first."
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                 style:UIAlertActionStyleDefault
+                                               handler:nil]];
+        settings_present_controller(alert, self);
+        return;
+    }
+
+    UIAlertController *sheet = [UIAlertController
+        alertControllerWithTitle:@"Target App Observation"
+                         message:@"After dismissing and reopening Spotlight in the same host process, what did the logged target app show?"
+                  preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak typeof(self) weakSelf = self;
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:@"Target Themed"
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        [weakSelf presentSpotlightIconServicesControlPromptForTarget:@"themed"];
+    }]];
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:@"Target Stock"
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        [weakSelf presentSpotlightIconServicesControlPromptForTarget:@"stock"];
+    }]];
+    [sheet addAction:[UIAlertAction
+        actionWithTitle:@"Unclear"
+                  style:UIAlertActionStyleDefault
+                handler:^(__unused UIAlertAction *action) {
+        [weakSelf presentSpotlightIconServicesControlPromptForTarget:@"unclear"];
+    }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    sheet.popoverPresentationController.sourceView = self.view;
+    sheet.popoverPresentationController.sourceRect = self.view.bounds;
+    settings_present_controller(sheet, self);
 }
 
 - (void)clearLiveWPVideo
@@ -9692,7 +17813,7 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     NSString *iosVersion = [UIDevice currentDevice].systemVersion ?: @"unknown";
     struct utsname info; uname(&info);
     NSString *machine = [NSString stringWithUTF8String:info.machine] ?: @"unknown";
-    NSString *summary = [NSString stringWithFormat:@"Cyanide diagnostic log\nCyanide %@ · iOS %@ · %@",
+    NSString *summary = [NSString stringWithFormat:@"kslop diagnostic log\nkslop %@ · iOS %@ · %@",
                          appVersion, iosVersion, machine];
 
     UIActivityViewController *vc = [[UIActivityViewController alloc] initWithActivityItems:@[summary, logURL]
@@ -9740,7 +17861,7 @@ static void cyanide_upload_log_with_kind_event(NSString *kind, NSString *event) 
 
     // Prepend a diagnostic header so each uploaded log is self-contained.
     NSString *header = [NSString stringWithFormat:
-        @"=== Cyanide Diagnostic Log ===\n"
+        @"=== kslop Diagnostic Log ===\n"
         @"app_version : %@\n"
         @"app_build   : %@\n"
         @"ios_version : %@\n"
@@ -9865,10 +17986,10 @@ void cyanide_present_contact(UIViewController *host)
 
     // Single-line signature so it reads correctly even in mail clients that
     // collapse newlines from mailto: bodies (Gmail-iOS being the worst offender).
-    NSString *signature = [NSString stringWithFormat:@"—— Cyanide %@ · iOS %@ · %@ ——",
+    NSString *signature = [NSString stringWithFormat:@"—— kslop %@ · iOS %@ · %@ ——",
                            appVersion, iosVersion, machine];
 
-    NSString *subject = [NSString stringWithFormat:@"Cyanide %@ — Contact", appVersion];
+    NSString *subject = [NSString stringWithFormat:@"kslop %@ — Contact", appVersion];
 
     // CRLF rather than LF so iOS Mail, Gmail, Outlook, and the mailto: URL
     // path all preserve line breaks. Plain LF is fine in MFMailCompose but
@@ -9925,34 +18046,9 @@ void cyanide_present_contact(UIViewController *host)
             case RootSectionWarning:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionWarning];
                 break;
-            case RootSectionChangelog: {
-                if (!self.changelogExpanded) {
-                    return [self buildChangelogCollapsedCellInTableView:tableView];
-                }
-                NSInteger entryCount = (NSInteger)settings_changelog_entries().count;
-                if (indexPath.row == entryCount) {
-                    return [self buildChangelogFooterCellInTableView:tableView];
-                }
-                if (indexPath.row > entryCount) {
-                    return [self buildChangelogCollapseCellInTableView:tableView];
-                }
-                return [self buildChangelogCellAtRow:indexPath.row tableView:tableView];
-            }
             case RootSectionActions:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionActions];
                 break;
-            case RootSectionTweakBundles:
-                return [self buildBundleCellWithRow:self.tweakBundleRows[indexPath.row] tableView:tableView];
-            case RootSectionInDev:
-                return [self buildInDevCellWithRow:self.inDevBundleRows[indexPath.row] tableView:tableView];
-            case RootSectionSystemBundles:
-                return [self buildBundleCellWithRow:self.systemBundleRows[indexPath.row] tableView:tableView];
-            case RootSectionPatreon:
-                return [self buildPatreonCellAtRow:indexPath.row tableView:tableView];
-            case RootSectionExperimental:
-                if (!settings_experimental_access_allowed())
-                    return [self buildExperimentalLockedCellInTableView:tableView];
-                return [self buildExperimentalCellInTableView:tableView];
             case RootSectionAbout:
                 return [self buildAboutCellAtRow:indexPath.row tableView:tableView];
             case RootSectionCount:
@@ -9977,9 +18073,16 @@ void cyanide_present_contact(UIViewController *host)
         cell.detailTextLabel.text = nil;
 
         BOOL supported = settings_device_supported();
+        BOOL filesystemIconRedirectActive =
+            CNDIconDeclarationRedirectIsActive();
+        BOOL providerInterceptActive =
+            CNDIconServicesInterceptProofIsActive();
+        BOOL iconRedirectActive = filesystemIconRedirectActive ||
+            providerInterceptActive;
         BOOL cleanupEnabled = supported && (g_kexploit_done ||
                                             g_springboard_rc_ready ||
-                                            remote_call_has_local_state());
+                                            remote_call_has_local_state()) &&
+                                            !iconRedirectActive;
         BOOL anyInstalledOrQueued = NO;
         for (Package *p in [PackageCatalog allPackages]) {
             if (p.isInstalled || p.isQueuedForApply) { anyInstalledOrQueued = YES; break; }
@@ -9988,7 +18091,7 @@ void cyanide_present_contact(UIViewController *host)
             anyInstalledOrQueued = [[PackageQueue sharedQueue] pendingCount] > 0;
         }
 
-        BOOL rowEnabled = supported;
+        BOOL rowEnabled;
         NSString *symbol = nil;
         UIColor *color = nil;
 
@@ -9998,7 +18101,9 @@ void cyanide_present_contact(UIViewController *host)
             symbol = @"xmark.circle.fill";
             color  = UIColor.systemRedColor;
             cell.textLabel.text = running ? @"Cleaning Up…" : @"Clean Up";
-            cell.detailTextLabel.text = cleanupEnabled ? nil : @"No active session";
+            cell.detailTextLabel.text = iconRedirectActive
+                ? @"Restore icon proof first"
+                : (cleanupEnabled ? nil : @"No active session");
             if (running) {
                 UIActivityIndicatorView *spin = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
                 spin.color = color;
@@ -10006,10 +18111,12 @@ void cyanide_present_contact(UIViewController *host)
                 cell.accessoryView = spin;
             }
         } else if (indexPath.row == 1) {
+            rowEnabled = supported;
             BOOL running = g_settings_respring_cleanup_running;
             symbol = @"arrow.clockwise.circle.fill";
             color  = UIColor.systemOrangeColor;
             cell.textLabel.text = running ? @"Preparing…" : @"Respring";
+            cell.detailTextLabel.text = nil;
             if (running) {
                 UIActivityIndicatorView *spin = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
                 spin.color = color;
@@ -10022,11 +18129,86 @@ void cyanide_present_contact(UIViewController *host)
             color  = UIColor.systemRedColor;
             cell.textLabel.text = @"Reset All Packages";
             cell.detailTextLabel.text = anyInstalledOrQueued ? nil : @"Nothing active";
-        } else {
+        } else if (indexPath.row == 3) {
             rowEnabled = YES;
             symbol = @"arrow.down.circle.fill";
             color  = UIColor.systemBlueColor;
             cell.textLabel.text = @"Check for Updates";
+        } else if (indexPath.row == 4) {
+            rowEnabled = supported && !g_settings_actions_running &&
+                !iconRedirectActive;
+            symbol = @"checkmark.shield.fill";
+            color = UIColor.systemIndigoColor;
+            cell.textLabel.text = @"Test Icon Registration";
+            cell.detailTextLabel.text = iconRedirectActive
+                ? @"Restore icon proof first"
+                : (rowEnabled ? @"No-op baseline through stock installd"
+                              : (supported ? @"Another action is running" : nil));
+        } else if (indexPath.row == 5) {
+            rowEnabled = supported && !g_settings_actions_running &&
+                !iconRedirectActive;
+            symbol = @"photo.badge.arrow.down.fill";
+            color = UIColor.systemOrangeColor;
+            BOOL providerProof = remote_call_lab_backend_opted_in() ||
+                cnd_lab_vphone_guest();
+            cell.textLabel.text = providerProof
+                ? @"Publish eBay Marked Icon"
+                : [NSString stringWithFormat:@"Test %@ Icon Proof",
+                   settings_icon_redirect_target_name()];
+            cell.detailTextLabel.text = iconRedirectActive
+                ? @"Restore the pending icon proof first"
+                : (rowEnabled ? (providerProof
+                    ? (remote_call_lab_backend_opted_in()
+                        ? @"One-shot iconservicesagent publisher"
+                        : @"VM detected; enable the RemoteCall lab transport")
+                    : @"In-place fallback file + stock installd")
+                              : (supported ? @"Another action is running" : nil));
+        } else if (indexPath.row == 6) {
+            rowEnabled = supported && !g_settings_actions_running &&
+                iconRedirectActive;
+            symbol = @"arrow.uturn.backward.circle.fill";
+            color = UIColor.systemGreenColor;
+            cell.textLabel.text = providerInterceptActive
+                ? @"Restore eBay IconServices Response"
+                : [NSString stringWithFormat:@"Restore %@ Icon + Registration",
+                   settings_icon_redirect_target_name()];
+            cell.detailTextLabel.text = iconRedirectActive
+                ? (rowEnabled ? (providerInterceptActive
+                    ? @"Regenerate and verify the stock response"
+                    : @"Verify and restore both transaction halves")
+                              : @"Another action is running")
+                : [NSString stringWithFormat:@"No saved %@ recovery is pending",
+                   settings_icon_redirect_target_name()];
+        } else if (indexPath.row == 7) {
+            // Keep the escape hatch available even when a malformed or stale
+            // journal is not recognized by the normal active-state detector.
+            rowEnabled = !g_settings_actions_running;
+            symbol = @"xmark.bin.fill";
+            color = UIColor.systemRedColor;
+            cell.textLabel.text = @"Reset Icon Restore State";
+            cell.detailTextLabel.text = iconRedirectActive
+                ? (rowEnabled
+                    ? @"Forget kslop's local recovery only"
+                    : @"Another action is running")
+                : @"Forget any stale local recovery records";
+        } else {
+            NSString *supportReason = nil;
+            BOOL exactTarget = CNDPhysicalCSAllowInvalidProbeIsSupported(
+                &supportReason);
+            rowEnabled = exactTarget && !g_settings_actions_running &&
+                !CNDPhysicalCSAllowInvalidProbeIsRunning();
+            symbol = @"cpu.fill";
+            color = UIColor.systemPurpleColor;
+            cell.textLabel.text = CNDPhysicalCSAllowInvalidProbeIsRunning()
+                ? @"SpringBoard RX Probe Running…"
+                : @"Run SpringBoard RX Probe";
+            if (!exactTarget) {
+                cell.detailTextLabel.text = supportReason;
+            } else if (g_settings_actions_running) {
+                cell.detailTextLabel.text = @"Another action is running";
+            } else {
+                cell.detailTextLabel.text = @"Automatic KRW • resprings and closes Cyanide";
+            }
         }
 
         UIColor *effectiveColor = rowEnabled ? color : UIColor.tertiaryLabelColor;
@@ -10083,8 +18265,10 @@ void cyanide_present_contact(UIViewController *host)
         cell.accessoryView = nil;
         cell.textLabel.text = row[@"title"];
         cell.textLabel.textAlignment = NSTextAlignmentCenter;
+        UIColor *buttonTint = row[@"tintColor"];
         cell.textLabel.textColor = rowSupported
-            ? ([row[@"destructive"] boolValue] ? UIColor.systemRedColor : self.view.tintColor)
+            ? ([row[@"destructive"] boolValue] ? UIColor.systemRedColor
+                : (buttonTint ?: self.view.tintColor))
             : UIColor.tertiaryLabelColor;
         return cell;
     }
@@ -10330,6 +18514,19 @@ void cyanide_present_contact(UIViewController *host)
         ds_keepalive_apply_enabled(sender.isOn);
         return;
     }
+    if ([key isEqualToString:
+            kSettingsSnowBoardRemixInstallConsumerMappings]) {
+        /* Presentation is explicitly armed by the manual Spotlight action.
+         * Toggling the feature must never auto-start a watcher. */
+        if (!sender.isOn &&
+            CNDIconServicesConsumerLifecycleIsRunning()) {
+            dispatch_async(
+                dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                    (void)CNDIconServicesConsumerLifecycleStop();
+                });
+        }
+        return;
+    }
     if (settings_key_affects_package_state(key)) {
         if (!sender.isOn) settings_mark_tweak_applied(key, NO);
         settings_notify_package_queue_changed_async();
@@ -10478,7 +18675,7 @@ void cyanide_present_contact(UIViewController *host)
     if (apps.count == 0) {
         UIAlertController *ac = [UIAlertController
             alertControllerWithTitle:@"No Apps Found"
-                             message:@"Cyanide could not list installed user apps yet. Run the chain once, then try again."
+                             message:@"kslop could not list installed user apps yet. Run the chain once, then try again."
                       preferredStyle:UIAlertControllerStyleAlert];
         [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
         settings_present_controller(ac, self);
@@ -10560,7 +18757,7 @@ void cyanide_present_contact(UIViewController *host)
 {
     UIAlertController *ac = [UIAlertController
         alertControllerWithTitle:@"App Store Sign In"
-                         message:@"Sign in with the Apple ID that owns or can download the app. If Apple asks for two-factor authentication, Cyanide will prompt for the code next."
+                         message:@"Sign in with the Apple ID that owns or can download the app. If Apple asks for two-factor authentication, kslop will prompt for the code next."
                   preferredStyle:UIAlertControllerStyleAlert];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.placeholder = @"Apple ID email";
@@ -10706,7 +18903,7 @@ void cyanide_present_contact(UIViewController *host)
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     UIAlertController *ac = [UIAlertController
         alertControllerWithTitle:@"App Store Link"
-                         message:@"Paste an App Store URL like https://apps.apple.com/us/app/name/id123456789, or enter the numeric app ID. Cyanide will resolve it, then attempt the IPA download path."
+                         message:@"Paste an App Store URL like https://apps.apple.com/us/app/name/id123456789, or enter the numeric app ID. kslop will resolve it, then attempt the IPA download path."
                   preferredStyle:UIAlertControllerStyleAlert];
     [ac addTextFieldWithConfigurationHandler:^(UITextField *field) {
         field.placeholder = @"App Store URL or app ID";
@@ -11263,7 +19460,8 @@ void cyanide_present_contact(UIViewController *host)
 
     NSDictionary *row = [self rowForTag:sender.tag];
     NSInteger value = (NSInteger)sender.value;
-    [[NSUserDefaults standardUserDefaults] setInteger:value forKey:row[@"key"]];
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setInteger:value forKey:row[@"key"]];
 
     // NanoRegistry steppers are seed values for an explicit Apply button;
     // they don't drive a live SpringBoard RC loop, so skip the auto-apply.
@@ -11273,8 +19471,21 @@ void cyanide_present_contact(UIViewController *host)
                 || [key isEqualToString:kSettingsNanoMinPairingChipID]
                 || [key isEqualToString:kSettingsNanoMinQuickSwitch];
     if (!isNano) {
+        if ([key isEqualToString:kSettingsSBCDockIcons]) {
+            // Extra slots are session-only and map one-to-one to this ordered
+            // list. Drop choices that no longer fit before the live reapply so
+            // a 4-icon dock always restores every temporary move.
+            [defaults setObject:settings_sbc_ordered_dock_bundle_ids(defaults)
+                         forKey:kSettingsSBCDockAutofillBundleIDs];
+            [defaults synchronize];
+        }
         settings_schedule_live_apply_for_key(key);
         [self presentApplyLogIfRunning];
+    }
+
+    if ([key isEqualToString:kSettingsSBCDockIcons]) {
+        [self reloadSectionOrAll:SectionSBC];
+        return;
     }
 
     UIView *v = sender.superview;
@@ -11314,86 +19525,9 @@ void cyanide_present_contact(UIViewController *host)
         switch ((RootSection)indexPath.section) {
             case RootSectionWarning:
                 return;
-            case RootSectionChangelog: {
-                if (!self.changelogExpanded) {
-                    self.changelogExpanded = YES;
-                    [tableView reloadSections:[NSIndexSet indexSetWithIndex:RootSectionChangelog]
-                             withRowAnimation:UITableViewRowAnimationAutomatic];
-                    return;
-                }
-                NSInteger entryCount = (NSInteger)settings_changelog_entries().count;
-                if (indexPath.row == entryCount) {
-                    [self openReleasesPage];
-                } else if (indexPath.row > entryCount) {
-                    self.changelogExpanded = NO;
-                    [tableView reloadSections:[NSIndexSet indexSetWithIndex:RootSectionChangelog]
-                             withRowAnimation:UITableViewRowAnimationAutomatic];
-                }
-                return;
-            }
             case RootSectionActions:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionActions];
                 break;
-            case RootSectionInDev:
-            case RootSectionTweakBundles:
-            case RootSectionSystemBundles: {
-                NSArray<NSDictionary *> *bundles = (RootSection)indexPath.section == RootSectionInDev
-                    ? self.inDevBundleRows
-                    : ((RootSection)indexPath.section == RootSectionTweakBundles
-                        ? self.tweakBundleRows
-                        : self.systemBundleRows);
-                NSDictionary *bundle = bundles[indexPath.row];
-                NSInteger underlying = [bundle[@"section"] integerValue];
-                NSString *pushTitle = bundle[@"title"];
-                SettingsViewController *detail = [[SettingsViewController alloc] initWithUnderlyingSection:underlying
-                                                                                              bundleTitle:pushTitle];
-                [self.navigationController pushViewController:detail animated:YES];
-                return;
-            }
-            case RootSectionPatreon:
-                [self handlePatreonTapAtRow:indexPath.row];
-                return;
-            case RootSectionExperimental: {
-                if (!settings_experimental_access_allowed()) {
-                    if (cyanide_patreon_is_linked()) {
-                        [[UIApplication sharedApplication] openURL:cyanide_patreon_join_url()
-                                                            options:@{}
-                                                  completionHandler:nil];
-                    } else {
-                        UIAlertController *ac = [UIAlertController
-                            alertControllerWithTitle:@"Member Tier Required"
-                                             message:@"Experimental tweaks are early-access for Member tier supporters on patreon.com/zeroxjf."
-                                      preferredStyle:UIAlertControllerStyleAlert];
-                        __weak typeof(self) weakSelf = self;
-                        [ac addAction:[UIAlertAction actionWithTitle:@"Link Account"
-                                                               style:UIAlertActionStyleDefault
-                                                             handler:^(UIAlertAction *a) {
-                            (void)a;
-                            [weakSelf handlePatreonTapAtRow:0];
-                        }]];
-                        [ac addAction:[UIAlertAction actionWithTitle:@"Sign Up on Patreon"
-                                                               style:UIAlertActionStyleDefault
-                                                             handler:^(UIAlertAction *a) {
-                            (void)a;
-                            [[UIApplication sharedApplication] openURL:cyanide_patreon_join_url()
-                                                               options:@{}
-                                                     completionHandler:nil];
-                        }]];
-                        [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
-                                                               style:UIAlertActionStyleCancel
-                                                             handler:nil]];
-                        [self presentViewController:ac animated:YES completion:nil];
-                    }
-                    return;
-                }
-                UITableViewCell *expCell = [tableView cellForRowAtIndexPath:indexPath];
-                if ([expCell.accessoryView isKindOfClass:[UISwitch class]]) {
-                    UISwitch *sw = (UISwitch *)expCell.accessoryView;
-                    [sw setOn:!sw.isOn animated:YES];
-                    [self experimentalSwitchChanged:sw];
-                }
-                return;
-            }
             case RootSectionAbout: {
                 switch (indexPath.row) {
                     case 0: [self openTwitter]; break;
@@ -11511,6 +19645,101 @@ void cyanide_present_contact(UIViewController *host)
             settings_present_controller(ac, self);
         } else if (indexPath.row == 3) {
             [[UpdateChecker shared] checkForUpdatesManuallyFrom:self];
+        } else if (indexPath.row == 4) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Run Baseline Registration?"
+                                 message:@"This captures kslop's exact current signed identity, establishes live KRW, and asks stock installd to re-register that unchanged dictionary. It does not replace an icon or modify plist or app-bundle files."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Run Test"
+                                                   style:UIAlertActionStyleDefault
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_lsreg_baseline_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 5) {
+            NSString *targetName = settings_icon_redirect_target_name();
+            BOOL providerProof = remote_call_lab_backend_opted_in() ||
+                cnd_lab_vphone_guest();
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:providerProof
+                    ? @"Publish eBay IconServices Response?"
+                    : [NSString stringWithFormat:@"Test %@ Icon Proof?", targetName]
+                                 message:providerProof
+                    ? @"Apply only; Restore is never invoked. kslop renders transparent marked IFImage.data and publishes it through one scoped iconservicesagent session. A direct generateImageWithDescriptor: request triggers exactly one stock-first replacement: the original generator supplies the genuine validation token and may supply a pre-store UUID; otherwise the unmodified outer transaction assigns the canonical UUID, which kslop binds only from the exact data/token-matched cache/store response. After the publisher IMP and temporary map are removed and exact .isdata bytes verify, kslop installs the process-local transparent presentation route. eBay's bundle and LaunchServices remain untouched."
+                    : [NSString stringWithFormat:@"kslop will capture %@'s current bundle path, registration, real Info.plist, and declared fallback icon; durably journal both original files/metadata; then modify the existing Info.plist and icon vnodes in place with overwrite_system_file(). If no usable legacy file exists, it will create one guarded fallback instead. It removes only the phone primary CFBundleIconName, rebuilds registration from the mutated bundle URL, and verifies exact file/object readback plus the effective LaunchServices record. Restore after the visual and relaunch checks.", targetName]
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction
+                actionWithTitle:providerProof ? @"Publish" : @"Run Test"
+                          style:UIAlertActionStyleDefault
+                        handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_icon_redirect_action(YES, NO);
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 6) {
+            NSString *targetName = settings_icon_redirect_target_name();
+            BOOL providerProof = CNDIconServicesInterceptProofIsActive() &&
+                !CNDIconDeclarationRedirectIsActive();
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:providerProof
+                    ? @"Restore eBay IconServices Response?"
+                    : [NSString stringWithFormat:@"Restore %@ Icon + Registration?", targetName]
+                                 message:providerProof
+                    ? @"Runs an unhooked 68x68@3 stock generation request, then requires agent-cache and exact UUID.isdata readback with the same UUID, bytes, and validation token before issuing cache invalidation and clearing publication recovery. It does not contact SpringBoard or Spotlight and never edits eBay's bundle. Existing process-local flat-image redirects may remain until those processes exit; stock responses continue through the stock flat-image path. If a one-shot publisher mapping was not proven removed, recovery waits for that short-lived iconservicesagent to exit."
+                    : @"This attempts both halves even if one fails: submit the exact saved stock registration and restore the original icon bytes through the same in-place overwrite primitive (or remove only the transaction-created fallback). It refuses a changed bundle path, unknown file hash, symlink, or changed created-file vnode. The recovery journal is removed only after exact file verification, clean stock-installd teardown, and issuance of the IconServices invalidation request."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Restore"
+                                                   style:UIAlertActionStyleDefault
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_icon_redirect_action(NO, NO);
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 7) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_icon_redirect_reset_recovery_state();
+            }];
+        } else {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Run SpringBoard RX Probe?"
+                                 message:@"Exact iPhone 16 Pro Max (iPhone17,2) / 23A341 test. Cyanide automatically reuses or acquires KRW, invokes PT_ATTACHEXC on SpringBoard, and attempts one private anonymous RX page there. It never opens or injects Spotlight and never uses PT_TRACE_ME. If the attach succeeds, the result is saved, SpringBoard is restarted once, KRW is parked, and Cyanide closes to clear both processes' temporary debug state. Any explicitly running Cyanide Spotlight watcher is stopped first and is not restarted automatically."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Run Probe"
+                                                   style:UIAlertActionStyleDefault
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_physical_rx_probe_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
         }
     }
 
@@ -12045,14 +20274,208 @@ void cyanide_present_contact(UIViewController *host)
         NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
         if (![row[@"kind"] isEqualToString:@"button"]) return;
         NSString *action = row[@"action"];
-        if ([action isEqualToString:@"sbl-select-ios6"]) {
-            [self selectSnowBoardLiteIOS6Theme];
+        if ([action isEqualToString:@"sbl-apply-permanent"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboard_remix_operation(@"Apply Theme", YES, ^{
+                    return settings_apply_snowboard_remix();
+                });
+            }];
+        } else if ([action isEqualToString:@"sbl-update-repair"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboard_remix_operation(
+                    @"Update Repair", YES, ^{
+                    return settings_update_repair_snowboard_remix();
+                });
+            }];
+        } else if ([action isEqualToString:@"sbl-audit-applied-icons"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboard_remix_operation(
+                    @"Audit Applied Icons", YES, ^{
+                    return [CNDSnowBoardRemix auditAppliedIconState];
+                });
+            }];
+        } else if ([action isEqualToString:@"sbl-restore-all"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboard_remix_operation(@"Restore All Icons", YES, ^{
+                    return settings_restore_all_snowboard_remix();
+                });
+            }];
+        } else if ([action isEqualToString:@"sbl-start-kernel-consumer-watcher"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboard_remix_operation(
+                    @"Start Spotlight Watcher", NO, ^{
+                    NSDictionary<NSString *, id> *result =
+                        settings_snowboard_remix_krw_prerequisite();
+                    if (!result) {
+                        result = CNDIconServicesConsumerLifecycleStart(
+                            UIScreen.mainScreen.scale);
+                    }
+                    return result ?: @{
+                        @"ok": @NO,
+                        @"stage": @"presentation-watcher-no-result",
+                        @"message": @"The Spotlight watcher returned no result."
+                    };
+                });
+            }];
+        } else if ([action isEqualToString:@"sbl-stop-kernel-consumer-watcher"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboard_remix_operation(
+                    @"Stop Spotlight Watcher", NO, ^{
+                    return CNDIconServicesConsumerLifecycleStop();
+                });
+            }];
+        } else if ([action isEqualToString:
+                    @"sbl-repair-springboard-transparency"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboard_remix_operation(
+                    @"Apply SpringBoard Tweaks", YES, ^{
+                    return [CNDSnowBoardRemix
+                        applySpringBoardTweaks];
+                });
+            }];
+        } else if ([action isEqualToString:
+                    @"sbl-repair-spotlight-transparency"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboard_remix_operation(
+                    @"Repair Spotlight Transparency", YES, ^{
+                    return [CNDSnowBoardRemix repairSpotlightPresentation];
+                });
+            }];
         } else if ([action isEqualToString:@"sbl-import-folder"]) {
             [self presentSnowBoardLiteFolderImporter];
         } else if ([action isEqualToString:@"sbl-import-archive"]) {
             [self presentSnowBoardLiteArchiveImporter];
+#if 0
+        } else if ([action isEqualToString:@"sbl-reapply"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboardlite_reapply_action();
+            }];
+        } else if ([action isEqualToString:@"sbl-repair-static-dynamic"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_snowboardlite_static_dynamic_repair_action();
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-materialize68"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionMaterializeStock68);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-verify68"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionVerifyMaterializedStock68);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-inspect-recovery"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionInspectGenerationRecovery);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-inspect-live-store-state"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionInspectLiveStoreState);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-inspect-agent-writer"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionInspectAgentWriter);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-inspect-agent-response"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionInspectAgentResponse);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-lab-bridge"]) {
+            settings_toggle_lab_bridge(self);
+        } else if ([action isEqualToString:@"sbl-iconservices-inspect-store-surface"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionInspectStoreSurface);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-agent-preflight"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionAgentPublicationPreflight);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-agent-publish"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionAgentPublish);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-agent-restore"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionAgentRestore);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-probe"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionProbe);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-select"]) {
+            [self presentSpotlightIconServicesCandidatePicker];
+        } else if ([action isEqualToString:@"sbl-iconservices-seed"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionSeed);
+            }];
+        } else if ([action isEqualToString:@"sbl-iconservices-verify"]) {
+            [self presentSpotlightIconServicesVerifyPrompt];
+        } else if ([action isEqualToString:@"sbl-iconservices-restore"]) {
+            [self presentActivityLogWithCompletion:^{
+                settings_run_spotlight_iconservices_action(
+                    SettingsSpotlightIconServicesActionEmergencyRestore);
+            }];
+#endif
         } else if ([action isEqualToString:@"sbl-clear"]) {
             [self clearSnowBoardLiteTheme];
+        }
+        return;
+    }
+
+    if (indexPath.section == SectionFontChanger) {
+        NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
+        if (![row[@"kind"] isEqualToString:@"button"]) return;
+        NSString *action = row[@"action"];
+        if ([action isEqualToString:@"font-import-regular"]) {
+            [self presentFontChangerImporterForRole:CNDFontChangerRoleRegular];
+        } else if ([action isEqualToString:@"font-import-italic"]) {
+            [self presentFontChangerImporterForRole:CNDFontChangerRoleItalic];
+        } else if ([action isEqualToString:@"font-import-mono"]) {
+            [self presentFontChangerImporterForRole:CNDFontChangerRoleMono];
+        } else if ([action isEqualToString:@"font-clear"]) {
+            font_changer_clear_selected_family();
+            [self reloadSectionOrAll:SectionFontChanger];
+            settings_notify_package_queue_changed_async();
+        } else if ([action isEqualToString:@"font-app-restore-legacy"]) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Restore Legacy App Fonts?"
+                                 message:@"kslop will restore app-bundled font backups retained from the retired per-app experiment. It will not apply any new app font overrides. Force quit and reopen affected apps afterward."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *_) {
+                settings_run_legacy_font_app_restore_action();
+            }]];
+            settings_present_controller(ac, self);
+        } else if ([action isEqualToString:@"font-apply"]) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Apply Font Family?"
+                                 message:@"kslop will overwrite selected system font files and save stock backups first. Replacement files must be no larger than the originals. Respring after applying."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+                settings_run_font_changer_action(self, YES);
+            }]];
+            settings_present_controller(ac, self);
+        } else if ([action isEqualToString:@"font-restore"]) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Restore Stock Fonts?"
+                                 message:@"kslop will write its saved stock font backups back to the system font files. Respring after restoring."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+                settings_run_font_changer_action(self, NO);
+            }]];
+            settings_present_controller(ac, self);
         }
         return;
     }
@@ -12088,10 +20511,13 @@ void cyanide_present_contact(UIViewController *host)
     if (indexPath.section == SectionSBC) {
         NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
         if ([row[@"kind"] isEqualToString:@"button"]) {
-            settings_reset_sbc_defaults();
-            // In detail mode, SBC sits at table-view section 0.
-            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
-                          withRowAnimation:UITableViewRowAnimationNone];
+            NSString *action = row[@"action"];
+            if ([action isEqualToString:@"sbc-dock-autofill"]) {
+                [self presentSBCDockAppPicker];
+            } else if ([action isEqualToString:@"sbc-reset"]) {
+                settings_reset_sbc_defaults();
+                [self reloadSectionOrAll:SectionSBC];
+            }
         }
     }
 }

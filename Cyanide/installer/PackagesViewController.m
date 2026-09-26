@@ -11,12 +11,13 @@
 
 static NSString * const kPackageCellID         = @"PackageCell";
 static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
-static NSString * const kTipsExpandedDefault    = @"installer.tipsExpanded";
-static NSString * const kSignalGroupURL         = @"https://signal.group/#CjQKIP0pxjc9V52ddCNk--04DosuoQl-vVOsznJfQ4GwlrlxEhCveFhBS8YdNcILpUFt7IqC";
-static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/cyanide/issues";
+static NSString * const kReworkedSnowBoardIdentifier = @"com.darksword.snowboardlite";
+static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-changer";
 
 @interface PackagesViewController () <UISearchResultsUpdating>
 @property (nonatomic, copy)   NSArray<Package *> *allPackagesSorted;
+@property (nonatomic, copy)   NSArray<Package *> *favoritePackages;
+@property (nonatomic, copy)   NSArray<Package *> *reworkedPackages;
 @property (nonatomic, copy)   NSArray<Package *> *flatPackages;        // shown when !groupByCategory
 @property (nonatomic, copy)   NSArray<NSString *> *visibleCategories;  // shown when groupByCategory
 @property (nonatomic, copy)   NSDictionary<NSString *, NSArray<Package *> *> *packagesByCategory;
@@ -41,6 +42,13 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
            ![SettingsViewController liveWPHasSelectedVideo];
 }
 
+- (BOOL)packageNeedsFontBeforeInstall:(Package *)pkg
+{
+    return pkg.kind == PackageInstallKindFontChanger &&
+           !pkg.isInstalled &&
+           !settings_font_changer_has_regular_font();
+}
+
 - (BOOL)presentQueueConflictIfNeededForPackage:(Package *)pkg intent:(PackageQueueIntent)intent
 {
     NSString *reason = nil;
@@ -51,8 +59,8 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     }
 
     UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:@"Run Hide Home Bar Alone"
-                                            message:reason ?: @"Hide Home Bar must be the only pending queue item."
+        [UIAlertController alertControllerWithTitle:@"Run System Edit Alone"
+                                            message:reason ?: @"This system edit must be the only pending queue item."
                                      preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK"
                                               style:UIAlertActionStyleDefault
@@ -95,7 +103,6 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
 
     [self installSortBarButton];
-    [self installTipsHeader];
     [self rebuildFilteredData];
 
     [[NSNotificationCenter defaultCenter] addObserver:self
@@ -105,6 +112,10 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(queueDidChange:)
                                                  name:kSettingsActionsDidCompleteNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(favoritesDidChange:)
+                                                 name:PackageFavoritesDidChangeNotification
                                                object:nil];
 }
 
@@ -139,262 +150,15 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     [self.tableView reloadData];
 }
 
+- (void)favoritesDidChange:(NSNotification *)note
+{
+    (void)note;
+    if (!self.isViewLoaded) return;
+    [self rebuildFilteredData];
+    [self.tableView reloadData];
+}
+
 #pragma mark - Sort menu
-
-#pragma mark - Tips header
-
-// Each entry becomes a row in the card: leading SF Symbol icon, then bold
-// title + body text wrapping below. Order matters — top to bottom.
-- (NSArray<NSDictionary *> *)tipsEntries
-{
-    return @[
-        @{ @"icon":  @"wand.and.stars",
-           @"color": UIColor.systemPurpleColor,
-           @"title": @"What's new",
-           @"body":  @"• App Switcher Grid adds a grid-style app switcher option\n• LiveWP now supports video picking from Files and Photos\n• Location Simulator is available as a public Beta tool\n• Call Recording Sound is available as a public Beta package" },
-        @{ @"icon":  @"exclamationmark.triangle.fill",
-           @"color": UIColor.systemOrangeColor,
-           @"title": @"Don't force-quit Cyanide",
-           @"body":  @"From the App Switcher kills live tweaks instantly — StatBar, Axon Lite, and anything else running per session stops the moment the app dies." },
-        @{ @"icon":  @"hand.tap.fill",
-           @"color": UIColor.systemTealColor,
-           @"title": @"New Beta tools",
-           @"body":  @"Try exact-coordinate location simulation, App Switcher Grid, LiveWP video wallpapers, and SnowBoard-style local icon themes from the Installer." },
-    ];
-}
-
-- (void)openURLString:(NSString *)urlString
-{
-    NSURL *url = [NSURL URLWithString:urlString];
-    if (!url) return;
-    [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
-}
-
-- (UIButton *)buildSupportButtonWithTitle:(NSString *)title
-                                     icon:(NSString *)iconName
-                              background:(UIColor *)backgroundColor
-                                      url:(NSString *)urlString
-                                    width:(CGFloat)width
-                                   height:(CGFloat)height
-{
-    UIButtonConfiguration *cfg = [UIButtonConfiguration filledButtonConfiguration];
-    cfg.title = title;
-    cfg.image = [UIImage systemImageNamed:iconName];
-    cfg.imagePadding = 8.0;
-    cfg.imagePlacement = NSDirectionalRectEdgeLeading;
-    cfg.cornerStyle = UIButtonConfigurationCornerStyleCapsule;
-    cfg.baseBackgroundColor = backgroundColor;
-    cfg.baseForegroundColor = UIColor.whiteColor;
-    cfg.contentInsets = NSDirectionalEdgeInsetsMake(0.0, 16.0, 0.0, 16.0);
-
-    __weak typeof(self) weakSelf = self;
-    UIButton *button = [UIButton buttonWithConfiguration:cfg
-                                           primaryAction:[UIAction actionWithHandler:^(UIAction *_) {
-        typeof(self) strongSelf = weakSelf;
-        [strongSelf openURLString:urlString];
-    }]];
-    button.frame = CGRectMake(0, 0, width, height);
-    button.layer.cornerCurve = kCACornerCurveContinuous;
-    return button;
-}
-
-// Builds the icon + title/body subview for one tip row at a fixed width.
-// Returns the row with its frame already sized to fit the text.
-- (UIView *)buildTipRowWithIcon:(NSString *)iconName
-                          color:(UIColor *)color
-                          title:(NSString *)title
-                           body:(NSString *)body
-                          width:(CGFloat)width
-{
-    CGFloat iconSize  = 22.0;
-    CGFloat iconGap   = 12.0;
-    CGFloat textX     = iconSize + iconGap;
-    CGFloat textWidth = width - textX;
-
-    UIView *row = [[UIView alloc] init];
-
-    UIImageSymbolConfiguration *symCfg =
-        [UIImageSymbolConfiguration configurationWithPointSize:16.0 weight:UIImageSymbolWeightSemibold];
-    UIImageView *icon = [[UIImageView alloc] initWithImage:
-        [[UIImage systemImageNamed:iconName withConfiguration:symCfg]
-            imageWithTintColor:color renderingMode:UIImageRenderingModeAlwaysOriginal]];
-    icon.contentMode = UIViewContentModeCenter;
-    icon.frame = CGRectMake(0, 1, iconSize, iconSize);
-    [row addSubview:icon];
-
-    NSMutableParagraphStyle *para = [[NSMutableParagraphStyle alloc] init];
-    para.lineSpacing = 1.5;
-
-    NSMutableAttributedString *as = [[NSMutableAttributedString alloc] init];
-    [as appendAttributedString:[[NSAttributedString alloc] initWithString:title attributes:@{
-        NSFontAttributeName: [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold],
-        NSForegroundColorAttributeName: UIColor.labelColor,
-        NSParagraphStyleAttributeName: para,
-    }]];
-    [as appendAttributedString:[[NSAttributedString alloc] initWithString:@"\n" attributes:@{
-        NSFontAttributeName: [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold],
-    }]];
-    [as appendAttributedString:[[NSAttributedString alloc] initWithString:body attributes:@{
-        NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightRegular],
-        NSForegroundColorAttributeName: UIColor.secondaryLabelColor,
-        NSParagraphStyleAttributeName: para,
-    }]];
-
-    UILabel *label = [[UILabel alloc] init];
-    label.numberOfLines = 0;
-    label.preferredMaxLayoutWidth = textWidth;
-    label.attributedText = as;
-    CGSize fit = [label sizeThatFits:CGSizeMake(textWidth, CGFLOAT_MAX)];
-    label.frame = CGRectMake(textX, 0, textWidth, fit.height);
-    [row addSubview:label];
-
-    row.frame = CGRectMake(0, 0, width, MAX(fit.height, iconSize));
-    return row;
-}
-
-- (void)installTipsHeader
-{
-    CGFloat width = self.tableView.bounds.size.width;
-    if (width <= 0) width = UIScreen.mainScreen.bounds.size.width;
-
-    CGFloat horizontalMargin = 16.0;
-    CGFloat topPadding       = 14.0;
-    CGFloat bottomPadding    = 0.0;     // section header below adds its own breathing room
-    CGFloat cardInset        = 14.0;
-    CGFloat contentWidth     = width - horizontalMargin * 2 - cardInset * 2;
-    CGFloat rowGap           = 14.0;
-    CGFloat headingGap       = 10.0;    // gap after heading
-    CGFloat supportGap       = 10.0;
-    CGFloat supportButtonGap = 8.0;
-    CGFloat supportButtonHeight = 46.0;
-    CGFloat chevronSize      = 14.0;
-
-    BOOL expanded = [[NSUserDefaults standardUserDefaults] boolForKey:kTipsExpandedDefault];
-
-    NSMutableArray<UIView *> *placed = [NSMutableArray array];
-    CGFloat y = cardInset;
-
-    // Heading: "What's New & Tips" with a sparkles glyph for some personality.
-    UILabel *heading = [[UILabel alloc] init];
-    heading.numberOfLines = 1;
-    NSMutableAttributedString *headAS = [[NSMutableAttributedString alloc] init];
-    NSTextAttachment *sparkle = [[NSTextAttachment alloc] init];
-    UIImageSymbolConfiguration *headCfg =
-        [UIImageSymbolConfiguration configurationWithPointSize:15.0 weight:UIImageSymbolWeightSemibold];
-    sparkle.image = [[UIImage systemImageNamed:@"sparkles" withConfiguration:headCfg]
-                        imageWithTintColor:UIColor.systemPurpleColor
-                          renderingMode:UIImageRenderingModeAlwaysOriginal];
-    [headAS appendAttributedString:[NSAttributedString attributedStringWithAttachment:sparkle]];
-    [headAS appendAttributedString:[[NSAttributedString alloc] initWithString:@"  What's New & Tips" attributes:@{
-        NSFontAttributeName: [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold],
-        NSForegroundColorAttributeName: UIColor.labelColor,
-    }]];
-    heading.attributedText = headAS;
-    CGFloat headingWidth = contentWidth - chevronSize - 8.0;
-    CGSize headFit = [heading sizeThatFits:CGSizeMake(headingWidth, CGFLOAT_MAX)];
-    heading.frame = CGRectMake(cardInset, y, headingWidth, headFit.height);
-    [placed addObject:heading];
-
-    // Trailing chevron indicates the section is collapsible.
-    UIImageSymbolConfiguration *chevCfg =
-        [UIImageSymbolConfiguration configurationWithPointSize:13.0 weight:UIImageSymbolWeightSemibold];
-    UIImageView *chevron = [[UIImageView alloc] initWithImage:
-        [[UIImage systemImageNamed:(expanded ? @"chevron.up" : @"chevron.down") withConfiguration:chevCfg]
-            imageWithTintColor:UIColor.tertiaryLabelColor renderingMode:UIImageRenderingModeAlwaysOriginal]];
-    chevron.contentMode = UIViewContentModeCenter;
-    chevron.frame = CGRectMake(cardInset + contentWidth - chevronSize, y, chevronSize, headFit.height);
-    [placed addObject:chevron];
-
-    CGFloat headingRowHeight = headFit.height;
-    y += headingRowHeight;
-
-    if (expanded) {
-        y += headingGap;
-
-        // Tip rows
-        NSArray<NSDictionary *> *entries = [self tipsEntries];
-        for (NSDictionary *entry in entries) {
-            UIView *row = [self buildTipRowWithIcon:entry[@"icon"]
-                                              color:entry[@"color"]
-                                              title:entry[@"title"]
-                                               body:entry[@"body"]
-                                              width:contentWidth];
-            CGRect f = row.frame;
-            f.origin = CGPointMake(cardInset, y);
-            row.frame = f;
-            [placed addObject:row];
-            y += f.size.height + rowGap;
-        }
-        y -= rowGap;        // last row didn't need trailing gap
-    }
-
-    y += cardInset;     // final bottom padding inside the card
-
-    // Invisible tap target over the heading row; added last so it's on top.
-    UIButton *tap = [UIButton buttonWithType:UIButtonTypeCustom];
-    tap.backgroundColor = UIColor.clearColor;
-    CGFloat tapHeight = MAX(headingRowHeight, 44.0);
-    tap.frame = CGRectMake(cardInset, cardInset, contentWidth, tapHeight);
-    [tap addTarget:self action:@selector(toggleTipsExpanded) forControlEvents:UIControlEventTouchUpInside];
-    [placed addObject:tap];
-
-    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(horizontalMargin,
-                                                            topPadding,
-                                                            width - horizontalMargin * 2,
-                                                            y)];
-    card.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
-    card.layer.cornerRadius = 12.0;
-    card.layer.cornerCurve = kCACornerCurveContinuous;
-    for (UIView *v in placed) [card addSubview:v];
-
-    CGFloat supportWidth = width - horizontalMargin * 2;
-    UIButton *signal = [self buildSupportButtonWithTitle:@"Join Signal Group"
-                                                    icon:@"bubble.left.and.bubble.right.fill"
-                                             background:UIColor.systemBlueColor
-                                                     url:kSignalGroupURL
-                                                   width:supportWidth
-                                                  height:supportButtonHeight];
-    CGRect signalFrame = signal.frame;
-    signalFrame.origin = CGPointMake(horizontalMargin, CGRectGetMaxY(card.frame) + supportGap);
-    signal.frame = signalFrame;
-
-    UIButton *issues = [self buildSupportButtonWithTitle:@"GitHub Issues"
-                                                    icon:@"exclamationmark.bubble.fill"
-                                             background:UIColor.systemIndigoColor
-                                                     url:kGitHubIssuesURL
-                                                   width:supportWidth
-                                                  height:supportButtonHeight];
-    CGRect issuesFrame = issues.frame;
-    issuesFrame.origin = CGPointMake(horizontalMargin, CGRectGetMaxY(signal.frame) + supportButtonGap);
-    issues.frame = issuesFrame;
-
-    CGFloat containerHeight = CGRectGetMaxY(issues.frame) + bottomPadding;
-    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, containerHeight)];
-    [container addSubview:card];
-    [container addSubview:signal];
-    [container addSubview:issues];
-
-    self.tableView.tableHeaderView = container;
-}
-
-- (void)toggleTipsExpanded
-{
-    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    [ud setBool:![ud boolForKey:kTipsExpandedDefault] forKey:kTipsExpandedDefault];
-    [self installTipsHeader];
-}
-
-- (void)viewDidLayoutSubviews
-{
-    [super viewDidLayoutSubviews];
-    UIView *hdr = self.tableView.tableHeaderView;
-    if (!hdr) return;
-    // Re-fit on width changes (rotation, split view, etc.) by rebuilding the
-    // header in place when the table's width no longer matches our cached size.
-    if (fabs(hdr.frame.size.width - self.tableView.bounds.size.width) > 0.5) {
-        [self installTipsHeader];
-    }
-}
 
 - (void)installSortBarButton
 {
@@ -460,7 +224,34 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     for (Package *p in self.allPackagesSorted) {
         if ([self package:p matchesQuery:self.searchText]) [filtered addObject:p];
     }
-    self.flatPackages = filtered;
+    NSMutableArray<Package *> *reworked = [NSMutableArray array];
+    NSMutableArray<Package *> *remaining = [NSMutableArray array];
+    NSSet<NSString *> *reworkedIdentifiers = [NSSet setWithObjects:
+        kReworkedSnowBoardIdentifier, kReworkedFontIdentifier, nil];
+    for (Package *package in filtered) {
+        if ([reworkedIdentifiers containsObject:package.identifier]) {
+            [reworked addObject:package];
+        } else {
+            [remaining addObject:package];
+        }
+    }
+    [reworked sortUsingComparator:^NSComparisonResult(Package *a, Package *b) {
+        BOOL aSnowBoard = [a.identifier isEqualToString:kReworkedSnowBoardIdentifier];
+        BOOL bSnowBoard = [b.identifier isEqualToString:kReworkedSnowBoardIdentifier];
+        if (aSnowBoard != bSnowBoard) return aSnowBoard ? NSOrderedAscending : NSOrderedDescending;
+        return [a.name caseInsensitiveCompare:b.name];
+    }];
+    self.reworkedPackages = reworked;
+    self.flatPackages = remaining;
+
+    NSSet<NSString *> *favoriteIdentifiers = PackageFavoriteIdentifiers();
+    NSMutableArray<Package *> *favorites = [NSMutableArray array];
+    for (Package *package in filtered) {
+        if ([favoriteIdentifiers containsObject:package.identifier]) {
+            [favorites addObject:package];
+        }
+    }
+    self.favoritePackages = favorites;
 
     if (!self.groupByCategory) {
         self.visibleCategories = nil;
@@ -472,7 +263,7 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     NSMutableDictionary<NSString *, NSArray<Package *> *> *bucket = [NSMutableDictionary dictionary];
     for (NSString *cat in [PackageCatalog categoriesInOrder]) {
         NSMutableArray<Package *> *inCat = [NSMutableArray array];
-        for (Package *p in filtered) {
+        for (Package *p in remaining) {
             if ([p.category isEqualToString:cat]) [inCat addObject:p];
         }
         if (inCat.count > 0) {
@@ -488,14 +279,18 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
-    if (self.groupByCategory) return (NSInteger)self.visibleCategories.count;
-    return 1;
+    // Favorites is always section zero; Reworked is the curated section
+    // immediately below it, before the normal category buckets.
+    if (self.groupByCategory) return (NSInteger)self.visibleCategories.count + 2;
+    return 3;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
+    if (section == 0) return MAX((NSInteger)self.favoritePackages.count, 1);
+    if (section == 1) return MAX((NSInteger)self.reworkedPackages.count, 1);
     if (self.groupByCategory) {
-        NSString *cat = self.visibleCategories[section];
+        NSString *cat = self.visibleCategories[section - 2];
         return (NSInteger)self.packagesByCategory[cat].count;
     }
     return (NSInteger)self.flatPackages.count;
@@ -503,19 +298,16 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
-    // Tighten the first category header so it doesn't sit far below the tips
-    // card. Subsequent category headers keep their natural spacing.
-    if (section == 0) return 26.0;
+    // Keep the Favorites and Reworked headers compact above the package rows.
+    if (section <= 1) return 26.0;
     return UITableViewAutomaticDimension;
 }
 
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section
 {
-    // Custom only for the first category header so the gap to the tips card
-    // is tight. A plain UIView (not UITableViewHeaderFooterView) avoids the
-    // header-footer's built-in textLabel auto-rendering the system title on
-    // top of our own.
-    if (section != 0) return nil;
+    // Use a plain view so UIKit does not render a second system title on top
+    // of the compact section title.
+    if (section > 1) return nil;
     NSString *title = [self tableView:tableView titleForHeaderInSection:section];
     if (!title.length) return nil;
 
@@ -541,14 +333,24 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-    if (self.groupByCategory) return self.visibleCategories[section];
-    return nil;
+    if (section == 0) return @"Favorites";
+    if (section == 1) return @"Reworked";
+    if (self.groupByCategory) return self.visibleCategories[section - 2];
+    return @"All Tweaks";
 }
 
 - (Package *)packageAtIndexPath:(NSIndexPath *)indexPath
 {
+    if (indexPath.section == 0) {
+        if (self.favoritePackages.count == 0) return nil;
+        return self.favoritePackages[indexPath.row];
+    }
+    if (indexPath.section == 1) {
+        if (self.reworkedPackages.count == 0) return nil;
+        return self.reworkedPackages[indexPath.row];
+    }
     if (self.groupByCategory) {
-        NSString *cat = self.visibleCategories[indexPath.section];
+        NSString *cat = self.visibleCategories[indexPath.section - 2];
         return self.packagesByCategory[cat][indexPath.row];
     }
     return self.flatPackages[indexPath.row];
@@ -563,6 +365,33 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     }
 
     Package *pkg = [self packageAtIndexPath:indexPath];
+    if (!pkg) {
+        BOOL reworkedSection = indexPath.section == 1;
+        BOOL filteringFavorites = !reworkedSection && self.searchText.length > 0 &&
+                                  PackageFavoriteIdentifiers().count > 0;
+        UIListContentConfiguration *empty = [UIListContentConfiguration subtitleCellConfiguration];
+        empty.image = [UIImage systemImageNamed:reworkedSection ? @"wand.and.stars" : @"star"];
+        empty.imageProperties.tintColor = UIColor.tertiaryLabelColor;
+        if (reworkedSection) {
+            empty.text = self.searchText.length > 0
+                ? @"No matching reworked tweaks" : @"No reworked tweaks";
+            empty.secondaryText = self.searchText.length > 0
+                ? @"Try another search." : @"SnowBoard Remix and Font Changer appear here.";
+        } else {
+            empty.text = filteringFavorites ? @"No matching favorites" : @"No favorites yet";
+            empty.secondaryText = filteringFavorites
+                ? @"Try another search."
+                : @"Tap the star on any tweak to add it here.";
+        }
+        empty.textProperties.color = UIColor.secondaryLabelColor;
+        empty.secondaryTextProperties.color = UIColor.tertiaryLabelColor;
+        cell.contentConfiguration = empty;
+        cell.accessoryView = nil;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        return cell;
+    }
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
 
     // UIListContentConfiguration with a fixed reservedLayoutSize so every
     // SF Symbol occupies the same horizontal slot regardless of its intrinsic
@@ -590,14 +419,63 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     config.directionalLayoutMargins = m;
     cell.contentConfiguration = config;
 
-    cell.accessoryView = [self accessoryViewForPackage:pkg];
-    if (!cell.accessoryView) {
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-    } else {
-        cell.accessoryType = UITableViewCellAccessoryNone;
-    }
+    cell.accessoryView = [self combinedAccessoryViewForPackage:pkg];
+    cell.accessoryType = UITableViewCellAccessoryNone;
 
     return cell;
+}
+
+- (UIView *)combinedAccessoryViewForPackage:(Package *)pkg
+{
+    UIView *status = [self accessoryViewForPackage:pkg];
+    if (status) {
+        status.translatesAutoresizingMaskIntoConstraints = NO;
+        [NSLayoutConstraint activateConstraints:@[
+            [status.widthAnchor constraintEqualToConstant:CGRectGetWidth(status.frame)],
+            [status.heightAnchor constraintEqualToConstant:CGRectGetHeight(status.frame)],
+        ]];
+    }
+
+    BOOL favorite = PackageIdentifierIsFavorite(pkg.identifier);
+    UIButton *star = [UIButton buttonWithType:UIButtonTypeSystem];
+    star.translatesAutoresizingMaskIntoConstraints = NO;
+    [star setImage:[UIImage systemImageNamed:favorite ? @"star.fill" : @"star"]
+          forState:UIControlStateNormal];
+    star.tintColor = favorite ? UIColor.systemYellowColor : UIColor.secondaryLabelColor;
+    star.accessibilityLabel = favorite ? @"Remove from Favorites" : @"Add to Favorites";
+    star.accessibilityHint = pkg.name;
+    [NSLayoutConstraint activateConstraints:@[
+        [star.widthAnchor constraintEqualToConstant:44.0],
+        [star.heightAnchor constraintEqualToConstant:44.0],
+    ]];
+
+    NSString *identifier = [pkg.identifier copy];
+    [star addAction:[UIAction actionWithHandler:^(__unused UIAction *action) {
+        PackageSetIdentifierFavorite(identifier,
+                                     !PackageIdentifierIsFavorite(identifier));
+    }] forControlEvents:UIControlEventTouchUpInside];
+
+    UIImageView *chevron = [[UIImageView alloc]
+        initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+    chevron.translatesAutoresizingMaskIntoConstraints = NO;
+    chevron.tintColor = UIColor.tertiaryLabelColor;
+    chevron.contentMode = UIViewContentModeScaleAspectFit;
+    [NSLayoutConstraint activateConstraints:@[
+        [chevron.widthAnchor constraintEqualToConstant:8.0],
+        [chevron.heightAnchor constraintEqualToConstant:14.0],
+    ]];
+
+    NSMutableArray<UIView *> *items = [NSMutableArray array];
+    if (status) [items addObject:status];
+    [items addObject:star];
+    [items addObject:chevron];
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:items];
+    stack.axis = UILayoutConstraintAxisHorizontal;
+    stack.alignment = UIStackViewAlignmentCenter;
+    stack.spacing = 5.0;
+    CGSize size = [stack systemLayoutSizeFittingSize:UILayoutFittingCompressedSize];
+    stack.frame = CGRectMake(0, 0, ceil(size.width), MAX(44.0, ceil(size.height)));
+    return stack;
 }
 
 - (UIView *)accessoryViewForPackage:(Package *)pkg
@@ -647,6 +525,18 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     if (pkg.kind == PackageInstallKindHideHomeBar) {
         if (intent != PackageQueueIntentNone) {
             NSString *text = (intent == PackageQueueIntentInstall) ? @"HIDE PENDING" : @"RESTORE PENDING";
+            UIColor *color = self.view.tintColor;
+            return [self pillWithText:text
+                           background:[color colorWithAlphaComponent:0.18]
+                            textColor:color];
+        }
+        return [self pillWithText:@"MANUAL"
+                       background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14]
+                        textColor:UIColor.secondaryLabelColor];
+    }
+    if (pkg.kind == PackageInstallKindFontChanger) {
+        if (intent != PackageQueueIntentNone) {
+            NSString *text = (intent == PackageQueueIntentInstall) ? @"APPLY PENDING" : @"RESTORE PENDING";
             UIColor *color = self.view.tintColor;
             return [self pillWithText:text
                            background:[color colorWithAlphaComponent:0.18]
@@ -723,6 +613,7 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
 {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     Package *pkg = [self packageAtIndexPath:indexPath];
+    if (!pkg) return;
     PackageDetailViewController *detail = [[PackageDetailViewController alloc] initWithPackage:pkg];
     [self.navigationController pushViewController:detail animated:YES];
 }
@@ -731,6 +622,7 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
     trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     Package *pkg = [self packageAtIndexPath:indexPath];
+    if (!pkg) return nil;
     PackageQueue *q = [PackageQueue sharedQueue];
     PackageQueueIntent intent = [q intentForPackage:pkg];
     if (pkg.kind == PackageInstallKindDirectTool) {
@@ -882,6 +774,44 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
         return cfg;
     }
 
+    if (pkg.kind == PackageInstallKindFontChanger && intent == PackageQueueIntentNone) {
+        UIContextualAction *apply = [UIContextualAction
+            contextualActionWithStyle:UIContextualActionStyleNormal
+                                title:@"Apply"
+                              handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+            if ([self packageNeedsFontBeforeInstall:pkg]) {
+                done(YES);
+                [self navigateToSettingsSectionForPackage:pkg];
+                return;
+            }
+            if ([self presentQueueConflictIfNeededForPackage:pkg intent:PackageQueueIntentInstall]) {
+                done(YES);
+                return;
+            }
+            [q queueIntent:PackageQueueIntentInstall forPackage:pkg];
+            done(YES);
+        }];
+        apply.backgroundColor = self.view.tintColor;
+        apply.image = [UIImage systemImageNamed:@"textformat"];
+
+        UIContextualAction *restore = [UIContextualAction
+            contextualActionWithStyle:UIContextualActionStyleDestructive
+                                title:@"Restore"
+                              handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+            if ([self presentQueueConflictIfNeededForPackage:pkg intent:PackageQueueIntentUninstall]) {
+                done(YES);
+                return;
+            }
+            [q queueIntent:PackageQueueIntentUninstall forPackage:pkg];
+            done(YES);
+        }];
+        restore.image = [UIImage systemImageNamed:@"arrow.clockwise"];
+
+        UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[apply, restore]];
+        cfg.performsFirstActionWithFullSwipe = NO;
+        return cfg;
+    }
+
     NSString *title;
     UIColor *color;
     NSString *symbol;
@@ -901,6 +831,10 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
         title  = @"Select Video";
         color  = self.view.tintColor;
         symbol = @"photo.badge.plus";
+    } else if ([self packageNeedsFontBeforeInstall:pkg]) {
+        title  = @"Import Font";
+        color  = self.view.tintColor;
+        symbol = @"textformat";
     } else {
         title  = @"Activate";
         color  = self.view.tintColor;
@@ -924,6 +858,11 @@ static NSString * const kGitHubIssuesURL        = @"https://github.com/zeroxjf/c
             return;
         }
         if (isInstall && [self packageNeedsLiveWPVideoBeforeInstall:pkg]) {
+            done(YES);
+            [self navigateToSettingsSectionForPackage:pkg];
+            return;
+        }
+        if (isInstall && [self packageNeedsFontBeforeInstall:pkg]) {
             done(YES);
             [self navigateToSettingsSectionForPackage:pkg];
             return;

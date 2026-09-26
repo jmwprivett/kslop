@@ -14,6 +14,7 @@
 #import <mach/mach_host.h>
 #import <dlfcn.h>
 #import <ifaddrs.h>
+#import <limits.h>
 #import <math.h>
 #import <net/if.h>
 #import <net/if_dl.h>
@@ -30,6 +31,7 @@ static CFMutableDictionaryRef (*pIOServiceMatching)(const char *) = NULL;
 static io_service_t (*pIOServiceGetMatchingService)(mach_port_t, CFDictionaryRef) = NULL;
 static CFTypeRef (*pIORegistryEntryCreateCFProperty)(io_service_t, CFStringRef, CFAllocatorRef, uint32_t) = NULL;
 static kern_return_t (*pIOObjectRelease)(io_object_t) = NULL;
+static bool gStatBarRemoteIOKitLoaded = false;
 
 static bool statbar_should_log_tick(void);
 
@@ -47,119 +49,201 @@ static bool ensure_iokit_symbols(void)
            pIORegistryEntryCreateCFProperty && pIOObjectRelease;
 }
 
-static double __attribute__((unused)) read_battery_temp_c_local(void)
+static BOOL read_smart_battery_int_local(CFStringRef key, int64_t *out)
 {
-    if (!ensure_iokit_symbols()) return -1.0;
+    if (!key || !out || !ensure_iokit_symbols()) return NO;
 
     io_service_t svc = pIOServiceGetMatchingService(MACH_PORT_NULL,
                                                     pIOServiceMatching("AppleSmartBattery"));
-    if (svc == MACH_PORT_NULL) return -1.0;
-    double tempC = -1.0;
+    if (svc == MACH_PORT_NULL) return NO;
+
+    BOOL ok = NO;
     CFNumberRef prop = (CFNumberRef)pIORegistryEntryCreateCFProperty(svc,
-                                                                     CFSTR("Temperature"),
+                                                                     key,
                                                                      kCFAllocatorDefault, 0);
     if (prop) {
         int64_t raw = 0;
-        if (CFNumberGetValue(prop, kCFNumberSInt64Type, &raw)) {
-            tempC = (double)raw / 100.0;
+        if (CFGetTypeID(prop) == CFNumberGetTypeID() &&
+            CFNumberGetValue(prop, kCFNumberSInt64Type, &raw)) {
+            *out = raw;
+            ok = YES;
         }
         CFRelease(prop);
     }
     pIOObjectRelease(svc);
-    return tempC;
+    return ok;
+}
+
+static BOOL read_battery_current_ma_local(int *outMA)
+{
+    if (!outMA) return NO;
+    CFStringRef keys[] = {
+        CFSTR("InstantAmperage"),
+        CFSTR("Amperage"),
+        CFSTR("BatteryCurrent"),
+        CFSTR("Current"),
+    };
+    for (NSUInteger i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        int64_t raw = 0;
+        if (read_smart_battery_int_local(keys[i], &raw)) {
+            if (raw > INT_MAX) raw = INT_MAX;
+            if (raw < INT_MIN) raw = INT_MIN;
+            *outMA = (int)raw;
+            return YES;
+        }
+    }
+    return NO;
 }
 
 static bool ensure_remote_iokit_loaded(void)
 {
     if (!ensure_iokit_symbols()) return false;
-    static bool remoteLoaded = false;
-    if (remoteLoaded) return true;
+    if (gStatBarRemoteIOKitLoaded) return true;
 
     uint64_t path = r_alloc_str("/System/Library/Frameworks/IOKit.framework/IOKit");
     if (!path) return false;
     uint64_t handle = r_dlsym_call(R_TIMEOUT, "dlopen", path, RTLD_LAZY | RTLD_GLOBAL, 0, 0, 0, 0, 0, 0);
-    r_free(path);
-    remoteLoaded = (handle != 0);
-    return remoteLoaded;
+    if (remote_call_current_success()) r_free(path);
+    if (!remote_call_current_success()) return false;
+    gStatBarRemoteIOKitLoaded = (handle != 0);
+    return gStatBarRemoteIOKitLoaded;
 }
 
-static double read_battery_temp_c_remote(void)
+static uint64_t open_smart_battery_remote(void)
 {
-    if (!ensure_remote_iokit_loaded()) return -1.0;
+    if (!ensure_remote_iokit_loaded()) return 0;
 
     uint64_t name = r_alloc_str("AppleSmartBattery");
-    if (!name) return -1.0;
+    if (!name) return 0;
     uint64_t dict = do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIOServiceMatching, "IOServiceMatching",
                                                name, 0, 0, 0, 0, 0, 0, 0);
-    r_free(name);
-    if (!dict) return -1.0;
+    if (remote_call_current_success()) r_free(name);
+    if (!dict || !remote_call_current_success()) return 0;
 
-    uint64_t svc = do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIOServiceGetMatchingService,
-                                              "IOServiceGetMatchingService",
-                                              MACH_PORT_NULL, dict, 0, 0, 0, 0, 0, 0);
-    if (!svc) return -1.0;
+    return do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIOServiceGetMatchingService,
+                                      "IOServiceGetMatchingService",
+                                      MACH_PORT_NULL, dict, 0, 0, 0, 0, 0, 0);
+}
 
-    double tempC = -1.0;
-    uint64_t key = r_cfstr("Temperature");
+static BOOL read_smart_battery_int_remote(uint64_t svc, const char *keyName, int64_t *out)
+{
+    if (!svc || !keyName || !out || !remote_call_current_success()) return NO;
+
+    BOOL ok = NO;
+    uint64_t key = r_cfstr(keyName);
     if (key) {
         uint64_t prop = do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIORegistryEntryCreateCFProperty,
                                                    "IORegistryEntryCreateCFProperty",
                                                    svc, key, 0, 0, 0, 0, 0, 0);
         if (prop) {
             uint64_t scratch = r_dlsym_call(R_TIMEOUT, "malloc", 8, 0, 0, 0, 0, 0, 0, 0);
-            if (scratch) {
-                remote_write64(scratch, 0);
-                uint64_t ok = r_dlsym_call(R_TIMEOUT, "CFNumberGetValue", prop, 4, scratch, 0, 0, 0, 0, 0);
-                if (ok) {
-                    int64_t raw = (int64_t)remote_read64(scratch);
-                    tempC = (double)raw / 100.0;
+            if (scratch && remote_call_current_success() && remote_write64(scratch, 0)) {
+                uint64_t got = r_dlsym_call(R_TIMEOUT, "CFNumberGetValue", prop, 4, scratch, 0, 0, 0, 0, 0);
+                if (got && remote_call_current_success()) {
+                    *out = (int64_t)remote_read64(scratch);
+                    ok = remote_call_current_success() ? YES : NO;
                 }
+            }
+            if (scratch && remote_call_current_success()) {
                 r_free(scratch);
             }
-            r_dlsym_call(R_TIMEOUT, "CFRelease", prop, 0, 0, 0, 0, 0, 0, 0);
+            if (remote_call_current_success()) {
+                r_dlsym_call(R_TIMEOUT, "CFRelease", prop, 0, 0, 0, 0, 0, 0, 0);
+            }
         }
-        r_dlsym_call(R_TIMEOUT, "CFRelease", key, 0, 0, 0, 0, 0, 0, 0);
+        if (remote_call_current_success()) {
+            r_dlsym_call(R_TIMEOUT, "CFRelease", key, 0, 0, 0, 0, 0, 0, 0);
+        }
     }
 
-    do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIOObjectRelease, "IOObjectRelease",
-                               svc, 0, 0, 0, 0, 0, 0, 0);
-    return tempC;
+    return ok && remote_call_current_success();
 }
 
-static double read_battery_temp_c(void)
+static BOOL read_battery_current_ma_remote(int *outMA)
 {
-    static double cachedTempC = -1.0;
-    static time_t lastTempRead = 0;
+    if (!outMA || !ensure_remote_iokit_loaded()) return NO;
+    const char *keys[] = {
+        "InstantAmperage",
+        "Amperage",
+        "BatteryCurrent",
+        "Current",
+    };
+
+    uint64_t svc = open_smart_battery_remote();
+    if (!svc || !remote_call_current_success()) return NO;
+
+    BOOL found = NO;
+    int valueMA = 0;
+    for (NSUInteger i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        int64_t raw = 0;
+        if (read_smart_battery_int_remote(svc, keys[i], &raw)) {
+            if (raw > INT_MAX) raw = INT_MAX;
+            if (raw < INT_MIN) raw = INT_MIN;
+            valueMA = (int)raw;
+            found = YES;
+            break;
+        }
+        if (!remote_call_current_success()) break;
+    }
+
+    if (remote_call_current_success()) {
+        do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIOObjectRelease, "IOObjectRelease",
+                                   svc, 0, 0, 0, 0, 0, 0, 0);
+    }
+    if (found) *outMA = valueMA;
+    return found && remote_call_current_success();
+}
+
+static BOOL read_battery_current_ma(int *outMA)
+{
+    static int cachedMA = 0;
+    static BOOL hasCachedMA = NO;
+    static time_t lastCurrentRead = 0;
     static time_t lastRemoteRead = 0;
 
     time_t now = time(NULL);
-    if (lastTempRead != 0 && now >= lastTempRead && (now - lastTempRead) < 30) {
-        return cachedTempC;
+    if (hasCachedMA && lastCurrentRead != 0 && now >= lastCurrentRead && (now - lastCurrentRead) < 30) {
+        if (outMA) *outMA = cachedMA;
+        return YES;
     }
-    lastTempRead = now;
+    lastCurrentRead = now;
 
-    double localTempC = read_battery_temp_c_local();
-    if (localTempC > 0) {
-        cachedTempC = localTempC;
+    int localMA = 0;
+    if (read_battery_current_ma_local(&localMA)) {
+        cachedMA = localMA;
+        hasCachedMA = YES;
+        if (outMA) *outMA = cachedMA;
         if (statbar_should_log_tick())
-            printf("[STATBAR] temp source: local IOKit\n");
-        return cachedTempC;
+            printf("[STATBAR] current source: local IOKit value=%dmA\n", cachedMA);
+        return YES;
     }
 
-    if (lastRemoteRead != 0 && now >= lastRemoteRead && (now - lastRemoteRead) < 60) {
-        return cachedTempC;
+    if (hasCachedMA && lastRemoteRead != 0 && now >= lastRemoteRead && (now - lastRemoteRead) < 60) {
+        if (outMA) *outMA = cachedMA;
+        return YES;
     }
 
     lastRemoteRead = now;
     if (statbar_should_log_tick())
-        printf("[STATBAR] temp source: throttled SpringBoard IOKit\n");
-    double tempC = read_battery_temp_c_remote();
-    if (tempC > 0) {
-        cachedTempC = tempC;
+        printf("[STATBAR] current source: throttled SpringBoard IOKit\n");
+    int remoteMA = 0;
+    if (read_battery_current_ma_remote(&remoteMA)) {
+        cachedMA = remoteMA;
+        hasCachedMA = YES;
+        if (outMA) *outMA = cachedMA;
+        return YES;
     } else if (statbar_should_log_tick()) {
-        printf("[STATBAR] remote IOKit temp unavailable\n");
+        printf("[STATBAR] remote IOKit current unavailable\n");
     }
-    return cachedTempC;
+    return hasCachedMA;
+}
+
+static NSString *format_battery_current(void)
+{
+    int ma = 0;
+    if (!read_battery_current_ma(&ma)) return nil;
+    if (ma > 0) return [NSString stringWithFormat:@"+%dmA", ma];
+    return [NSString stringWithFormat:@"%dmA", ma];
 }
 
 static double read_free_ram_gb(void)
@@ -297,21 +381,19 @@ static NSString *format_net_slot(double kbValue)
 
 static NSString *build_text(bool celsius, bool showNet, bool showCPU, bool showLabels, bool networkOnly)
 {
+    (void)celsius;
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
 
-    // Slot order: temp -> cpu -> ram -> net. `showNet` controls whether the
+    // Slot order: current -> cpu -> ram -> net. `showNet` controls whether the
     // wider (260+) layout is used; in that mode, numbers are visually padded
     // to keep columns aligned as digits change.
     if (!networkOnly) {
-        double tempC = read_battery_temp_c();
-        if (tempC > 0) {
-            double v = celsius ? tempC : (tempC * 9.0 / 5.0 + 32.0);
-            NSString *num = [NSString stringWithFormat:@"%.2f", v];
-            NSString *displayNum = showNet ? pad_left_visual(num, 6) : num;
-            [parts addObject:[NSString stringWithFormat:@"%@\u00B0%c",
-                              displayNum, celsius ? 'C' : 'F']];
+        NSString *current = format_battery_current();
+        if (current.length) {
+            NSString *display = showNet ? pad_left_visual(current, 7) : current;
+            [parts addObject:display];
         } else if (statbar_should_log_tick()) {
-            printf("[STATBAR] temp unavailable this tick\n");
+            printf("[STATBAR] current unavailable this tick\n");
         }
     }
     if (!networkOnly && showCPU) {
@@ -369,6 +451,9 @@ static const double kStatBarFontPt = 11.5;
 static const double kStatBarScreenSideMargin = 8.0;
 static const double kStatBarDynamicIslandExtraY = 3.0;
 static const double kStatBarWinLevel = 999999.0;
+static const double kStatBarLayoutValidationIntervalSec = 60.0;
+static const size_t kStatBarRemoteTextBufferSize = 512;
+static const int kStatBarRemoteTimeoutFloorMS = 1500;
 static uint64_t gStatBarApplyTick = 0;
 static bool gStatBarOverlayConfigured = false;
 static bool gStatBarOverlayLastShowNet = false;
@@ -385,8 +470,28 @@ static uint64_t gStatBarPerformMainSel = 0;
 static uint64_t gStatBarNSStringClass = 0;
 static uint64_t gStatBarAllocSel = 0;
 static uint64_t gStatBarInitUTF8Sel = 0;
+static uint64_t gStatBarRemoteTextBuffer = 0;
+static char     gStatBarLastText[256] = {0};
+static char     gStatBarLastFailureReason[64] = {0};
+static double   gStatBarLastLayoutValidationTime = 0.0;
+static double   gStatBarLastLocalScreenWidth = -1.0;
+static double   gStatBarLastLocalScreenHeight = -1.0;
+static uint64_t gStatBarTextChangeCount = 0;
+static uint64_t gStatBarLayoutValidationCount = 0;
+static uint64_t gStatBarLayoutChangeCount = 0;
+static uint64_t gStatBarRecreateCount = 0;
+static uint64_t gStatBarFailureCount = 0;
 
 static void statbar_clear_cached_layout(void);
+static void statbar_clear_overlay_cache(void);
+
+static void statbar_release_remote_text_buffer(void)
+{
+    if (gStatBarRemoteTextBuffer && remote_call_current_success()) {
+        r_free(gStatBarRemoteTextBuffer);
+    }
+    gStatBarRemoteTextBuffer = 0;
+}
 
 static bool statbar_should_log_tick(void)
 {
@@ -395,48 +500,81 @@ static bool statbar_should_log_tick(void)
     return gStatBarApplyTick == 1;
 }
 
+static unsigned long long statbar_elapsed_ms_since(double start)
+{
+    double now = statbar_now_seconds();
+    if (start <= 0.0 || now <= start) return 0;
+    return (unsigned long long)llround((now - start) * 1000.0);
+}
+
+static void statbar_note_failure(const char *reason)
+{
+    gStatBarFailureCount++;
+    if (!reason || !reason[0]) reason = "unknown";
+    snprintf(gStatBarLastFailureReason, sizeof(gStatBarLastFailureReason), "%s", reason);
+}
+
 bool statbar_stop_in_session(void)
 {
+    uint32_t oldSettleUS = r_settle_us(0);
+    int oldTimeoutFloorMS =
+        remote_call_set_stable_timeout_floor_ms(kStatBarRemoteTimeoutFloorMS);
+    bool ok = false;
+
+    if (!remote_call_current_success()) goto done;
+
     uint64_t UIApplication = r_class("UIApplication");
-    if (!r_is_objc_ptr(UIApplication)) return false;
+    if (!r_is_objc_ptr(UIApplication) || !remote_call_current_success()) goto done;
 
     uint64_t app = r_msg2_main(UIApplication, "sharedApplication", 0, 0, 0, 0);
-    if (!r_is_objc_ptr(app)) return false;
+    if (!r_is_objc_ptr(app) || !remote_call_current_success()) goto done;
 
     uint64_t assocKey = r_sel("darkswordStatBarOverlayWindow");
-    if (!assocKey) return false;
+    if (!assocKey || !remote_call_current_success()) goto done;
 
     uint64_t win = r_dlsym_call(R_TIMEOUT, "objc_getAssociatedObject",
                                 app, assocKey, 0, 0, 0, 0, 0, 0);
+    if (!remote_call_current_success()) goto done;
     if (r_is_objc_ptr(win)) {
         r_msg2_main(win, "setHidden:", 1, 0, 0, 0);
+        if (!remote_call_current_success()) goto done;
         r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject", app, assocKey, 0, 1, 0, 0, 0, 0);
+        if (!remote_call_current_success()) goto done;
     }
 
-    gStatBarOverlayWindow = 0;
-    gStatBarOverlayLabel = 0;
-    statbar_clear_cached_layout();
+    statbar_release_remote_text_buffer();
+    if (!remote_call_current_success()) goto done;
+    statbar_clear_overlay_cache();
     printf("[STATBAR] overlay: stopped\n");
-    return true;
+    ok = true;
+
+done:
+    if (!ok) {
+        gStatBarRemoteTextBuffer = 0;
+        statbar_clear_overlay_cache();
+    }
+    remote_call_set_stable_timeout_floor_ms(oldTimeoutFloorMS);
+    r_settle_us(oldSettleUS);
+    return ok;
 }
 
 void statbar_forget_remote_state(void)
 {
-    gStatBarOverlayConfigured = false;
-    gStatBarOverlayLastShowNet = false;
-    gStatBarOverlayLastShowCPU = false;
-    gStatBarOverlayLastShowLabels = false;
-    gStatBarOverlayLastX = -1.0;
-    gStatBarOverlayLastY = -1.0;
-    gStatBarOverlayLastW = -1.0;
-    gStatBarOverlayLastH = -1.0;
-    gStatBarOverlayWindow = 0;
-    gStatBarOverlayLabel = 0;
+    statbar_clear_overlay_cache();
     gStatBarSetTextSel = 0;
     gStatBarPerformMainSel = 0;
     gStatBarNSStringClass = 0;
     gStatBarAllocSel = 0;
     gStatBarInitUTF8Sel = 0;
+    gStatBarRemoteTextBuffer = 0;
+    gStatBarRemoteIOKitLoaded = false;
+    gStatBarApplyTick = 0;
+    gStatBarTextChangeCount = 0;
+    gStatBarLayoutValidationCount = 0;
+    gStatBarLayoutChangeCount = 0;
+    gStatBarRecreateCount = 0;
+    gStatBarFailureCount = 0;
+    gStatBarLastFailureReason[0] = '\0';
     printf("[STATBAR] forgot remote overlay state\n");
 }
 
@@ -460,13 +598,24 @@ static bool statbar_set_text_fast(uint64_t label, uint64_t textObj)
     }
     if (!gStatBarSetTextSel || !gStatBarPerformMainSel) return false;
     r_msg(label, gStatBarPerformMainSel, gStatBarSetTextSel, textObj, 1, 0);
-    return true;
+    return remote_call_current_success();
 }
 
 static void statbar_release_remote_obj(uint64_t obj)
 {
-    if (!r_is_objc_ptr(obj)) return;
+    if (!r_is_objc_ptr(obj) || !remote_call_current_success()) return;
     r_dlsym_call(R_TIMEOUT, "CFRelease", obj, 0, 0, 0, 0, 0, 0, 0);
+}
+
+static uint64_t statbar_remote_autorelease_pool_push(void)
+{
+    return r_dlsym_call(R_TIMEOUT, "objc_autoreleasePoolPush", 0, 0, 0, 0, 0, 0, 0, 0);
+}
+
+static void statbar_remote_autorelease_pool_pop(uint64_t token)
+{
+    if (!token || !remote_call_current_success()) return;
+    r_dlsym_call(R_TIMEOUT, "objc_autoreleasePoolPop", token, 0, 0, 0, 0, 0, 0, 0);
 }
 
 static bool statbar_valid_screen_length(double v)
@@ -500,6 +649,9 @@ static bool statbar_layout_is_cached(bool showNet, bool showCPU, bool showLabels
 static void statbar_mark_layout_cached(bool showNet, bool showCPU, bool showLabels,
                                        double x, double y, double width, double height)
 {
+    if (!statbar_layout_is_cached(showNet, showCPU, showLabels, x, y, width, height)) {
+        gStatBarLayoutChangeCount++;
+    }
     gStatBarOverlayConfigured = true;
     gStatBarOverlayLastShowNet = showNet;
     gStatBarOverlayLastShowCPU = showCPU;
@@ -508,6 +660,17 @@ static void statbar_mark_layout_cached(bool showNet, bool showCPU, bool showLabe
     gStatBarOverlayLastY = y;
     gStatBarOverlayLastW = width;
     gStatBarOverlayLastH = height;
+}
+
+static void statbar_record_layout_validation(void)
+{
+    CGRect bounds = UIScreen.mainScreen.bounds;
+    double width = fabs(bounds.size.width);
+    double height = fabs(bounds.size.height);
+    if (statbar_valid_screen_length(width)) gStatBarLastLocalScreenWidth = width;
+    if (statbar_valid_screen_length(height)) gStatBarLastLocalScreenHeight = height;
+    gStatBarLastLayoutValidationTime = statbar_now_seconds();
+    gStatBarLayoutValidationCount++;
 }
 
 static void statbar_clear_cached_layout(void)
@@ -520,6 +683,60 @@ static void statbar_clear_cached_layout(void)
     gStatBarOverlayLastY = -1.0;
     gStatBarOverlayLastW = -1.0;
     gStatBarOverlayLastH = -1.0;
+    gStatBarLastLayoutValidationTime = 0.0;
+    gStatBarLastLocalScreenWidth = -1.0;
+    gStatBarLastLocalScreenHeight = -1.0;
+}
+
+static void statbar_clear_overlay_cache(void)
+{
+    gStatBarOverlayWindow = 0;
+    gStatBarOverlayLabel = 0;
+    gStatBarLastText[0] = '\0';
+    statbar_clear_cached_layout();
+}
+
+static bool statbar_last_text_matches(const char *text)
+{
+    if (!text) text = "";
+    return gStatBarLastText[0] != '\0' &&
+           strcmp(gStatBarLastText, text) == 0;
+}
+
+static void statbar_remember_last_text(const char *text)
+{
+    if (!text) text = "";
+    if (!statbar_last_text_matches(text)) gStatBarTextChangeCount++;
+    snprintf(gStatBarLastText, sizeof(gStatBarLastText), "%s", text);
+}
+
+static bool statbar_cached_layout_flags_match(bool showNet, bool showCPU, bool showLabels)
+{
+    return gStatBarOverlayConfigured &&
+           gStatBarOverlayLastShowNet == showNet &&
+           gStatBarOverlayLastShowCPU == showCPU &&
+           gStatBarOverlayLastShowLabels == showLabels;
+}
+
+static bool statbar_layout_validation_due(bool showNet, bool showCPU, bool showLabels)
+{
+    if (!statbar_cached_layout_flags_match(showNet, showCPU, showLabels)) return true;
+
+    CGRect bounds = UIScreen.mainScreen.bounds;
+    double width = fabs(bounds.size.width);
+    double height = fabs(bounds.size.height);
+    if ((statbar_valid_screen_length(width) &&
+         !statbar_layout_value_equal(width, gStatBarLastLocalScreenWidth)) ||
+        (statbar_valid_screen_length(height) &&
+         !statbar_layout_value_equal(height, gStatBarLastLocalScreenHeight))) {
+        return true;
+    }
+
+    double now = statbar_now_seconds();
+    return gStatBarLastLayoutValidationTime <= 0.0 ||
+           now <= 0.0 ||
+           now < gStatBarLastLayoutValidationTime ||
+           (now - gStatBarLastLayoutValidationTime) >= kStatBarLayoutValidationIntervalSec;
 }
 
 static double statbar_fallback_top_area_for_screen(double screenWidth, double screenHeight)
@@ -602,18 +819,26 @@ static double statbar_overlay_y_for_top_area(double topAreaHeight)
 static uint64_t statbar_nsstring_utf8_fast(const char *cstr)
 {
     if (!cstr) cstr = "n/a";
-    uint64_t buf = r_alloc_str(cstr);
-    if (!buf) return 0;
+    if (strlen(cstr) + 1 > kStatBarRemoteTextBufferSize) return 0;
+    if (!gStatBarRemoteTextBuffer) {
+        gStatBarRemoteTextBuffer =
+            r_dlsym_call(R_TIMEOUT, "malloc", kStatBarRemoteTextBufferSize, 0, 0, 0, 0, 0, 0, 0);
+    }
+    if (!gStatBarRemoteTextBuffer ||
+        !remote_call_current_success() ||
+        !remote_writeStr(gStatBarRemoteTextBuffer, cstr)) {
+        return 0;
+    }
     if (!gStatBarNSStringClass) gStatBarNSStringClass = r_class("NSString");
     if (!gStatBarAllocSel) gStatBarAllocSel = r_sel("alloc");
     if (!gStatBarInitUTF8Sel) gStatBarInitUTF8Sel = r_sel("initWithUTF8String:");
     if (!r_is_objc_ptr(gStatBarNSStringClass) || !gStatBarAllocSel || !gStatBarInitUTF8Sel) {
-        r_free(buf);
         return 0;
     }
     uint64_t allocated = r_msg(gStatBarNSStringClass, gStatBarAllocSel, 0, 0, 0, 0);
-    uint64_t ns = r_is_objc_ptr(allocated) ? r_msg(allocated, gStatBarInitUTF8Sel, buf, 0, 0, 0) : 0;
-    r_free(buf);
+    uint64_t ns = r_is_objc_ptr(allocated)
+        ? r_msg(allocated, gStatBarInitUTF8Sel, gStatBarRemoteTextBuffer, 0, 0, 0)
+        : 0;
     return ns;
 }
 
@@ -625,8 +850,7 @@ static bool r_send_double_main(uint64_t obj, const char *selName, double value)
                     NULL, 0,
                     NULL, 0,
                     NULL, 0);
-    usleep(20000);
-    return true;
+    return remote_call_current_success();
 }
 
 static bool r_send_rect_main(uint64_t obj, const char *selName,
@@ -639,8 +863,7 @@ static bool r_send_rect_main(uint64_t obj, const char *selName,
                     NULL, 0,
                     NULL, 0,
                     NULL, 0);
-    usleep(20000);
-    return true;
+    return remote_call_current_success();
 }
 
 static uint64_t statbar_overlay_font(void)
@@ -656,6 +879,7 @@ static uint64_t statbar_overlay_font(void)
                                     NULL, 0,
                                     NULL, 0);
     if (r_is_objc_ptr(font)) return font;
+    if (!remote_call_current_success()) return 0;
 
     return r_msg2_main_raw(UIFont, "systemFontOfSize:",
                            &size, sizeof(size),
@@ -664,29 +888,42 @@ static uint64_t statbar_overlay_font(void)
                            NULL, 0);
 }
 
-static void statbar_apply_overlay_style(uint64_t label)
+static bool statbar_apply_overlay_style(uint64_t label)
 {
-    if (!r_is_objc_ptr(label)) return;
+    if (!r_is_objc_ptr(label)) return false;
 
     uint64_t font = statbar_overlay_font();
+    if (!remote_call_current_success()) return false;
     if (r_is_objc_ptr(font)) {
         r_msg2_main(label, "setFont:", font, 0, 0, 0);
+        if (!remote_call_current_success()) return false;
     }
 
     uint64_t layer = r_msg2_main(label, "layer", 0, 0, 0, 0);
+    if (!remote_call_current_success()) return false;
     if (r_is_objc_ptr(layer)) {
         double radius = kStatBarWinH / 2.0;
-        r_send_double_main(layer, "setCornerRadius:", radius);
+        if (!r_send_double_main(layer, "setCornerRadius:", radius)) return false;
         r_msg2_main(layer, "setMasksToBounds:", 1, 0, 0, 0);
+        if (!remote_call_current_success()) return false;
     }
+    return true;
 }
 
 static bool statbar_apply_overlay_layout(uint64_t win, uint64_t label,
                                          bool showNet, bool showCPU, bool showLabels)
 {
-    if (!r_is_objc_ptr(win)) return false;
+    if (!r_is_objc_ptr(win)) {
+        statbar_note_failure("layout-window");
+        return false;
+    }
 
     StatBarLayoutMetrics metrics = statbar_read_layout_metrics(win);
+    if (!remote_call_current_success()) {
+        statbar_note_failure("layout-metrics");
+        return false;
+    }
+    statbar_record_layout_validation();
     double screenWidth = statbar_valid_screen_length(metrics.screenWidth) ?
                          metrics.screenWidth : kStatBarFallbackScreenWidth;
     double maxWidth = fmax(1.0, screenWidth - (kStatBarScreenSideMargin * 2.0));
@@ -704,41 +941,76 @@ static bool statbar_apply_overlay_layout(uint64_t win, uint64_t label,
         return true;
     }
 
-    bool ok = true;
-    ok &= r_send_rect_main(win, "setFrame:", x, y, width, kStatBarWinH);
-    ok &= r_send_double_main(win, "setWindowLevel:", kStatBarWinLevel);
-    r_msg2_main(win, "setUserInteractionEnabled:", 0, 0, 0, 0);
-
-    if (r_is_objc_ptr(label)) {
-        ok &= r_send_rect_main(label, "setFrame:", 0.0, 0.0, width, kStatBarWinH);
-        statbar_apply_overlay_style(label);
+    bool ok = r_send_rect_main(win, "setFrame:", x, y, width, kStatBarWinH);
+    if (ok) ok = r_send_double_main(win, "setWindowLevel:", kStatBarWinLevel);
+    if (ok) {
+        r_msg2_main(win, "setUserInteractionEnabled:", 0, 0, 0, 0);
+        ok = remote_call_current_success();
     }
-    if (ok) statbar_mark_layout_cached(showNet, showCPU, showLabels, x, y, width, kStatBarWinH);
+
+    if (ok && r_is_objc_ptr(label)) {
+        ok = r_send_rect_main(label, "setFrame:", 0.0, 0.0, width, kStatBarWinH);
+        if (ok) ok = statbar_apply_overlay_style(label);
+    }
+    if (ok) {
+        statbar_mark_layout_cached(showNet, showCPU, showLabels, x, y, width, kStatBarWinH);
+    } else {
+        statbar_note_failure("layout-send");
+    }
     return ok;
 }
 
-static bool statbar_install_overlay(NSString *text, bool showNet, bool showCPU, bool showLabels)
+static bool statbar_install_overlay_inner(NSString *text,
+                                          bool showNet,
+                                          bool showCPU,
+                                          bool showLabels)
 {
     if (statbar_should_log_tick())
         printf("[STATBAR] overlay: entry (dedicated UIWindow)\n");
 
     const char *utf8 = text.UTF8String;
     if (!utf8) utf8 = "n/a";
-    uint64_t textObj = statbar_nsstring_utf8_fast(utf8);
-    if (!r_is_objc_ptr(textObj)) { printf("[STATBAR] overlay: NSString alloc failed\n"); return false; }
 
     if (r_is_objc_ptr(gStatBarOverlayWindow) && r_is_objc_ptr(gStatBarOverlayLabel)) {
-        bool ok = statbar_set_text_fast(gStatBarOverlayLabel, textObj);
-        statbar_release_remote_obj(textObj);
-        if (ok) {
-            statbar_apply_overlay_layout(gStatBarOverlayWindow, gStatBarOverlayLabel, showNet, showCPU, showLabels);
+        bool textChanged = !statbar_last_text_matches(utf8);
+        bool layoutDue = statbar_layout_validation_due(showNet, showCPU, showLabels);
+        if (!textChanged && !layoutDue) {
+            return true;
+        }
+
+        bool textOK = true;
+        if (textChanged) {
+            uint64_t textObj = statbar_nsstring_utf8_fast(utf8);
+            if (!r_is_objc_ptr(textObj)) {
+                printf("[STATBAR] overlay: NSString alloc failed\n");
+                statbar_note_failure("text-alloc");
+                return false;
+            }
+            textOK = statbar_set_text_fast(gStatBarOverlayLabel, textObj);
+            statbar_release_remote_obj(textObj);
+        }
+
+        bool layoutOK = textOK && remote_call_current_success() && (!layoutDue ||
+            statbar_apply_overlay_layout(gStatBarOverlayWindow,
+                                         gStatBarOverlayLabel,
+                                         showNet,
+                                         showCPU,
+                                         showLabels));
+        if (textOK && layoutOK && remote_call_current_success()) {
+            if (textChanged) statbar_remember_last_text(utf8);
             if (statbar_should_log_tick())
                 printf("[STATBAR] overlay: fast cached text updated\n");
             return true;
         }
-        gStatBarOverlayWindow = 0;
-        gStatBarOverlayLabel = 0;
-        statbar_clear_cached_layout();
+        if (!textOK) statbar_note_failure("set-text");
+        statbar_clear_overlay_cache();
+        return false;
+    }
+
+    uint64_t textObj = statbar_nsstring_utf8_fast(utf8);
+    if (!r_is_objc_ptr(textObj)) {
+        printf("[STATBAR] overlay: NSString alloc failed\n");
+        statbar_note_failure("text-alloc");
         return false;
     }
 
@@ -746,6 +1018,7 @@ static bool statbar_install_overlay(NSString *text, bool showNet, bool showCPU, 
     if (!r_is_objc_ptr(UIApplication)) {
         statbar_release_remote_obj(textObj);
         printf("[STATBAR] overlay: UIApplication missing\n");
+        statbar_note_failure("uiapplication");
         return false;
     }
 
@@ -753,6 +1026,7 @@ static bool statbar_install_overlay(NSString *text, bool showNet, bool showCPU, 
     if (!r_is_objc_ptr(app)) {
         statbar_release_remote_obj(textObj);
         printf("[STATBAR] overlay: sharedApplication nil\n");
+        statbar_note_failure("shared-application");
         return false;
     }
 
@@ -760,94 +1034,258 @@ static bool statbar_install_overlay(NSString *text, bool showNet, bool showCPU, 
     if (!assocKey) {
         statbar_release_remote_obj(textObj);
         printf("[STATBAR] overlay: assoc key failed\n");
+        statbar_note_failure("assoc-key");
         return false;
     }
 
     uint64_t cachedWin = r_dlsym_call(R_TIMEOUT, "objc_getAssociatedObject",
                                       app, assocKey, 0, 0, 0, 0, 0, 0);
+    if (!remote_call_current_success()) {
+        statbar_note_failure("associated-window");
+        return false;
+    }
     if (r_is_objc_ptr(cachedWin)) {
         uint64_t cachedLabel = r_msg2_main(cachedWin, "viewWithTag:", kStatBarOverlayTag, 0, 0, 0);
+        if (!remote_call_current_success()) {
+            statbar_note_failure("associated-label");
+            statbar_clear_overlay_cache();
+            return false;
+        }
         if (statbar_should_log_tick())
             printf("[STATBAR] overlay: cached window=0x%llx label=0x%llx\n", cachedWin, cachedLabel);
         if (r_is_objc_ptr(cachedLabel)) {
             gStatBarOverlayWindow = cachedWin;
             gStatBarOverlayLabel = cachedLabel;
-            statbar_set_text_fast(cachedLabel, textObj);
-            statbar_apply_overlay_layout(cachedWin, cachedLabel, showNet, showCPU, showLabels);
-            r_msg2_main(cachedWin, "setHidden:", 0, 0, 0, 0);
+            bool textOK = statbar_set_text_fast(cachedLabel, textObj);
+            bool layoutOK = textOK && remote_call_current_success() &&
+                statbar_apply_overlay_layout(cachedWin,
+                                             cachedLabel,
+                                             showNet,
+                                             showCPU,
+                                             showLabels);
+            bool showOK = false;
+            if (layoutOK && remote_call_current_success()) {
+                r_msg2_main(cachedWin, "setHidden:", 0, 0, 0, 0);
+                showOK = remote_call_current_success();
+            }
             statbar_release_remote_obj(textObj);
-            if (statbar_should_log_tick())
-                printf("[STATBAR] overlay: cached text updated\n");
-            return true;
+            if (textOK && layoutOK && showOK && remote_call_current_success()) {
+                statbar_remember_last_text(utf8);
+                if (statbar_should_log_tick())
+                    printf("[STATBAR] overlay: cached text updated\n");
+                return true;
+            }
+            if (!textOK) statbar_note_failure("cached-set-text");
+            if (!showOK) statbar_note_failure("cached-show");
+            statbar_clear_overlay_cache();
+            return false;
         }
         r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject", app, assocKey, 0, 1, 0, 0, 0, 0);
-        gStatBarOverlayWindow = 0;
-        gStatBarOverlayLabel = 0;
-        statbar_clear_cached_layout();
+        if (!remote_call_current_success()) {
+            statbar_note_failure("associated-clear");
+            statbar_clear_overlay_cache();
+            return false;
+        }
+        statbar_clear_overlay_cache();
     }
 
     uint64_t keyWin = r_msg2_main(app, "keyWindow", 0, 0, 0, 0);
+    if (!remote_call_current_success()) {
+        statbar_note_failure("key-window-call");
+        return false;
+    }
     if (!r_is_objc_ptr(keyWin)) {
         uint64_t windows = r_msg2_main(app, "windows", 0, 0, 0, 0);
-        uint64_t count = r_is_objc_ptr(windows) ? r_msg2_main(windows, "count", 0, 0, 0, 0) : 0;
-        if (count > 0 && count < 64) keyWin = r_msg2_main(windows, "objectAtIndex:", 0, 0, 0, 0);
+        if (remote_call_current_success()) {
+            uint64_t count = r_is_objc_ptr(windows)
+                ? r_msg2_main(windows, "count", 0, 0, 0, 0)
+                : 0;
+            if (remote_call_current_success() && count > 0 && count < 64) {
+                keyWin = r_msg2_main(windows, "objectAtIndex:", 0, 0, 0, 0);
+            }
+        }
     }
-    if (!r_is_objc_ptr(keyWin)) { printf("[STATBAR] overlay: keyWindow nil\n"); return false; }
+    if (!r_is_objc_ptr(keyWin)) {
+        statbar_release_remote_obj(textObj);
+        printf("[STATBAR] overlay: keyWindow nil\n");
+        statbar_note_failure("key-window");
+        return false;
+    }
 
     uint64_t scene = r_msg2_main(keyWin, "windowScene", 0, 0, 0, 0);
-    if (!r_is_objc_ptr(scene)) { printf("[STATBAR] overlay: windowScene nil\n"); return false; }
+    if (!r_is_objc_ptr(scene)) {
+        statbar_release_remote_obj(textObj);
+        printf("[STATBAR] overlay: windowScene nil\n");
+        statbar_note_failure("window-scene");
+        return false;
+    }
 
     uint64_t UIWindow = r_class("UIWindow");
-    if (!r_is_objc_ptr(UIWindow)) { printf("[STATBAR] overlay: UIWindow missing\n"); return false; }
+    if (!r_is_objc_ptr(UIWindow)) {
+        statbar_release_remote_obj(textObj);
+        printf("[STATBAR] overlay: UIWindow missing\n");
+        statbar_note_failure("uiwindow");
+        return false;
+    }
 
     uint64_t winAlloc = r_msg2_main(UIWindow, "alloc", 0, 0, 0, 0);
-    if (!r_is_objc_ptr(winAlloc)) { printf("[STATBAR] overlay: UIWindow alloc failed\n"); return false; }
+    if (!r_is_objc_ptr(winAlloc)) {
+        statbar_release_remote_obj(textObj);
+        printf("[STATBAR] overlay: UIWindow alloc failed\n");
+        statbar_note_failure("window-alloc");
+        return false;
+    }
 
     uint64_t win = r_msg2_main(winAlloc, "initWithWindowScene:", scene, 0, 0, 0);
-    if (!r_is_objc_ptr(win)) { printf("[STATBAR] overlay: initWithWindowScene failed\n"); return false; }
+    if (!r_is_objc_ptr(win)) {
+        statbar_release_remote_obj(textObj);
+        printf("[STATBAR] overlay: initWithWindowScene failed\n");
+        statbar_note_failure("window-init");
+        return false;
+    }
     if (statbar_should_log_tick())
         printf("[STATBAR] overlay: window=0x%llx\n", win);
 
     uint64_t UIColor = r_class("UIColor");
     if (r_is_objc_ptr(UIColor)) {
         uint64_t clear = r_msg2_main(UIColor, "clearColor", 0, 0, 0, 0);
-        if (r_is_objc_ptr(clear)) r_msg2_main(win, "setBackgroundColor:", clear, 0, 0, 0);
+        if (remote_call_current_success() && r_is_objc_ptr(clear)) {
+            r_msg2_main(win, "setBackgroundColor:", clear, 0, 0, 0);
+        }
+    }
+    if (!remote_call_current_success()) {
+        statbar_note_failure("window-config");
+        statbar_release_remote_obj(textObj);
+        return false;
     }
 
     uint64_t UILabel = r_class("UILabel");
-    if (!r_is_objc_ptr(UILabel)) { printf("[STATBAR] overlay: UILabel missing\n"); return false; }
+    if (!r_is_objc_ptr(UILabel)) {
+        statbar_release_remote_obj(textObj);
+        printf("[STATBAR] overlay: UILabel missing\n");
+        statbar_note_failure("uilabel");
+        return false;
+    }
 
     uint64_t labelAlloc = r_msg2_main(UILabel, "alloc", 0, 0, 0, 0);
-    if (!r_is_objc_ptr(labelAlloc)) { printf("[STATBAR] overlay: UILabel alloc failed\n"); return false; }
+    if (!r_is_objc_ptr(labelAlloc)) {
+        statbar_release_remote_obj(textObj);
+        printf("[STATBAR] overlay: UILabel alloc failed\n");
+        statbar_note_failure("label-alloc");
+        return false;
+    }
 
     uint64_t label = r_msg2_main(labelAlloc, "init", 0, 0, 0, 0);
-    if (!r_is_objc_ptr(label)) { printf("[STATBAR] overlay: UILabel init failed\n"); return false; }
+    if (!r_is_objc_ptr(label)) {
+        statbar_release_remote_obj(textObj);
+        printf("[STATBAR] overlay: UILabel init failed\n");
+        statbar_note_failure("label-init");
+        return false;
+    }
     if (statbar_should_log_tick())
         printf("[STATBAR] overlay: label=0x%llx\n", label);
 
+    bool configOK = true;
     r_msg2_main(label, "setText:", textObj, 0, 0, 0);
-    r_msg2_main(label, "setTag:", kStatBarOverlayTag, 0, 0, 0);
-    r_msg2_main(label, "setTextAlignment:", 1, 0, 0, 0);
-    r_msg2_main(label, "setNumberOfLines:", 1, 0, 0, 0);
-
-    if (r_is_objc_ptr(UIColor)) {
-        uint64_t black = r_msg2_main(UIColor, "blackColor", 0, 0, 0, 0);
-        uint64_t white = r_msg2_main(UIColor, "whiteColor", 0, 0, 0, 0);
-        if (r_is_objc_ptr(black)) r_msg2_main(label, "setBackgroundColor:", black, 0, 0, 0);
-        if (r_is_objc_ptr(white)) r_msg2_main(label, "setTextColor:", white, 0, 0, 0);
+    configOK = remote_call_current_success();
+    if (configOK) {
+        r_msg2_main(label, "setTag:", kStatBarOverlayTag, 0, 0, 0);
+        configOK = remote_call_current_success();
+    }
+    if (configOK) {
+        r_msg2_main(label, "setTextAlignment:", 1, 0, 0, 0);
+        configOK = remote_call_current_success();
+    }
+    if (configOK) {
+        r_msg2_main(label, "setNumberOfLines:", 1, 0, 0, 0);
+        configOK = remote_call_current_success();
     }
 
-    statbar_apply_overlay_layout(win, label, showNet, showCPU, showLabels);
+    if (configOK && r_is_objc_ptr(UIColor)) {
+        uint64_t black = r_msg2_main(UIColor, "blackColor", 0, 0, 0, 0);
+        configOK = remote_call_current_success();
+        uint64_t white = configOK
+            ? r_msg2_main(UIColor, "whiteColor", 0, 0, 0, 0)
+            : 0;
+        configOK = configOK && remote_call_current_success();
+        if (configOK && r_is_objc_ptr(black)) {
+            r_msg2_main(label, "setBackgroundColor:", black, 0, 0, 0);
+            configOK = remote_call_current_success();
+        }
+        if (configOK && r_is_objc_ptr(white)) {
+            r_msg2_main(label, "setTextColor:", white, 0, 0, 0);
+            configOK = remote_call_current_success();
+        }
+    }
+
+    if (!configOK || !remote_call_current_success()) {
+        statbar_note_failure("label-config");
+        statbar_release_remote_obj(textObj);
+        statbar_clear_overlay_cache();
+        return false;
+    }
+
+    bool layoutOK = statbar_apply_overlay_layout(win, label, showNet, showCPU, showLabels);
+    if (!layoutOK) {
+        statbar_release_remote_obj(textObj);
+        statbar_clear_overlay_cache();
+        return false;
+    }
     r_msg2_main(win, "addSubview:", label, 0, 0, 0);
-    r_msg2_main(win, "setHidden:", 0, 0, 0, 0);
-    r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject", app, assocKey, win, 1, 0, 0, 0, 0);
+    bool attachOK = remote_call_current_success();
+    if (attachOK) {
+        r_msg2_main(win, "setHidden:", 0, 0, 0, 0);
+        attachOK = remote_call_current_success();
+    }
+    if (attachOK) {
+        r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject", app, assocKey, win, 1, 0, 0, 0, 0);
+        attachOK = remote_call_current_success();
+    }
+    statbar_release_remote_obj(textObj);
+    if (!attachOK || !remote_call_current_success()) {
+        statbar_note_failure("attach");
+        statbar_clear_overlay_cache();
+        return false;
+    }
+
     gStatBarOverlayWindow = win;
     gStatBarOverlayLabel = label;
-    statbar_release_remote_obj(textObj);
+    gStatBarRecreateCount++;
+    statbar_remember_last_text(utf8);
 
     if (statbar_should_log_tick())
         printf("[STATBAR] overlay: installed dedicated window\n");
     return true;
+}
+
+static bool statbar_install_overlay(NSString *text, bool showNet, bool showCPU, bool showLabels)
+{
+    const char *utf8 = text.UTF8String;
+    if (!utf8) utf8 = "n/a";
+    if (r_is_objc_ptr(gStatBarOverlayWindow) &&
+        r_is_objc_ptr(gStatBarOverlayLabel) &&
+        statbar_last_text_matches(utf8) &&
+        !statbar_layout_validation_due(showNet, showCPU, showLabels)) {
+        return true;
+    }
+
+    uint64_t pool = statbar_remote_autorelease_pool_push();
+    if (!remote_call_current_success()) {
+        statbar_note_failure("install-pool-push");
+        statbar_clear_overlay_cache();
+        return false;
+    }
+
+    bool ok = statbar_install_overlay_inner(text, showNet, showCPU, showLabels);
+    if (remote_call_current_success()) {
+        statbar_remote_autorelease_pool_pop(pool);
+    }
+    if (!remote_call_current_success()) {
+        statbar_note_failure("install-pool-pop");
+        statbar_clear_overlay_cache();
+        return false;
+    }
+    return ok;
 }
 
 // Recursive walk of the SpringBoard status-bar wrapper subview tree, looking
@@ -913,17 +1351,63 @@ recurse: {
 
 bool statbar_apply_in_session(bool celsius, bool showNet, bool showCPU, bool showLabels, bool networkOnly)
 {
-    gStatBarApplyTick++;
-    bool effectiveShowNet = showNet || networkOnly;
-    bool effectiveShowCPU = networkOnly ? false : showCPU;
-    bool effectiveShowLabels = networkOnly ? false : showLabels;
-    NSString *text = build_text(celsius, effectiveShowNet, effectiveShowCPU, effectiveShowLabels, networkOnly);
-    if (statbar_should_log_tick()) {
-        printf("[STATBAR] === entry === text='%s' celsius=%d showNet=%d showCPU=%d showLabels=%d networkOnly=%d tick=%llu\n",
-               text.UTF8String, celsius, showNet, showCPU, showLabels, networkOnly, gStatBarApplyTick);
+    uint32_t oldSettleUS = r_settle_us(0);
+    int oldTimeoutFloorMS =
+        remote_call_set_stable_timeout_floor_ms(kStatBarRemoteTimeoutFloorMS);
+    double start = statbar_now_seconds();
+    bool ok = false;
+    gStatBarLastFailureReason[0] = '\0';
+
+    @autoreleasepool {
+        gStatBarApplyTick++;
+        if (!remote_call_current_success()) {
+            statbar_note_failure("remote-state");
+        } else {
+            bool effectiveShowNet = showNet || networkOnly;
+            bool effectiveShowCPU = networkOnly ? false : showCPU;
+            bool effectiveShowLabels = networkOnly ? false : showLabels;
+            NSString *text = build_text(celsius,
+                                        effectiveShowNet,
+                                        effectiveShowCPU,
+                                        effectiveShowLabels,
+                                        networkOnly);
+            if (statbar_should_log_tick()) {
+                printf("[STATBAR] === entry === text='%s' celsius=%d showNet=%d showCPU=%d showLabels=%d networkOnly=%d tick=%llu\n",
+                       text.UTF8String,
+                       celsius,
+                       showNet,
+                       showCPU,
+                       showLabels,
+                       networkOnly,
+                       gStatBarApplyTick);
+            }
+
+            ok = statbar_install_overlay(text,
+                                         effectiveShowNet,
+                                         effectiveShowCPU,
+                                         effectiveShowLabels);
+        }
     }
 
-    return statbar_install_overlay(text, effectiveShowNet, effectiveShowCPU, effectiveShowLabels);
+    unsigned long long totalMS = statbar_elapsed_ms_since(start);
+    if (!ok || totalMS > 500ULL) {
+        const char *reason = ok
+            ? "-"
+            : (gStatBarLastFailureReason[0] ? gStatBarLastFailureReason : "unknown");
+        printf("[STATBAR] apply %s tick=%llu total=%llums reason=%s textChanges=%llu layoutChecks=%llu layoutChanges=%llu recreates=%llu failures=%llu\n",
+               ok ? "slow" : "failed",
+               gStatBarApplyTick,
+               totalMS,
+               reason,
+               gStatBarTextChangeCount,
+               gStatBarLayoutValidationCount,
+               gStatBarLayoutChangeCount,
+               gStatBarRecreateCount,
+               gStatBarFailureCount);
+    }
+    remote_call_set_stable_timeout_floor_ms(oldTimeoutFloorMS);
+    r_settle_us(oldSettleUS);
+    return ok;
 }
 
 bool statbar_apply(bool celsius, bool showNet, bool showCPU, bool showLabels, bool networkOnly)
@@ -934,6 +1418,12 @@ bool statbar_apply(bool celsius, bool showNet, bool showCPU, bool showLabels, bo
     }
 
     bool ok = statbar_apply_in_session(celsius, showNet, showCPU, showLabels, networkOnly);
-    destroy_remote_call();
+    statbar_release_remote_text_buffer();
+    if (remote_call_current_success()) {
+        destroy_remote_call();
+    } else {
+        abandon_remote_call();
+    }
+    statbar_forget_remote_state();
     return ok;
 }

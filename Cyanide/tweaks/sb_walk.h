@@ -10,9 +10,9 @@
 #import <stdint.h>
 
 // BFS from `root` collecting subviews that are instances of `klass`.
+// UIKit snapshots are taken synchronously on SpringBoard's main thread.
 // Matched views are NOT recursed into. Returns the count written to `out`,
-// capped at `cap`. Not reentrant — uses a static BFS queue. Callers are
-// already serialized under the settings RemoteCall lock.
+// capped at `cap`. Not reentrant — uses a static BFS queue.
 int sb_collect_views(uint64_t root, uint64_t klass, uint64_t *out, int cap);
 
 // Walks every UIApplication window (falls back to keyWindow if -windows

@@ -68,7 +68,7 @@ bool wait_exception(mach_port_t exceptionPort, ExceptionMessage *excBuffer, int 
     return true;
 }
 
-void reply_with_state(ExceptionMessage *exc, arm_thread_state64_internal *state)
+bool reply_with_state(ExceptionMessage *exc, arm_thread_state64_internal *state)
 {
     uint8_t replyBuf[EXCEPTION_REPLY_SIZE];
     memset(replyBuf, 0, sizeof(replyBuf));
@@ -93,4 +93,5 @@ void reply_with_state(ExceptionMessage *exc, arm_thread_state64_internal *state)
                                 MACH_PORT_NULL);
     if (kr != KERN_SUCCESS)
         printf("[%s:%d] reply_with_state failed: %s\n", __FUNCTION__, __LINE__, mach_error_string(kr));
+    return kr == KERN_SUCCESS;
 }

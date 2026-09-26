@@ -12,6 +12,7 @@ extern NSString * const kSettingsKeepAlive;
 
 extern NSString * const kSettingsSBCEnabled;
 extern NSString * const kSettingsSBCDockIcons;
+extern NSString * const kSettingsSBCDockAutofillBundleIDs;
 extern NSString * const kSettingsSBCCols;
 extern NSString * const kSettingsSBCRows;
 extern NSString * const kSettingsSBCHideLabels;
@@ -82,6 +83,9 @@ extern NSString * const kSettingsThemerCustomThemeName;
 
 extern NSString * const kSettingsSnowBoardLiteEnabled;
 extern NSString * const kSettingsSnowBoardLiteSelectedThemeID;
+/// Versioned SnowBoard Remix selection key. The legacy Lite key remains
+/// readable for one-time migration and for older builds.
+extern NSString * const kSettingsSnowBoardRemixSelectedThemeID;
 
 extern NSString * const kSettingsLiveWPEnabled;
 extern NSString * const kSettingsLiveWPVideoPath;
@@ -110,6 +114,7 @@ BOOL settings_themer_has_selected_theme(void);
 NSString *settings_themer_selected_theme_display_name(void);
 BOOL settings_snowboardlite_has_selected_theme(void);
 NSString *settings_snowboardlite_selected_theme_display_name(void);
+BOOL settings_font_changer_has_regular_font(void);
 
 // Synchronously runs kexploit and writes/clears the NanoRegistry pairing-
 // compatibility override using the four numbers currently in NSUserDefaults
@@ -117,8 +122,13 @@ NSString *settings_snowboardlite_selected_theme_display_name(void);
 BOOL settings_apply_nano_registry_now(BOOL apply);
 BOOL settings_apply_call_recording_sound_disabled(BOOL disabled);
 BOOL settings_apply_hide_home_bar_hidden(BOOL hidden);
+BOOL settings_apply_font_changer_now(BOOL apply);
 BOOL settings_hide_home_bar_respring_pending(void);
+void settings_begin_system_edit_respring(UIViewController *host);
 void settings_present_hide_home_bar_respring_prompt(UIViewController *host);
+void settings_present_system_edit_respring_prompt(UIViewController *host,
+                                                  NSString *title,
+                                                  NSString *message);
 
 void settings_run_actions(void);
 void settings_run_pending_actions(void);

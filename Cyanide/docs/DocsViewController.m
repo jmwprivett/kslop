@@ -474,7 +474,7 @@ static NSString * const kFooterID      = @"DocsFooter";
                       @"Cyanide/tweaks/ for shipped patterns at increasing complexity.",
            @"rows": @[
                @{ @"kind": @"prose",
-                  @"text": @"Cyanide tweaks are app-side drivers. No SpringBoard dylibs, no "
+                  @"text": @"kslop tweaks are app-side drivers. No SpringBoard dylibs, no "
                            @"Substrate hooks, no swizzled methods. The app reaches into the "
                            @"target from outside." },
                @{ @"kind": @"prose",

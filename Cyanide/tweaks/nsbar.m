@@ -15,6 +15,7 @@
 #import <math.h>
 #import <net/if.h>
 #import <net/if_dl.h>
+#import <stdio.h>
 #import <time.h>
 
 // Constants
@@ -45,6 +46,17 @@ static uint64_t gNSBarApplyTick = 0;
 static uint64_t gNSBarOverlayWindow = 0;
 static uint64_t gNSBarOverlayLabel = 0;
 static NSBarPosition gNSBarLastPosition = NSBarPositionTopLeft;
+static bool gNSBarOverlayLayoutCached = false;
+static double gNSBarOverlayLastX = 0.0;
+static double gNSBarOverlayLastY = 0.0;
+static double gNSBarOverlayLastW = 0.0;
+static double gNSBarOverlayLastH = 0.0;
+static char gNSBarLastText[128] = {0};
+static char gNSBarLastFailureReason[64] = {0};
+static uint64_t gNSBarTextChangeCount = 0;
+static uint64_t gNSBarLayoutChangeCount = 0;
+static uint64_t gNSBarRecreateCount = 0;
+static uint64_t gNSBarFailureCount = 0;
 
 // Cached selectors
 static uint64_t gNSBarSetTextSel = 0;
@@ -78,6 +90,86 @@ typedef struct {
 static bool nsbar_should_log_tick(void)
 {
     return gNSBarApplyTick == 1;
+}
+
+static bool nsbar_double_close(double a, double b)
+{
+    return fabs(a - b) < 0.5;
+}
+
+static void nsbar_note_failure(const char *reason)
+{
+    gNSBarFailureCount++;
+    if (!reason || !reason[0]) reason = "unknown";
+    snprintf(gNSBarLastFailureReason, sizeof(gNSBarLastFailureReason), "%s", reason);
+}
+
+static void nsbar_clear_layout_cache(void)
+{
+    gNSBarOverlayLayoutCached = false;
+    gNSBarOverlayLastX = 0.0;
+    gNSBarOverlayLastY = 0.0;
+    gNSBarOverlayLastW = 0.0;
+    gNSBarOverlayLastH = 0.0;
+}
+
+static void nsbar_clear_text_cache(void)
+{
+    gNSBarLastText[0] = '\0';
+}
+
+static void nsbar_clear_overlay_cache(void)
+{
+    gNSBarOverlayWindow = 0;
+    gNSBarOverlayLabel = 0;
+    nsbar_clear_layout_cache();
+    nsbar_clear_text_cache();
+}
+
+static bool nsbar_text_matches_cache(const char *utf8)
+{
+    if (!utf8) utf8 = "n/a";
+    return gNSBarLastText[0] && strcmp(gNSBarLastText, utf8) == 0;
+}
+
+static void nsbar_remember_text(const char *utf8)
+{
+    if (!utf8) utf8 = "n/a";
+    if (!nsbar_text_matches_cache(utf8)) {
+        gNSBarTextChangeCount++;
+        snprintf(gNSBarLastText, sizeof(gNSBarLastText), "%s", utf8);
+    }
+}
+
+static bool nsbar_layout_matches_cache(NSBarPosition position,
+                                       double x,
+                                       double y,
+                                       double width,
+                                       double height)
+{
+    return gNSBarOverlayLayoutCached &&
+           gNSBarLastPosition == position &&
+           nsbar_double_close(gNSBarOverlayLastX, x) &&
+           nsbar_double_close(gNSBarOverlayLastY, y) &&
+           nsbar_double_close(gNSBarOverlayLastW, width) &&
+           nsbar_double_close(gNSBarOverlayLastH, height);
+}
+
+static void nsbar_remember_layout(NSBarPosition position,
+                                  double x,
+                                  double y,
+                                  double width,
+                                  double height)
+{
+    if (!nsbar_layout_matches_cache(position, x, y, width, height)) {
+        gNSBarLayoutChangeCount++;
+    }
+    gNSBarOverlayLayoutCached = true;
+    gNSBarLastPosition = position;
+    gNSBarOverlayLastX = x;
+    gNSBarOverlayLastY = y;
+    gNSBarOverlayLastW = width;
+    gNSBarOverlayLastH = height;
 }
 
 static bool read_net_totals(uint64_t *ibytes, uint64_t *obytes)
@@ -463,7 +555,10 @@ static void nsbar_calculate_position(NSBarPosition position,
 
 static bool nsbar_apply_overlay_layout(uint64_t win, uint64_t label, NSBarPosition position, NSString *text)
 {
-    if (!r_is_objc_ptr(win)) return false;
+    if (!r_is_objc_ptr(win)) {
+        nsbar_note_failure("layout-window");
+        return false;
+    }
 
     NSBarLayout layout = nsbar_read_layout();
     double width = nsbar_width_for_text(text, position, layout);
@@ -477,6 +572,10 @@ static bool nsbar_apply_overlay_layout(uint64_t win, uint64_t label, NSBarPositi
                position, layout.screenWidth, layout.screenHeight, layout.topAreaHeight, x, y, width, kNSBarWinH);
     }
 
+    if (nsbar_layout_matches_cache(position, x, y, width, kNSBarWinH)) {
+        return true;
+    }
+
     bool ok = true;
     ok &= r_send_rect_main(win, "setFrame:", x, y, width, kNSBarWinH);
     ok &= r_send_double_main(win, "setWindowLevel:", kNSBarWinLevel);
@@ -484,6 +583,11 @@ static bool nsbar_apply_overlay_layout(uint64_t win, uint64_t label, NSBarPositi
 
     if (r_is_objc_ptr(label)) {
         ok &= r_send_rect_main(label, "setFrame:", 0.0, 0.0, width, kNSBarWinH);
+    }
+    if (ok) {
+        nsbar_remember_layout(position, x, y, width, kNSBarWinH);
+    } else {
+        nsbar_note_failure("layout-send");
     }
     
     return ok;
@@ -499,12 +603,35 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
 
     const char *utf8 = text.UTF8String;
     if (!utf8) utf8 = "n/a";
+
+    if (r_is_objc_ptr(gNSBarOverlayWindow) &&
+        r_is_objc_ptr(gNSBarOverlayLabel) &&
+        nsbar_text_matches_cache(utf8)) {
+        double cachedStart = nsbar_now_seconds();
+        bool layoutOK = nsbar_apply_overlay_layout(gNSBarOverlayWindow,
+                                                   gNSBarOverlayLabel,
+                                                   position,
+                                                   text);
+        if (layoutOK) {
+            NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] unchanged-cache ok=1 layout=%llums total=%llums\n",
+                            nsbar_elapsed_ms_since(cachedStart),
+                            nsbar_elapsed_ms_since(start));
+            return true;
+        }
+        nsbar_clear_overlay_cache();
+        NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] unchanged-cache ok=0 layout=%llums total=%llums\n",
+                        nsbar_elapsed_ms_since(cachedStart),
+                        nsbar_elapsed_ms_since(start));
+        return false;
+    }
+
     double stringStart = nsbar_now_seconds();
     uint64_t textObj = nsbar_nsstring_utf8_fast(utf8);
     NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] textObj=0x%llx elapsed=%llums\n",
                     textObj, nsbar_elapsed_ms_since(stringStart));
     if (!r_is_objc_ptr(textObj)) { 
         printf("[NSBAR] overlay: NSString alloc failed\n"); 
+        nsbar_note_failure("text-alloc");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=textObj total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false; 
@@ -515,22 +642,29 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
         double fastStart = nsbar_now_seconds();
         if (nsbar_should_log_tick())
             printf("[NSBAR] fast path: current position=%d last position=%d\n", position, gNSBarLastPosition);
-        bool ok = nsbar_set_text_fast(gNSBarOverlayLabel, textObj);
+        bool textOK = nsbar_text_matches_cache(utf8) || nsbar_set_text_fast(gNSBarOverlayLabel, textObj);
         nsbar_release_remote_obj(textObj);
-        if (ok) {
+        if (textOK) {
             double layoutStart = nsbar_now_seconds();
-            nsbar_apply_overlay_layout(gNSBarOverlayWindow, gNSBarOverlayLabel, position, text);
-            gNSBarLastPosition = position;
-            if (nsbar_should_log_tick())
-                printf("[NSBAR] overlay: fast cached text updated\n");
-            NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] fast-path ok=1 setTextAndRelease=%llums layout=%llums total=%llums\n",
+            bool layoutOK = nsbar_apply_overlay_layout(gNSBarOverlayWindow, gNSBarOverlayLabel, position, text);
+            if (layoutOK) {
+                nsbar_remember_text(utf8);
+                if (nsbar_should_log_tick())
+                    printf("[NSBAR] overlay: fast cached text updated\n");
+                NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] fast-path ok=1 setTextAndRelease=%llums layout=%llums total=%llums\n",
+                                nsbar_elapsed_ms_since(fastStart),
+                                nsbar_elapsed_ms_since(layoutStart),
+                                nsbar_elapsed_ms_since(start));
+                return true;
+            }
+            nsbar_clear_overlay_cache();
+            NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] fast-path ok=0 reason=layout elapsed=%llums total=%llums\n",
                             nsbar_elapsed_ms_since(fastStart),
-                            nsbar_elapsed_ms_since(layoutStart),
                             nsbar_elapsed_ms_since(start));
-            return true;
+            return false;
         }
-        gNSBarOverlayWindow = 0;
-        gNSBarOverlayLabel = 0;
+        nsbar_note_failure("set-text");
+        nsbar_clear_overlay_cache();
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] fast-path ok=0 elapsed=%llums total=%llums\n",
                         nsbar_elapsed_ms_since(fastStart),
                         nsbar_elapsed_ms_since(start));
@@ -543,6 +677,7 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     if (!r_is_objc_ptr(UIApplication)) {
         nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: UIApplication missing\n");
+        nsbar_note_failure("uiapplication");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=uiapplication total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false;
@@ -554,6 +689,7 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     if (!r_is_objc_ptr(app)) {
         nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: sharedApplication nil\n");
+        nsbar_note_failure("shared-application");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=sharedApplication total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false;
@@ -564,6 +700,7 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     if (!assocKey) {
         nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: assoc key failed\n");
+        nsbar_note_failure("assoc-key");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=assoc-key total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false;
@@ -583,22 +720,30 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
             gNSBarOverlayWindow = cachedWin;
             gNSBarOverlayLabel = cachedLabel;
             gNSBarLastPosition = position;
-            nsbar_set_text_fast(cachedLabel, textObj);
+            bool textOK = nsbar_text_matches_cache(utf8) || nsbar_set_text_fast(cachedLabel, textObj);
             nsbar_make_window_click_through(cachedWin);
             nsbar_apply_overlay_style(cachedLabel);
-            nsbar_apply_overlay_layout(cachedWin, cachedLabel, position, text);
+            bool layoutOK = nsbar_apply_overlay_layout(cachedWin, cachedLabel, position, text);
             r_msg2_main(cachedWin, "setHidden:", 0, 0, 0, 0);
             nsbar_release_remote_obj(textObj);
-            if (nsbar_should_log_tick())
-                printf("[NSBAR] overlay: cached text updated\n");
-            NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] associated-cache ok=1 label=0x%llx elapsed=%llums total=%llums\n",
+            if (textOK && layoutOK) {
+                nsbar_remember_text(utf8);
+                if (nsbar_should_log_tick())
+                    printf("[NSBAR] overlay: cached text updated\n");
+                NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] associated-cache ok=1 label=0x%llx elapsed=%llums total=%llums\n",
+                                cachedLabel, nsbar_elapsed_ms_since(cachedStart),
+                                nsbar_elapsed_ms_since(start));
+                return true;
+            }
+            if (!textOK) nsbar_note_failure("cached-set-text");
+            nsbar_clear_overlay_cache();
+            NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] associated-cache ok=0 label=0x%llx elapsed=%llums total=%llums\n",
                             cachedLabel, nsbar_elapsed_ms_since(cachedStart),
                             nsbar_elapsed_ms_since(start));
-            return true;
+            return false;
         }
         r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject", app, assocKey, 0, 1, 0, 0, 0, 0);
-        gNSBarOverlayWindow = 0;
-        gNSBarOverlayLabel = 0;
+        nsbar_clear_overlay_cache();
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] associated-cache invalid label=0x%llx elapsed=%llums\n",
                         cachedLabel, nsbar_elapsed_ms_since(cachedStart));
     }
@@ -614,7 +759,9 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
                         windows, count, keyWin);
     }
     if (!r_is_objc_ptr(keyWin)) { 
+        nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: keyWindow nil\n"); 
+        nsbar_note_failure("key-window");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=keyWindow total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false; 
@@ -624,7 +771,9 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] keyWin=0x%llx scene=0x%llx elapsed=%llums\n",
                     keyWin, scene, nsbar_elapsed_ms_since(sceneStart));
     if (!r_is_objc_ptr(scene)) { 
+        nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: windowScene nil\n"); 
+        nsbar_note_failure("window-scene");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=windowScene total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false; 
@@ -634,7 +783,9 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     double windowStart = nsbar_now_seconds();
     uint64_t UIWindow = r_class("UIWindow");
     if (!r_is_objc_ptr(UIWindow)) { 
+        nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: UIWindow missing\n"); 
+        nsbar_note_failure("uiwindow");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=uiwindow total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false; 
@@ -642,7 +793,9 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
 
     uint64_t winAlloc = r_msg2_main(UIWindow, "alloc", 0, 0, 0, 0);
     if (!r_is_objc_ptr(winAlloc)) { 
+        nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: UIWindow alloc failed\n"); 
+        nsbar_note_failure("window-alloc");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=window-alloc total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false; 
@@ -652,7 +805,9 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] window alloc=0x%llx win=0x%llx elapsed=%llums\n",
                     winAlloc, win, nsbar_elapsed_ms_since(windowStart));
     if (!r_is_objc_ptr(win)) { 
+        nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: initWithWindowScene failed\n"); 
+        nsbar_note_failure("window-init");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=window-init total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false; 
@@ -673,7 +828,9 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     double labelStart = nsbar_now_seconds();
     uint64_t UILabel = r_class("UILabel");
     if (!r_is_objc_ptr(UILabel)) { 
+        nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: UILabel missing\n"); 
+        nsbar_note_failure("uilabel");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=uilabel total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false; 
@@ -681,7 +838,9 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
 
     uint64_t labelAlloc = r_msg2_main(UILabel, "alloc", 0, 0, 0, 0);
     if (!r_is_objc_ptr(labelAlloc)) { 
+        nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: UILabel alloc failed\n"); 
+        nsbar_note_failure("label-alloc");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=label-alloc total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false; 
@@ -691,7 +850,9 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] label alloc=0x%llx label=0x%llx elapsed=%llums\n",
                     labelAlloc, label, nsbar_elapsed_ms_since(labelStart));
     if (!r_is_objc_ptr(label)) { 
+        nsbar_release_remote_obj(textObj);
         printf("[NSBAR] overlay: UILabel init failed\n"); 
+        nsbar_note_failure("label-init");
         NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=0 reason=label-init total=%llums\n",
                         nsbar_elapsed_ms_since(start));
         return false; 
@@ -727,7 +888,7 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] click-through elapsed=%llums\n",
                     nsbar_elapsed_ms_since(clickStart));
     double layoutStart = nsbar_now_seconds();
-    nsbar_apply_overlay_layout(win, label, position, text);
+    bool layoutOK = nsbar_apply_overlay_layout(win, label, position, text);
     NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] layout elapsed=%llums\n",
                     nsbar_elapsed_ms_since(layoutStart));
     double attachStart = nsbar_now_seconds();
@@ -740,13 +901,15 @@ static bool nsbar_install_overlay(NSString *text, NSBarPosition position)
     gNSBarOverlayWindow = win;
     gNSBarOverlayLabel = label;
     gNSBarLastPosition = position;
+    gNSBarRecreateCount++;
+    nsbar_remember_text(utf8);
     nsbar_release_remote_obj(textObj);
 
     if (nsbar_should_log_tick())
         printf("[NSBAR] overlay: installed dedicated window\n");
-    NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=1 total=%llums window=0x%llx label=0x%llx\n",
-                    nsbar_elapsed_ms_since(start), win, label);
-    return true;
+    NSBAR_DEBUG_LOG("[NSBAR][DEBUG][install] end ok=%d total=%llums window=0x%llx label=0x%llx\n",
+                    layoutOK ? 1 : 0, nsbar_elapsed_ms_since(start), win, label);
+    return layoutOK;
 }
 
 bool nsbar_apply_in_session(NSBarPosition position)
@@ -766,9 +929,23 @@ bool nsbar_apply_in_session(NSBarPosition position)
 
     double installStart = nsbar_now_seconds();
     bool ok = nsbar_install_overlay(text, position);
+    unsigned long long installMS = nsbar_elapsed_ms_since(installStart);
+    unsigned long long totalMS = nsbar_elapsed_ms_since(start);
     NSBAR_DEBUG_LOG("[NSBAR][DEBUG][apply] install ok=%d elapsed=%llums total=%llums\n",
-                    ok ? 1 : 0, nsbar_elapsed_ms_since(installStart),
-                    nsbar_elapsed_ms_since(start));
+                    ok ? 1 : 0, installMS, totalMS);
+    if (!ok || totalMS > 500ULL) {
+        const char *reason = ok ? "-" : (gNSBarLastFailureReason[0] ? gNSBarLastFailureReason : "unknown");
+        printf("[NSBAR] apply %s tick=%llu total=%llums install=%llums reason=%s textChanges=%llu layoutChanges=%llu recreates=%llu failures=%llu\n",
+               ok ? "slow" : "failed",
+               gNSBarApplyTick,
+               totalMS,
+               installMS,
+               reason,
+               gNSBarTextChangeCount,
+               gNSBarLayoutChangeCount,
+               gNSBarRecreateCount,
+               gNSBarFailureCount);
+    }
     r_settle_us(oldSettleUS);
     return ok;
 }
@@ -810,8 +987,7 @@ bool nsbar_stop_in_session(void)
         r_dlsym_call(R_TIMEOUT, "objc_setAssociatedObject", app, assocKey, 0, 1, 0, 0, 0, 0);
     }
 
-    gNSBarOverlayWindow = 0;
-    gNSBarOverlayLabel = 0;
+    nsbar_clear_overlay_cache();
     printf("[NSBAR] overlay: stopped\n");
     NSBAR_DEBUG_LOG("[NSBAR][DEBUG][stop] end ok=1 total=%llums\n",
                     nsbar_elapsed_ms_since(start));
@@ -821,8 +997,7 @@ bool nsbar_stop_in_session(void)
 
 void nsbar_forget_remote_state(void)
 {
-    gNSBarOverlayWindow = 0;
-    gNSBarOverlayLabel = 0;
+    nsbar_clear_overlay_cache();
     gNSBarSetTextSel = 0;
     gNSBarPerformMainSel = 0;
     gNSBarNSStringClass = 0;
@@ -830,5 +1005,11 @@ void nsbar_forget_remote_state(void)
     gNSBarInitUTF8Sel = 0;
     gNSBarUIColorClass = 0;
     gNSBarBorderColor = 0;
+    gNSBarApplyTick = 0;
+    gNSBarTextChangeCount = 0;
+    gNSBarLayoutChangeCount = 0;
+    gNSBarRecreateCount = 0;
+    gNSBarFailureCount = 0;
+    gNSBarLastFailureReason[0] = '\0';
     printf("[NSBAR] forgot remote overlay state\n");
 }

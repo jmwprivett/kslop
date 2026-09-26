@@ -9,6 +9,14 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+FOUNDATION_EXPORT NSNotificationName const PackageFavoritesDidChangeNotification;
+
+/// Favorites are UI-only Installer metadata keyed by the package's stable
+/// identifier. They do not change install/activation state.
+FOUNDATION_EXPORT NSSet<NSString *> *PackageFavoriteIdentifiers(void);
+FOUNDATION_EXPORT BOOL PackageIdentifierIsFavorite(NSString *identifier);
+FOUNDATION_EXPORT void PackageSetIdentifierFavorite(NSString *identifier, BOOL favorite);
+
 typedef NS_ENUM(NSInteger, PackageInstallKind) {
     // Master enable is a BOOL in NSUserDefaults under enabledKey. Installing
     // sets it to YES; uninstalling sets NO. settings_run_actions() applies.
@@ -36,9 +44,14 @@ typedef NS_ENUM(NSInteger, PackageInstallKind) {
     // the home bar after respring; restoring needs a respring.
     PackageInstallKindHideHomeBar = 4,
 
+    // One-shot system font replacement. Installing writes the imported local
+    // font family after backing up stock fonts; uninstalling restores backups.
+    // Respring required after either direction.
+    PackageInstallKindFontChanger = 5,
+
     // Direct settings tool. It has a Settings bundle but no install queue,
     // active state, or PackageQueue commit step.
-    PackageInstallKindDirectTool = 5,
+    PackageInstallKindDirectTool = 6,
 };
 
 @interface Package : NSObject

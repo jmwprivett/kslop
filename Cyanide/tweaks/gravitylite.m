@@ -1593,7 +1593,7 @@ bool gravitylite_apply_in_session(GravityLiteConfig config)
         gl_set_state(ctrl, state);
         printf("[GRAVITY] Physics started — groups=%d home=%d dock=%d visiblePages=%d\n",
                built, homeBuilt, dockBuilt, count);
-        printf("[WARN] TO STOP GRAVITY: USE APP SWITCHER TO RETURN TO CYANIDE AND DEACTIVATE.\n");
+        printf("[WARN] TO STOP GRAVITY: USE APP SWITCHER TO RETURN TO KSLOP AND DEACTIVATE.\n");
 
         gl_release(groups);
         gl_release(state);
@@ -1655,7 +1655,7 @@ bool gravitylite_apply_in_session(GravityLiteConfig config)
     printf("[GRAVITY] Physics started — magnitude=%.1fx, bounce=%.2f, friction=%.2f%s\n",
            config.magnitude, config.bounce, config.friction,
            dockBuilt ? ", dock included" : "");
-    printf("[WARN] TO STOP GRAVITY: USE APP SWITCHER TO RETURN TO CYANIDE AND DEACTIVATE.\n");
+    printf("[WARN] TO STOP GRAVITY: USE APP SWITCHER TO RETURN TO KSLOP AND DEACTIVATE.\n");
 
     gl_release(groups);
     gl_release(state);

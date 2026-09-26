@@ -18,6 +18,7 @@
 @property (nonatomic, strong) UIBarButtonItem *hideOrDoneButton;
 @property (nonatomic, assign) BOOL completed;
 @property (nonatomic, assign) BOOL didPromptForHideHomeBarRespring;
+@property (nonatomic, assign) BOOL didPromptForSystemEditRespring;
 @end
 
 @implementation InstallProgressViewController
@@ -49,6 +50,11 @@
     [self.view addSubview:separator];
 
     self.logView = [[LogTextView alloc] initWithFrame:CGRectZero];
+    // Restore/apply can follow a long prior session.  Keep presentation
+    // responsive and show the recent tail first; the complete session remains
+    // available in the persisted log file and the live view continues to
+    // append new lines normally.
+    self.logView.initialDisplayLineLimit = 2000;
     self.logView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.logView];
 
@@ -151,6 +157,9 @@
         settings_hide_home_bar_respring_pending()) {
         [self scheduleHideHomeBarRespringPrompt];
     }
+    if (success && self.promptsForSystemEditRespring) {
+        [self scheduleSystemEditRespringPrompt];
+    }
 }
 
 - (void)scheduleHideHomeBarRespringPrompt
@@ -161,6 +170,17 @@
                    dispatch_get_main_queue(), ^{
         if (!self.view.window) return;
         settings_present_hide_home_bar_respring_prompt(self);
+    });
+}
+
+- (void)scheduleSystemEditRespringPrompt
+{
+    if (self.didPromptForSystemEditRespring) return;
+    self.didPromptForSystemEditRespring = YES;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (!self.view.window) return;
+        settings_begin_system_edit_respring(self);
     });
 }
 
@@ -180,8 +200,8 @@
         @"     ╭───────────╮\n"
         @"     │ ▄▄▄▄▄▄▄▄▄ │\n"
         @"     ├───────────┤\n"
-        @"     │ ░░░░░░░░░ │   C Y A N I D E\n"
-        @"     │ ░░░ C ░░░ │   %@ (%@)\n"
+        @"     │ ░░░░░░░░░ │   K S L O P\n"
+        @"     │ ░░░ K ░░░ │   %@ (%@)\n"
         @"     │ ░░░░░░░░░ │   %s • iOS %@\n"
         @"     │ ░░░░░░░░░ │\n"
         @"     ╰───────────╯",

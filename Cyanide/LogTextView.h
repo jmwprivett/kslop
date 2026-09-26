@@ -9,6 +9,10 @@
 #import <UIKit/UIKit.h>
 
 @interface LogTextView : UITextView
+/// Optional cap for the first render.  The underlying ring buffer and
+/// exported/session logs remain complete; this only prevents a modal progress
+/// screen from synchronously laying out tens of thousands of old lines.
+@property (nonatomic, assign) NSUInteger initialDisplayLineLimit;
 @end
 
 void log_init(void);

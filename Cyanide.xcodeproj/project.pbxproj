@@ -385,6 +385,7 @@
 				AAA297752F72D439000B5902 /* Resources */,
 				AAA2989D2F7418CC000B5902 /* CopyFiles */,
 				FBC0A0012FD6000000C0A001 /* Copy Simulator XPF */,
+				C1D1C0A12FD6000000C0A001 /* Preserve Exact Icon Redirect Payload */,
 			);
 			buildRules = (
 			);
@@ -595,6 +596,27 @@
 			shellPath = /bin/sh;
 			shellScript = "if [ \"$PLATFORM_NAME\" = \"iphonesimulator\" ]; then\n    cp \"$SRCROOT/Cyanide/XPF/output/iphonesimulator/libxpf.dylib\" \"$TARGET_BUILD_DIR/$WRAPPER_NAME/libxpf.dylib\"\nfi\n";
 		};
+		C1D1C0A12FD6000000C0A001 /* Preserve Exact Icon Redirect Payload */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Cyanide/IconRedirect/CNDIconRedirectTheme.png",
+				"$(SRCROOT)/Cyanide/IconRedirect/CNDIconRedirectTheme120.png",
+			);
+			name = "Preserve Exact Icon Redirect Payload";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nsource=\"$SRCROOT/Cyanide/IconRedirect/CNDIconRedirectTheme.png\"\ndestination=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/CNDIconRedirectTheme.png\"\nscaled3_destination=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/CNDIconRedirectTheme@3x.png\"\nexpected=74122c8aa948fc4e2d9d02148f62b88b8e4c77b1727cd34cf5632f9c6bbdca8b\nactual=$(/usr/bin/shasum -a 256 \"$source\" | /usr/bin/awk '{print $1}')\nif [ \"$actual\" != \"$expected\" ]; then\n    echo \"error: icon redirect payload hash mismatch: $actual\" >&2\n    exit 1\nfi\ncompact_source=\"$SRCROOT/Cyanide/IconRedirect/CNDIconRedirectTheme120.png\"\ncompact_destination=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/CNDIconRedirectTheme120.png\"\nscaled2_destination=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/CNDIconRedirectTheme@2x.png\"\ncompact_expected=717a887c38e13e6ba3a3813f82e6c01cb710348cb660587c6f5c34d9e07221fb\ncompact_actual=$(/usr/bin/shasum -a 256 \"$compact_source\" | /usr/bin/awk '{print $1}')\nif [ \"$compact_actual\" != \"$compact_expected\" ]; then\n    echo \"error: compact icon redirect payload hash mismatch: $compact_actual\" >&2\n    exit 1\nfi\n/bin/cp \"$source\" \"$destination\"\n/bin/cp \"$source\" \"$scaled3_destination\"\n/bin/cp \"$compact_source\" \"$compact_destination\"\n/bin/cp \"$compact_source\" \"$scaled2_destination\"\n/usr/bin/cmp -s \"$source\" \"$destination\" || { echo \"error: packaged icon redirect payload changed\" >&2; exit 1; }\n/usr/bin/cmp -s \"$source\" \"$scaled3_destination\" || { echo \"error: packaged 3x icon redirect payload changed\" >&2; exit 1; }\n/usr/bin/cmp -s \"$compact_source\" \"$compact_destination\" || { echo \"error: packaged compact icon redirect payload changed\" >&2; exit 1; }\n/usr/bin/cmp -s \"$compact_source\" \"$scaled2_destination\" || { echo \"error: packaged 2x icon redirect payload changed\" >&2; exit 1; }\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -615,7 +637,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1002024;
+				CURRENT_PROJECT_VERSION = 1005002;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 7LGY4NE2VM;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -626,7 +648,7 @@
 					"$(SRCROOT)/Cyanide/XPF/external/ChOma/include",
 				);
 				INFOPLIST_FILE = Cyanide/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Cyanide;
+				INFOPLIST_KEY_CFBundleDisplayName = kslop;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
@@ -648,24 +670,24 @@
 					"$(PROJECT_DIR)/Cyanide/XPF/output/ios",
 					"$(PROJECT_DIR)/Cyanide/XPF/output/macos",
 					"$(PROJECT_DIR)/Cyanide/XPF/external/ChOma/external/ios",
-					"$(PROJECT_DIR)/Cyanide/resident/output",
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/Cyanide/XPF/output/iphonesimulator",
 					"$(PROJECT_DIR)/Cyanide/XPF/output/macos",
 					"$(PROJECT_DIR)/Cyanide/XPF/external/ChOma/external/ios",
-					"$(PROJECT_DIR)/Cyanide/resident/output",
 				);
-				MARKETING_VERSION = 1.2.24;
+				MARKETING_VERSION = 1.6;
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "$(inherited)";
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
+					-lz,
 					"$(PROJECT_DIR)/Cyanide/XPF/output/ios/libxpf.dylib",
 				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
+					-lz,
 					"$(PROJECT_DIR)/Cyanide/XPF/output/iphonesimulator/libxpf.dylib",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zeroxjf.ios-cyanide1";
@@ -689,7 +711,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1002024;
+				CURRENT_PROJECT_VERSION = 1005002;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 7LGY4NE2VM;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -700,7 +722,7 @@
 					"$(SRCROOT)/Cyanide/XPF/external/ChOma/include",
 				);
 				INFOPLIST_FILE = Cyanide/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Cyanide;
+				INFOPLIST_KEY_CFBundleDisplayName = kslop;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
@@ -722,24 +744,24 @@
 					"$(PROJECT_DIR)/Cyanide/XPF/output/ios",
 					"$(PROJECT_DIR)/Cyanide/XPF/output/macos",
 					"$(PROJECT_DIR)/Cyanide/XPF/external/ChOma/external/ios",
-					"$(PROJECT_DIR)/Cyanide/resident/output",
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/Cyanide/XPF/output/iphonesimulator",
 					"$(PROJECT_DIR)/Cyanide/XPF/output/macos",
 					"$(PROJECT_DIR)/Cyanide/XPF/external/ChOma/external/ios",
-					"$(PROJECT_DIR)/Cyanide/resident/output",
 				);
-				MARKETING_VERSION = 1.2.24;
+				MARKETING_VERSION = 1.6;
 				OTHER_CFLAGS = "";
 				OTHER_LDFLAGS = "$(inherited)";
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
+					-lz,
 					"$(PROJECT_DIR)/Cyanide/XPF/output/ios/libxpf.dylib",
 				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
+					-lz,
 					"$(PROJECT_DIR)/Cyanide/XPF/output/iphonesimulator/libxpf.dylib",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.zeroxjf.ios-cyanide1";

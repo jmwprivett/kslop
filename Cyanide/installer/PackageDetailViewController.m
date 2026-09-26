@@ -43,7 +43,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 
     UIAlertController *alert =
         [UIAlertController alertControllerWithTitle:@"Call Recording Disclosure"
-                                            message:@"Silencing call-recording disclosure sounds may violate consent, notice, or privacy laws where you live or where the call participants are located. Only use this where you have permission and understand the rules that apply to you.\n\nCyanide modifies CallServices system files and keeps a backup when possible. You can restore the original sounds from this package."
+                                            message:@"Silencing call-recording disclosure sounds may violate consent, notice, or privacy laws where you live or where the call participants are located. Only use this where you have permission and understand the rules that apply to you.\n\nkslop modifies CallServices system files and keeps a backup when possible. You can restore the original sounds from this package."
                                      preferredStyle:UIAlertControllerStyleAlert];
 
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
@@ -72,7 +72,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     return self.package.kind == PackageInstallKindOTA
         || self.package.kind == PackageInstallKindNanoRegistry
         || self.package.kind == PackageInstallKindCallRecordingSound
-        || self.package.kind == PackageInstallKindHideHomeBar;
+        || self.package.kind == PackageInstallKindHideHomeBar
+        || self.package.kind == PackageInstallKindFontChanger;
 }
 
 - (BOOL)isDirectToolPackage
@@ -92,11 +93,15 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         if (self.package.kind == PackageInstallKindHideHomeBar) {
             return (intent == PackageQueueIntentInstall) ? @"Cancel Hide" : @"Cancel Restore";
         }
+        if (self.package.kind == PackageInstallKindFontChanger) {
+            return (intent == PackageQueueIntentInstall) ? @"Cancel Apply" : @"Cancel Restore";
+        }
         return (intent == PackageQueueIntentInstall) ? @"Cancel Disable" : @"Cancel Enable";
     }
     if (self.package.kind == PackageInstallKindNanoRegistry) return @"Apply/Remove";
     if (self.package.kind == PackageInstallKindCallRecordingSound) return @"Silence/Restore";
     if (self.package.kind == PackageInstallKindHideHomeBar) return @"Hide/Restore";
+    if (self.package.kind == PackageInstallKindFontChanger) return @"Apply/Restore";
     return @"Disable/Enable";
 }
 
@@ -115,6 +120,11 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     }
     if (self.package.kind == PackageInstallKindHideHomeBar) {
         if (intent == PackageQueueIntentInstall) return @"Hide Pending";
+        if (intent == PackageQueueIntentUninstall) return @"Restore Pending";
+        return @"Manual Control";
+    }
+    if (self.package.kind == PackageInstallKindFontChanger) {
+        if (intent == PackageQueueIntentInstall) return @"Apply Pending";
         if (intent == PackageQueueIntentUninstall) return @"Restore Pending";
         return @"Manual Control";
     }
@@ -170,8 +180,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     }
 
     UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:@"Run Hide Home Bar Alone"
-                                            message:reason ?: @"Hide Home Bar must be the only pending queue item."
+        [UIAlertController alertControllerWithTitle:@"Run System Edit Alone"
+                                            message:reason ?: @"This system edit must be the only pending queue item."
                                      preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK"
                                               style:UIAlertActionStyleDefault
@@ -200,6 +210,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     } else if (self.package.kind == PackageInstallKindHideHomeBar) {
         log_user("[INSTALLER] Pending home bar %s\n",
                  intent == PackageQueueIntentInstall ? "hide" : "restore");
+    } else if (self.package.kind == PackageInstallKindFontChanger) {
+        log_user("[INSTALLER] Pending font %s\n",
+                 intent == PackageQueueIntentInstall ? "apply" : "restore");
     } else {
         log_user("[INSTALLER] Pending OTA %s\n",
                  intent == PackageQueueIntentInstall ? "disable" : "enable");
@@ -270,6 +283,31 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         return [UIMenu menuWithTitle:@"Home Bar" children:@[hide, restore]];
     }
 
+    if (self.package.kind == PackageInstallKindFontChanger) {
+        UIAction *apply = [UIAction actionWithTitle:@"Apply Selected Family"
+                                              image:[UIImage systemImageNamed:@"textformat"]
+                                         identifier:nil
+                                            handler:^(__kindof UIAction *_) {
+            if (!settings_font_changer_has_regular_font()) {
+                SettingsViewController *detail = [[SettingsViewController alloc] initWithUnderlyingSection:self.package.settingsSection
+                                                                                              bundleTitle:self.package.name];
+                [self.navigationController pushViewController:detail animated:YES];
+                return;
+            }
+            [self queueManualIntent:PackageQueueIntentInstall];
+        }];
+        apply.attributes = UIMenuElementAttributesDestructive;
+
+        UIAction *restore = [UIAction actionWithTitle:@"Restore Stock Fonts"
+                                                image:[UIImage systemImageNamed:@"arrow.clockwise"]
+                                           identifier:nil
+                                              handler:^(__kindof UIAction *_) {
+            [self queueManualIntent:PackageQueueIntentUninstall];
+        }];
+
+        return [UIMenu menuWithTitle:@"Font Changer" children:@[apply, restore]];
+    }
+
     UIAction *disable = [UIAction actionWithTitle:@"Disable OTA Updates"
                                             image:[UIImage systemImageNamed:@"icloud.slash"]
                                        identifier:nil
@@ -337,6 +375,11 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     return [self.package.identifier isEqualToString:@"com.darksword.livewp"];
 }
 
+- (BOOL)isFontChangerPackage
+{
+    return self.package.kind == PackageInstallKindFontChanger;
+}
+
 - (BOOL)needsThemeBeforeInstall
 {
     return [self requiresThemeSelection] &&
@@ -349,6 +392,13 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     return [self isLiveWPPackage] &&
            !self.package.isInstalled &&
            ![SettingsViewController liveWPHasSelectedVideo];
+}
+
+- (BOOL)needsFontBeforeInstall
+{
+    return [self isFontChangerPackage] &&
+           !self.package.isInstalled &&
+           !settings_font_changer_has_regular_font();
 }
 
 - (void)viewDidLoad
@@ -574,6 +624,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     } else if ([self needsLiveWPVideoBeforeInstall]) {
         title = @"Select Video";
         style = UIBarButtonItemStyleDone;
+    } else if ([self needsFontBeforeInstall]) {
+        title = @"Import Font";
+        style = UIBarButtonItemStyleDone;
     } else {
         title = @"Activate";
         style = UIBarButtonItemStyleDone;
@@ -589,7 +642,31 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     }
     if (tint) item.tintColor = tint;
     item.enabled = !self.package.isInstallDisabled || installed || intent != PackageQueueIntentNone;
-    self.navigationItem.rightBarButtonItem = item;
+    self.navigationItem.rightBarButtonItems = @[
+        item,
+        [self favoriteBarButtonItem],
+    ];
+}
+
+- (UIBarButtonItem *)favoriteBarButtonItem
+{
+    BOOL favorite = PackageIdentifierIsFavorite(self.package.identifier);
+    UIBarButtonItem *item = [[UIBarButtonItem alloc]
+        initWithImage:[UIImage systemImageNamed:favorite ? @"star.fill" : @"star"]
+                style:UIBarButtonItemStylePlain
+               target:self
+               action:@selector(didTapFavorite)];
+    item.tintColor = favorite ? UIColor.systemYellowColor : self.view.tintColor;
+    item.accessibilityLabel = favorite ? @"Remove from Favorites" : @"Add to Favorites";
+    return item;
+}
+
+- (void)didTapFavorite
+{
+    NSString *identifier = self.package.identifier;
+    PackageSetIdentifierFavorite(identifier,
+                                 !PackageIdentifierIsFavorite(identifier));
+    [self updateActionButton];
 }
 
 - (void)didTapAction
@@ -614,6 +691,10 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         return;
     }
     if ([self needsLiveWPVideoBeforeInstall]) {
+        [self navigateToSettingsSection];
+        return;
+    }
+    if ([self needsFontBeforeInstall]) {
         [self navigateToSettingsSection];
         return;
     }

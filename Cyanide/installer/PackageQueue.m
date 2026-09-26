@@ -19,11 +19,23 @@ static BOOL PackageRequiresThemerTheme(Package *package)
     return [package.identifier isEqualToString:@"com.darksword.themer"];
 }
 
+static BOOL PackageRequiresFontFamily(Package *package)
+{
+    return package.kind == PackageInstallKindFontChanger;
+}
+
 static BOOL PackageCanQueueInstall(Package *package)
 {
     if (package.kind == PackageInstallKindDirectTool) return NO;
-    if (!PackageRequiresThemerTheme(package)) return YES;
-    return settings_themer_has_selected_theme();
+    if (PackageRequiresThemerTheme(package)) return settings_themer_has_selected_theme();
+    if (PackageRequiresFontFamily(package)) return settings_font_changer_has_regular_font();
+    return YES;
+}
+
+static BOOL PackageRequiresExclusiveRespringEdit(Package *package)
+{
+    return package.kind == PackageInstallKindHideHomeBar ||
+           package.kind == PackageInstallKindFontChanger;
 }
 
 @implementation PackageQueue
@@ -48,12 +60,12 @@ static BOOL PackageCanQueueInstall(Package *package)
 - (NSArray<Package *> *)queuedInstalls
 {
     NSMutableArray<Package *> *out = [self.installs mutableCopy];
-    if ([self hasExplicitHideHomeBarQueued]) {
-        NSMutableArray<Package *> *onlyHomeBar = [NSMutableArray array];
+    if ([self hasExplicitExclusiveRespringEditQueued]) {
+        NSMutableArray<Package *> *onlyExclusive = [NSMutableArray array];
         for (Package *p in out) {
-            if (p.kind == PackageInstallKindHideHomeBar) [onlyHomeBar addObject:p];
+            if (PackageRequiresExclusiveRespringEdit(p)) [onlyExclusive addObject:p];
         }
-        return onlyHomeBar;
+        return onlyExclusive;
     }
 
     for (Package *p in [PackageCatalog allPackages]) {
@@ -69,22 +81,22 @@ static BOOL PackageCanQueueInstall(Package *package)
 
 - (NSArray<Package *> *)queuedUninstalls
 {
-    if (![self hasExplicitHideHomeBarQueued]) return [self.uninstalls copy];
+    if (![self hasExplicitExclusiveRespringEditQueued]) return [self.uninstalls copy];
 
-    NSMutableArray<Package *> *onlyHomeBar = [NSMutableArray array];
+    NSMutableArray<Package *> *onlyExclusive = [NSMutableArray array];
     for (Package *p in self.uninstalls) {
-        if (p.kind == PackageInstallKindHideHomeBar) [onlyHomeBar addObject:p];
+        if (PackageRequiresExclusiveRespringEdit(p)) [onlyExclusive addObject:p];
     }
-    return onlyHomeBar;
+    return onlyExclusive;
 }
 - (NSInteger)pendingCount                { return (NSInteger)(self.queuedInstalls.count + self.queuedUninstalls.count); }
 
 - (PackageQueueIntent)intentForPackage:(Package *)package
 {
     if (package.kind == PackageInstallKindDirectTool) return PackageQueueIntentNone;
-    BOOL hideHomeBarQueued = [self hasExplicitHideHomeBarQueued];
-    BOOL isHideHomeBar = package.kind == PackageInstallKindHideHomeBar;
-    if (hideHomeBarQueued && !isHideHomeBar) return PackageQueueIntentNone;
+    BOOL exclusiveQueued = [self hasExplicitExclusiveRespringEditQueued];
+    BOOL isExclusive = PackageRequiresExclusiveRespringEdit(package);
+    if (exclusiveQueued && !isExclusive) return PackageQueueIntentNone;
     if (!package.isInstalled && !PackageCanQueueInstall(package)) return PackageQueueIntentNone;
     if ([self packageInArray:self.installs matching:package])   return PackageQueueIntentInstall;
     if ([self packageInArray:self.uninstalls matching:package]) return PackageQueueIntentUninstall;
@@ -101,13 +113,13 @@ static BOOL PackageCanQueueInstall(Package *package)
     return nil;
 }
 
-- (BOOL)hasExplicitHideHomeBarQueued
+- (BOOL)hasExplicitExclusiveRespringEditQueued
 {
     for (Package *p in self.installs) {
-        if (p.kind == PackageInstallKindHideHomeBar) return YES;
+        if (PackageRequiresExclusiveRespringEdit(p)) return YES;
     }
     for (Package *p in self.uninstalls) {
-        if (p.kind == PackageInstallKindHideHomeBar) return YES;
+        if (PackageRequiresExclusiveRespringEdit(p)) return YES;
     }
     return NO;
 }
@@ -126,17 +138,17 @@ static BOOL PackageCanQueueInstall(Package *package)
     return count;
 }
 
-- (BOOL)hasQueuedHideHomeBarIntentExcludingPackage:(Package *)package
+- (Package *)queuedExclusiveRespringEditExcludingPackage:(Package *)package
 {
     for (Package *p in self.installs) {
         if (package && [p.identifier isEqualToString:package.identifier]) continue;
-        if (p.kind == PackageInstallKindHideHomeBar) return YES;
+        if (PackageRequiresExclusiveRespringEdit(p)) return p;
     }
     for (Package *p in self.uninstalls) {
         if (package && [p.identifier isEqualToString:package.identifier]) continue;
-        if (p.kind == PackageInstallKindHideHomeBar) return YES;
+        if (PackageRequiresExclusiveRespringEdit(p)) return p;
     }
-    return NO;
+    return nil;
 }
 
 - (BOOL)canQueueIntent:(PackageQueueIntent)intent
@@ -147,17 +159,20 @@ static BOOL PackageCanQueueInstall(Package *package)
     if (!package) return NO;
     if (intent == PackageQueueIntentNone) return YES;
 
-    BOOL isHideHomeBar = package.kind == PackageInstallKindHideHomeBar;
-    if (isHideHomeBar && [self pendingCountExcludingPackage:package] > 0) {
+    BOOL isExclusive = PackageRequiresExclusiveRespringEdit(package);
+    if (isExclusive && [self pendingCountExcludingPackage:package] > 0) {
         if (reason) {
-            *reason = @"Hide Home Bar changes the system home-indicator asset and needs a respring right after. Clear the current queue, run Hide Home Bar by itself, respring, then queue your other tweaks.";
+            *reason = [NSString stringWithFormat:@"%@ changes system files and needs a respring right after. Clear the current queue, run %@ by itself, respring, then queue your other tweaks.",
+                       package.name, package.name];
         }
         return NO;
     }
 
-    if (!isHideHomeBar && [self hasQueuedHideHomeBarIntentExcludingPackage:package]) {
+    Package *queuedExclusive = [self queuedExclusiveRespringEditExcludingPackage:package];
+    if (!isExclusive && queuedExclusive) {
         if (reason) {
-            *reason = @"Hide Home Bar is already waiting in the queue and must run by itself. Apply or remove Hide Home Bar first, then queue other tweaks after the respring.";
+            *reason = [NSString stringWithFormat:@"%@ is already waiting in the queue and must run by itself. Apply or remove %@ first, then queue other tweaks after the respring.",
+                       queuedExclusive.name, queuedExclusive.name];
         }
         return NO;
     }

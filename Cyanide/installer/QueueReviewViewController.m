@@ -152,7 +152,24 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     self.confirmButton.configuration = cfg;
 }
 
-- (UIView *)homeBarWarningHeaderView
+- (BOOL)packageRequiresExclusiveRespringEdit:(Package *)pkg
+{
+    return pkg.kind == PackageInstallKindHideHomeBar ||
+           pkg.kind == PackageInstallKindFontChanger;
+}
+
+- (Package *)queuedExclusiveRespringEditPackage
+{
+    for (Package *pkg in [PackageQueue sharedQueue].queuedInstalls) {
+        if ([self packageRequiresExclusiveRespringEdit:pkg]) return pkg;
+    }
+    for (Package *pkg in [PackageQueue sharedQueue].queuedUninstalls) {
+        if ([self packageRequiresExclusiveRespringEdit:pkg]) return pkg;
+    }
+    return nil;
+}
+
+- (UIView *)exclusiveWarningHeaderView
 {
     CGFloat width = self.tableView.bounds.size.width;
     if (width <= 0.0) width = self.view.bounds.size.width;
@@ -177,14 +194,16 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 
     UILabel *title = [[UILabel alloc] init];
     title.translatesAutoresizingMaskIntoConstraints = NO;
-    title.text = @"Hide Home Bar must run alone";
+    Package *exclusive = [self queuedExclusiveRespringEditPackage];
+    NSString *name = exclusive.name ?: @"This system edit";
+    title.text = [NSString stringWithFormat:@"%@ must run alone", name];
     title.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightBold];
     title.textColor = UIColor.labelColor;
     [card addSubview:title];
 
     UILabel *body = [[UILabel alloc] init];
     body.translatesAutoresizingMaskIntoConstraints = NO;
-    body.text = @"It edits the system home-indicator asset and then needs a respring. Confirm only Hide Home Bar, respring, then queue your other tweaks.";
+    body.text = [NSString stringWithFormat:@"%@ edits system files and then needs a respring. Confirm only this item, respring, then queue your other tweaks.", name];
     body.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightRegular];
     body.textColor = UIColor.secondaryLabelColor;
     body.numberOfLines = 0;
@@ -220,11 +239,11 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 
 - (void)updateHomeBarWarningHeader
 {
-    if (![self queueIncludesHideHomeBar]) {
+    if (![self queueIncludesExclusiveRespringEdit]) {
         self.tableView.tableHeaderView = nil;
         return;
     }
-    self.tableView.tableHeaderView = [self homeBarWarningHeaderView];
+    self.tableView.tableHeaderView = [self exclusiveWarningHeaderView];
 }
 
 - (void)queueChanged:(NSNotification *)note
@@ -241,7 +260,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 
 - (NSArray<Package *> *)reApplyPackages
 {
-    if ([self queueIncludesHideHomeBar]) return @[];
+    if ([self queueIncludesExclusiveRespringEdit]) return @[];
 
     PackageQueue *q = [PackageQueue sharedQueue];
     NSMutableArray<Package *> *out = [NSMutableArray array];
@@ -265,15 +284,9 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     return @[];
 }
 
-- (BOOL)queueIncludesHideHomeBar
+- (BOOL)queueIncludesExclusiveRespringEdit
 {
-    for (Package *pkg in [PackageQueue sharedQueue].queuedInstalls) {
-        if (pkg.kind == PackageInstallKindHideHomeBar) return YES;
-    }
-    for (Package *pkg in [PackageQueue sharedQueue].queuedUninstalls) {
-        if (pkg.kind == PackageInstallKindHideHomeBar) return YES;
-    }
-    return NO;
+    return [self queuedExclusiveRespringEditPackage] != nil;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
@@ -304,6 +317,8 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                 label = @"Silence";
             } else if (allSameKind && commonKind == PackageInstallKindHideHomeBar) {
                 label = @"Hide";
+            } else if (allSameKind && commonKind == PackageInstallKindFontChanger) {
+                label = @"Apply";
             } else {
                 label = @"Activate";
             }
@@ -316,6 +331,8 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
             } else if (allSameKind && commonKind == PackageInstallKindCallRecordingSound) {
                 label = @"Restore";
             } else if (allSameKind && commonKind == PackageInstallKindHideHomeBar) {
+                label = @"Restore";
+            } else if (allSameKind && commonKind == PackageInstallKindFontChanger) {
                 label = @"Restore";
             } else {
                 label = @"Deactivate";
@@ -331,8 +348,8 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 {
     switch ((QueueReviewSection)section) {
         case QueueReviewSectionInstall:
-            if (![self queueIncludesHideHomeBar]) return nil;
-            return @"Hide Home Bar must run by itself because it edits the system home-indicator asset and then needs a respring. Run it alone first, then apply other tweaks after the respring.";
+            if (![self queueIncludesExclusiveRespringEdit]) return nil;
+            return @"This system-file edit must run by itself and needs a respring before other tweaks are applied.";
         case QueueReviewSectionReApply:
             if ([self reApplyPackages].count == 0) return nil;
             return @"These are already installed, not new pending changes. Confirming re-runs the chain so RemoteCall-backed tweaks come back after a force-quit. To stop one from running, deactivate it from the Installer tab, or use Reset All Packages in Settings → Quick Actions.";
@@ -386,6 +403,10 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                     cell.detailTextLabel.text = @"Runs alone; respring required";
                     cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
                     break;
+                case PackageInstallKindFontChanger:
+                    cell.detailTextLabel.text = @"Pending font apply; respring required";
+                    cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
+                    break;
                 default:
                     cell.detailTextLabel.text = @"Activation pending";
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
@@ -408,6 +429,10 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                     break;
                 case PackageInstallKindHideHomeBar:
                     cell.detailTextLabel.text = @"Pending respring restore";
+                    cell.detailTextLabel.textColor = UIColor.systemGreenColor;
+                    break;
+                case PackageInstallKindFontChanger:
+                    cell.detailTextLabel.text = @"Pending font restore; respring required";
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
                 default:
@@ -463,25 +488,27 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 {
     if ([PackageQueue sharedQueue].pendingCount == 0) return;
     NSInteger count = [PackageQueue sharedQueue].pendingCount;
-    BOOL includesHideHomeBar = NO;
+    Package *exclusivePackage = nil;
+    BOOL exclusiveRestore = NO;
     for (Package *pkg in [PackageQueue sharedQueue].queuedInstalls) {
-        if (pkg.kind == PackageInstallKindHideHomeBar) {
-            includesHideHomeBar = YES;
+        if ([self packageRequiresExclusiveRespringEdit:pkg]) {
+            exclusivePackage = pkg;
             break;
         }
     }
-    if (!includesHideHomeBar) {
+    if (!exclusivePackage) {
         for (Package *pkg in [PackageQueue sharedQueue].queuedUninstalls) {
-            if (pkg.kind == PackageInstallKindHideHomeBar) {
-                includesHideHomeBar = YES;
+            if ([self packageRequiresExclusiveRespringEdit:pkg]) {
+                exclusivePackage = pkg;
+                exclusiveRestore = YES;
                 break;
             }
         }
     }
-    if (includesHideHomeBar && count > 1) {
+    if (exclusivePackage && count > 1) {
         UIAlertController *ac = [UIAlertController
-            alertControllerWithTitle:@"Run Hide Home Bar Alone"
-                             message:@"Hide Home Bar edits the system home-indicator asset and needs a respring after it applies. Remove the other pending changes, run Hide Home Bar by itself, then apply other tweaks after the respring."
+            alertControllerWithTitle:[NSString stringWithFormat:@"Run %@ Alone", exclusivePackage.name]
+                             message:[NSString stringWithFormat:@"%@ edits system files and needs a respring after it applies. Remove the other pending changes, run it by itself, then apply other tweaks after the respring.", exclusivePackage.name]
                       preferredStyle:UIAlertControllerStyleAlert];
         [ac addAction:[UIAlertAction actionWithTitle:@"OK"
                                                style:UIAlertActionStyleDefault
@@ -491,7 +518,12 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     }
 
     InstallProgressViewController *vc = [[InstallProgressViewController alloc] init];
-    vc.promptsForHideHomeBarRespring = includesHideHomeBar;
+    vc.promptsForHideHomeBarRespring = exclusivePackage.kind == PackageInstallKindHideHomeBar;
+    vc.promptsForSystemEditRespring = exclusivePackage.kind == PackageInstallKindFontChanger;
+    vc.systemEditRespringTitle = exclusiveRestore ? @"Respring to Restore Fonts?" : @"Respring to Apply Fonts?";
+    vc.systemEditRespringMessage = exclusiveRestore
+        ? @"The stock font backups were restored, but SpringBoard needs to restart before the font cache refreshes."
+        : @"The font change was written, but SpringBoard needs to restart before the font cache refreshes.";
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationAutomatic;
     [self presentViewController:nav animated:YES completion:^{

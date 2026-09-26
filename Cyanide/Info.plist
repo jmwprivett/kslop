@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>kslop uses the local network only when you manually enable its authenticated development Lab Bridge.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -31,7 +33,7 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Cyanide uses your location to show local weather in NiceBar Lite.</string>
+	<string>kslop uses your location to show local weather in NiceBar Lite.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

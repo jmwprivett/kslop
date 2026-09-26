@@ -145,6 +145,9 @@ uint64_t overwrite_system_file(char* to, char* from) {
     }
 
     memcpy(to_mapped, from_mapped, from_file_sz);
+    if (to_file_sz > from_file_sz) {
+        memset((char *)to_mapped + from_file_sz, 0, (size_t)(to_file_sz - from_file_sz));
+    }
     msync(to_mapped, to_file_sz, MS_SYNC);
     
     munmap(from_mapped, from_file_sz);

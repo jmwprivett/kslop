@@ -18,6 +18,7 @@
 #import <dlfcn.h>
 #import <arpa/inet.h>
 #import <ifaddrs.h>
+#import <limits.h>
 #import <math.h>
 #import <net/if.h>
 #import <net/if_dl.h>
@@ -184,7 +185,7 @@ static const char *nbl_kind_name(int kind)
 static const char *nbl_system_item_name(int item)
 {
     switch (item) {
-        case NiceBarLiteSystemBatteryTemp: return "battery-temp";
+        case NiceBarLiteSystemBatteryTemp: return "battery-current";
         case NiceBarLiteSystemFreeRAM: return "free-ram";
         case NiceBarLiteSystemBatteryPercent: return "battery-percent";
         case NiceBarLiteSystemNetworkSpeed: return "network-speed";
@@ -213,26 +214,49 @@ static bool nbl_ensure_iokit_symbols(void)
            pIORegistryEntryCreateCFProperty && pIOObjectRelease;
 }
 
-static double nbl_read_battery_temp_c_local(void)
+static BOOL nbl_read_smart_battery_int_local(CFStringRef key, int64_t *out)
 {
-    if (!nbl_ensure_iokit_symbols()) return -1.0;
+    if (!key || !out || !nbl_ensure_iokit_symbols()) return NO;
     io_service_t svc = pIOServiceGetMatchingService(MACH_PORT_NULL,
                                                     pIOServiceMatching("AppleSmartBattery"));
-    if (svc == MACH_PORT_NULL) return -1.0;
+    if (svc == MACH_PORT_NULL) return NO;
 
-    double tempC = -1.0;
+    BOOL ok = NO;
     CFNumberRef prop = (CFNumberRef)pIORegistryEntryCreateCFProperty(svc,
-                                                                     CFSTR("Temperature"),
+                                                                     key,
                                                                      kCFAllocatorDefault, 0);
     if (prop) {
         int64_t raw = 0;
-        if (CFNumberGetValue(prop, kCFNumberSInt64Type, &raw)) {
-            tempC = (double)raw / 100.0;
+        if (CFGetTypeID(prop) == CFNumberGetTypeID() &&
+            CFNumberGetValue(prop, kCFNumberSInt64Type, &raw)) {
+            *out = raw;
+            ok = YES;
         }
         CFRelease(prop);
     }
     pIOObjectRelease(svc);
-    return tempC;
+    return ok;
+}
+
+static BOOL nbl_read_battery_current_ma_local(int *outMA)
+{
+    if (!outMA) return NO;
+    CFStringRef keys[] = {
+        CFSTR("InstantAmperage"),
+        CFSTR("Amperage"),
+        CFSTR("BatteryCurrent"),
+        CFSTR("Current"),
+    };
+    for (NSUInteger i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        int64_t raw = 0;
+        if (nbl_read_smart_battery_int_local(keys[i], &raw)) {
+            if (raw > INT_MAX) raw = INT_MAX;
+            if (raw < INT_MIN) raw = INT_MIN;
+            *outMA = (int)raw;
+            return YES;
+        }
+    }
+    return NO;
 }
 
 static bool nbl_ensure_remote_iokit_loaded(void)
@@ -249,24 +273,24 @@ static bool nbl_ensure_remote_iokit_loaded(void)
     return remoteLoaded;
 }
 
-static double nbl_read_battery_temp_c_remote(void)
+static BOOL nbl_read_smart_battery_int_remote(const char *keyName, int64_t *out)
 {
-    if (!nbl_ensure_remote_iokit_loaded()) return -1.0;
+    if (!keyName || !out || !nbl_ensure_remote_iokit_loaded()) return NO;
 
     uint64_t name = r_alloc_str("AppleSmartBattery");
-    if (!name) return -1.0;
+    if (!name) return NO;
     uint64_t dict = do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIOServiceMatching, "IOServiceMatching",
                                                name, 0, 0, 0, 0, 0, 0, 0);
     r_free(name);
-    if (!dict) return -1.0;
+    if (!dict) return NO;
 
     uint64_t svc = do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIOServiceGetMatchingService,
                                               "IOServiceGetMatchingService",
                                               MACH_PORT_NULL, dict, 0, 0, 0, 0, 0, 0);
-    if (!svc) return -1.0;
+    if (!svc) return NO;
 
-    double tempC = -1.0;
-    uint64_t key = r_cfstr("Temperature");
+    BOOL ok = NO;
+    uint64_t key = r_cfstr(keyName);
     if (key) {
         uint64_t prop = do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIORegistryEntryCreateCFProperty,
                                                    "IORegistryEntryCreateCFProperty",
@@ -275,10 +299,10 @@ static double nbl_read_battery_temp_c_remote(void)
             uint64_t scratch = r_dlsym_call(R_TIMEOUT, "malloc", 8, 0, 0, 0, 0, 0, 0, 0);
             if (scratch) {
                 remote_write64(scratch, 0);
-                uint64_t ok = r_dlsym_call(R_TIMEOUT, "CFNumberGetValue", prop, 4, scratch, 0, 0, 0, 0, 0);
-                if (ok) {
-                    int64_t raw = (int64_t)remote_read64(scratch);
-                    tempC = (double)raw / 100.0;
+                uint64_t got = r_dlsym_call(R_TIMEOUT, "CFNumberGetValue", prop, 4, scratch, 0, 0, 0, 0, 0);
+                if (got) {
+                    *out = (int64_t)remote_read64(scratch);
+                    ok = YES;
                 }
                 r_free(scratch);
             }
@@ -289,50 +313,89 @@ static double nbl_read_battery_temp_c_remote(void)
 
     do_remote_call_stable_addr(R_TIMEOUT, (uint64_t)pIOObjectRelease, "IOObjectRelease",
                                svc, 0, 0, 0, 0, 0, 0, 0);
-    return tempC;
+    return ok;
 }
 
-static double nbl_read_battery_temp_c(void)
+static BOOL nbl_read_battery_current_ma_remote(int *outMA)
+{
+    if (!outMA) return NO;
+    const char *keys[] = {
+        "InstantAmperage",
+        "Amperage",
+        "BatteryCurrent",
+        "Current",
+    };
+    for (NSUInteger i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        int64_t raw = 0;
+        if (nbl_read_smart_battery_int_remote(keys[i], &raw)) {
+            if (raw > INT_MAX) raw = INT_MAX;
+            if (raw < INT_MIN) raw = INT_MIN;
+            *outMA = (int)raw;
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static BOOL nbl_read_battery_current_ma(int *outMA)
 {
     uint64_t startUs = nbl_now_us();
     uint64_t localStartUs = nbl_now_us();
-    static double cachedTempC = -1.0;
+    static int cachedMA = 0;
+    static BOOL hasCachedMA = NO;
     static time_t lastRemoteRead = 0;
 
-    double localTempC = nbl_read_battery_temp_c_local();
+    int localMA = 0;
+    BOOL localOK = nbl_read_battery_current_ma_local(&localMA);
     unsigned long long localMs = nbl_elapsed_ms_since(localStartUs);
-    if (localTempC > 0.0) {
-        cachedTempC = localTempC;
+    if (localOK) {
+        cachedMA = localMA;
+        hasCachedMA = YES;
+        if (outMA) *outMA = cachedMA;
         unsigned long long totalMs = nbl_elapsed_ms_since(startUs);
         if (nbl_should_trace_apply() || totalMs >= kNBLSlowLogMs) {
-            NBL_DEBUG_LOG("[NICEBARLITE][TEMP] source=local value=%.1fC local=%llums total=%llums\n",
-                     cachedTempC, localMs, totalMs);
+            NBL_DEBUG_LOG("[NICEBARLITE][CURRENT] source=local value=%dmA local=%llums total=%llums\n",
+                          cachedMA, localMs, totalMs);
         }
-        return cachedTempC;
+        return YES;
     }
 
     time_t now = time(NULL);
-    if (lastRemoteRead != 0 && now >= lastRemoteRead && (now - lastRemoteRead) < 60) {
+    if (hasCachedMA && lastRemoteRead != 0 && now >= lastRemoteRead && (now - lastRemoteRead) < 60) {
+        if (outMA) *outMA = cachedMA;
         unsigned long long totalMs = nbl_elapsed_ms_since(startUs);
         if (nbl_should_trace_apply() || totalMs >= kNBLSlowLogMs) {
-            NBL_DEBUG_LOG("[NICEBARLITE][TEMP] source=cache value=%.1fC local=%llums total=%llums\n",
-                     cachedTempC, localMs, totalMs);
+            NBL_DEBUG_LOG("[NICEBARLITE][CURRENT] source=cache value=%dmA local=%llums total=%llums\n",
+                          cachedMA, localMs, totalMs);
         }
-        return cachedTempC;
+        return YES;
     }
 
     lastRemoteRead = now;
     uint64_t remoteStartUs = nbl_now_us();
-    double remoteTempC = nbl_read_battery_temp_c_remote();
+    int remoteMA = 0;
+    BOOL remoteOK = nbl_read_battery_current_ma_remote(&remoteMA);
     unsigned long long remoteMs = nbl_elapsed_ms_since(remoteStartUs);
-    if (remoteTempC > 0.0) cachedTempC = remoteTempC;
+    if (remoteOK) {
+        cachedMA = remoteMA;
+        hasCachedMA = YES;
+        if (outMA) *outMA = cachedMA;
+    }
     unsigned long long totalMs = nbl_elapsed_ms_since(startUs);
     if (nbl_should_trace_apply() || totalMs >= kNBLSlowLogMs) {
-        NBL_DEBUG_LOG("[NICEBARLITE][TEMP] source=%s value=%.1fC local=%llums remote=%llums total=%llums\n",
-                 remoteTempC > 0.0 ? "remote" : "unavailable",
-                 cachedTempC, localMs, remoteMs, totalMs);
+        NBL_DEBUG_LOG("[NICEBARLITE][CURRENT] source=%s value=%dmA local=%llums remote=%llums total=%llums\n",
+                      remoteOK ? "remote" : "unavailable",
+                      cachedMA, localMs, remoteMs, totalMs);
     }
-    return cachedTempC;
+    return remoteOK || hasCachedMA;
+}
+
+static NSString *nbl_battery_current_text(void)
+{
+    int ma = 0;
+    if (!nbl_read_battery_current_ma(&ma)) return @"--";
+    if (ma > 0) return [NSString stringWithFormat:@"+%dmA", ma];
+    return [NSString stringWithFormat:@"%dmA", ma];
 }
 
 static double nbl_read_free_ram_gb(void)
@@ -844,10 +907,8 @@ static NSString *nbl_system_text(int item, bool celsius, const char *language)
 {
     switch (item) {
         case NiceBarLiteSystemBatteryTemp: {
-            double tempC = nbl_read_battery_temp_c();
-            if (tempC <= 0.0) return @"--";
-            double v = celsius ? tempC : (tempC * 9.0 / 5.0 + 32.0);
-            return [NSString stringWithFormat:@"%.1f%c", v, celsius ? 'C' : 'F'];
+            (void)celsius;
+            return nbl_battery_current_text();
         }
         case NiceBarLiteSystemFreeRAM: {
             double ram = nbl_read_free_ram_gb();

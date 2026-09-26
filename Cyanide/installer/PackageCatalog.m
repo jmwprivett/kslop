@@ -31,6 +31,7 @@ static const NSInteger kSecGravityLite      = 21;
 static const NSInteger kSecAppSwitcherGrid  = 22;
 static const NSInteger kSecIPADecryptor     = 23;
 static const NSInteger kSecFastLockXLite    = 24;
+static const NSInteger kSecFontChanger      = 25;
 
 + (NSArray<Package *> *)allPackages
 {
@@ -59,8 +60,8 @@ static const NSInteger kSecFastLockXLite    = 24;
 
         Package *statBar = [[Package alloc] initWithIdentifier:@"com.darksword.statbar"
                                            name:@"StatBar"
-                               shortDescription:@"Battery temperature + free RAM overlay"
-                                longDescription:@"Installs an overlay window in SpringBoard that shows live battery temperature and free RAM next to the system status bar. Refresh timing is adjustable so you can trade live updates for battery life.\n\nConfigure units, visible metrics, and refresh speed in the Settings tab."
+                               shortDescription:@"Battery current + free RAM overlay"
+                                longDescription:@"Installs an overlay window in SpringBoard that shows live battery charge/discharge current and free RAM next to the system status bar. Refresh timing is adjustable so you can trade live updates for battery life.\n\nConfigure visible metrics and refresh speed in the Settings tab."
                                         version:version
                                          author:@"zeroxjf"
                                        category:@"Status Bar"
@@ -143,7 +144,7 @@ static const NSInteger kSecFastLockXLite    = 24;
         Package *axon = [[Package alloc] initWithIdentifier:@"com.darksword.axonlite"
                                            name:@"Axon Lite"
                                shortDescription:@"Group Notification Center requests by app"
-                                longDescription:@"Groups visible Notification Center requests by app in a SpringBoard overlay and filters duplicates while Cyanide keeps the RemoteCall session alive.\n\nNo extra configuration."
+                                longDescription:@"Groups visible Notification Center requests by app in a SpringBoard overlay and filters duplicates while kslop keeps the RemoteCall session alive.\n\nNo extra configuration."
                                         version:version
                                          author:@"zeroxjf"
                                        category:@"Beta"
@@ -151,7 +152,7 @@ static const NSInteger kSecFastLockXLite    = 24;
                                            kind:PackageInstallKindToggle
                                      enabledKey:kSettingsAxonLiteEnabled
                                           isNew:YES];
-        axon.unstableWarning = @"⚠️ Experimental: work-in-progress. Expect SpringBoard crashes, dropped notifications, layout glitches, and breakage between Cyanide builds. Don't rely on it for anything important.";
+        axon.unstableWarning = @"⚠️ Experimental: work-in-progress. Expect SpringBoard crashes, dropped notifications, layout glitches, and breakage between kslop builds. Don't rely on it for anything important.";
 
 #if CYANIDE_PRIVATE_TWEAKS_AVAILABLE
         Package *typeBanner = [[Package alloc] initWithIdentifier:@"com.darksword.typebanner"
@@ -173,7 +174,7 @@ static const NSInteger kSecFastLockXLite    = 24;
         Package *notificationIsland = [[Package alloc] initWithIdentifier:@"com.darksword.notificationisland"
                                            name:@"Notification Island"
                                shortDescription:@"Mirror incoming banners into the Dynamic Island"
-                                longDescription:@"Experimental Dynamic Island notification route. Watches SpringBoard's active banner request over the shared RemoteCall session, then mirrors the title/body into Cyanide's ActivityKit Live Activity.\n\nNo extra configuration."
+                                longDescription:@"Experimental Dynamic Island notification route. Watches SpringBoard's active banner request over the shared RemoteCall session, then mirrors the title/body into kslop's ActivityKit Live Activity.\n\nNo extra configuration."
                                         version:version
                                          author:@"zeroxjf"
                                        category:@"In Development"
@@ -213,7 +214,7 @@ static const NSInteger kSecFastLockXLite    = 24;
             @"• Tap two apps to launch them side-by-side.\n"
             @"• Drag the top bar to move; drag any corner to resize.\n"
             @"• X in the top-left of a window closes it.\n"
-            @"• Gear in the picker tray jumps back to Cyanide settings.\n\n"
+            @"• Gear in the picker tray jumps back to kslop settings.\n\n"
             @"First Run is slow. The picker has to enumerate every installed app over RemoteCall and build a tile per app — expect 1-2 minutes on a fresh install. Re-Runs reuse the cache and are fast.\n\n"
             @"Rough edges:\n"
             @"• Touch routing into hosted apps isn't wired — windows are for viewing/switching, not scrolling or typing.\n"
@@ -246,23 +247,23 @@ static const NSInteger kSecFastLockXLite    = 24;
         locationSim.unstableWarning = @"Beta: requires Apple Maps installed and set up. Changes CoreLocation's active simulation state — may affect time zone, date/time, and other location-tied behavior. Some apps and services prohibit or detect simulated locations. Only use this if you know what you're doing.";
 
         Package *snowboardLite = [[Package alloc] initWithIdentifier:@"com.darksword.snowboardlite"
-                                           name:@"SnowBoard Lite"
-                               shortDescription:@"Local SnowBoard-style icon themes"
-                                longDescription:@"Imports SnowBoard/IconBundles themes into a local library and applies the selected theme through Cyanide's icon replacement pipeline. Supports the bundled iOS 6 theme and local folder imports.\n\nSnowBoard Lite is the main icon-theme entry point in Cyanide.\n\nPorted from d1y/cyanide-ios."
+                                           name:@"SnowBoard Remix"
+                               shortDescription:@"Permanently theme installed app icons"
+                                longDescription:@"Imports SnowBoard/IconBundles themes into a local library, scans installed launchable apps, and applies the selected theme through independent per-app recovery transactions. Restore All Icons returns every journaled app to its exact pre-theme state.\n\nSnowBoard Remix keeps the existing Documents/SnowBoardLite library and manifest compatible with older kslop builds."
                                         version:version
                                          author:@"d1y"
                                        category:@"Beta"
                                      symbolName:@"square.stack.3d.up.fill"
-                                          kind:PackageInstallKindToggle
-                                     enabledKey:kSettingsSnowBoardLiteEnabled
+                                          kind:PackageInstallKindDirectTool
+                                     enabledKey:nil
                                           isNew:YES];
         snowboardLite.settingsSection = kSecSnowBoardLite;
-        snowboardLite.unstableWarning = @"Preview: import or select a SnowBoard Lite theme before applying.";
+        snowboardLite.unstableWarning = @"Preview: select or import a theme, scan installed apps, then apply it permanently. Each app is journaled independently so a failed app does not discard recovery data for other apps.";
 
         Package *liveWP = [[Package alloc] initWithIdentifier:@"com.darksword.livewp"
                                            name:@"LiveWP"
                                shortDescription:@"Video wallpaper for Home and Lock Screen"
-                                longDescription:@"Plays a selected MP4/MOV/M4V video behind SpringBoard's home and lock screen windows while Cyanide keeps the RemoteCall session alive.\n\nPorted from d1y/cyanide-ios."
+                                longDescription:@"Plays a selected MP4/MOV/M4V video behind SpringBoard's home and lock screen windows while kslop keeps the RemoteCall session alive.\n\nPorted from d1y/cyanide-ios."
                                         version:version
                                          author:@"d1y"
                                        category:@"Beta"
@@ -305,9 +306,9 @@ static const NSInteger kSecFastLockXLite    = 24;
         gravityLite.settingsSection = kSecGravityLite;
         gravityLite.unstableWarning = @"Beta: RemoteCall-only physics can be reset by SpringBoard relayouts such as page swipes, rotations, folder transitions, or resprings. Use Restore Icon Layout if icons stay displaced.";
         gravityLite.knownIssues = @[
-            @"To disable, use the App Switcher to return to Cyanide and deactivate Gravity Lite. There is no other way to stop it right now.",
+            @"To disable, use the App Switcher to return to kslop and deactivate Gravity Lite. There is no other way to stop it right now.",
             @"Touch input does not register on displaced icons yet. Forwarding taps in this environment is a major WIP.",
-            @"Install is slow as hell. WIP. Cyanide has to capture every visible icon and widget before physics start.",
+            @"Install is slow as hell. WIP. kslop has to capture every visible icon and widget before physics start.",
             @"Page swipes, folder opens, or SpringBoard relayouts may stop the effect. Run Gravity again.",
         ];
 
@@ -329,7 +330,7 @@ static const NSInteger kSecFastLockXLite    = 24;
         Package *fastLockXLite = [[Package alloc] initWithIdentifier:@"com.darksword.fastlockx-lite"
                                            name:@"FastLockX Lite"
                                shortDescription:@"Face ID retry + unlock controls"
-                                longDescription:@"RemoteCall-only port of the usable FastLockX primitives recovered from the iOS 15 tweak by Artem Kasper.\n\nCredits: original FastLockX by Artem Kasper; Cyanide FastLockX Lite port by zeroxjf.\n\nIt can pulse SpringBoard's biometric retry path, ask the iOS 26 biometric coordinator to start a Mesa/Face ID unlock, and send the original Lock Screen unlock request as a fallback. The Always On button keeps those retry/unlock requests armed with SpringBoard timers so pickup-to-unlock can work after Cyanide's 15-second test window ends.\n\nUse Disable, Clean Up, or a respring to stop the timers."
+                                longDescription:@"RemoteCall-only port of the usable FastLockX primitives recovered from the iOS 15 tweak by Artem Kasper.\n\nCredits: original FastLockX by Artem Kasper; kslop FastLockX Lite port by zeroxjf.\n\nIt can pulse SpringBoard's biometric retry path, ask the iOS 26 biometric coordinator to start a Mesa/Face ID unlock, and send the original Lock Screen unlock request as a fallback. The Always On button keeps those retry/unlock requests armed with SpringBoard timers so pickup-to-unlock can work after kslop's 15-second test window ends.\n\nUse Disable, Clean Up, or a respring to stop the timers."
                                         version:version
                                          author:@"Artem Kasper / zeroxjf"
                                        category:@"Experimental"
@@ -354,12 +355,12 @@ static const NSInteger kSecFastLockXLite    = 24;
                                      enabledKey:nil
                                           isNew:YES];
         nanoRegistry.settingsSection = kSecNanoRegistry;
-        nanoRegistry.unstableWarning = @"Warning: modifies a local NanoRegistry MobileAsset. Cyanide saves a .cyanide.bak backup beside the original, but system-file edits can fail or require a respring/reboot. Apply or remove this override at your own risk.";
+        nanoRegistry.unstableWarning = @"Warning: modifies a local NanoRegistry MobileAsset. kslop saves a .cyanide.bak backup beside the original, but system-file edits can fail or require a respring/reboot. Apply or remove this override at your own risk.";
 
         Package *callRecordingSound = [[Package alloc] initWithIdentifier:@"com.darksword.callrecording-sound"
                                            name:@"Call Recording Sound"
                                shortDescription:@"Silence disclosure start/stop sounds"
-                                longDescription:@"Replaces the CallServices StartDisclosureWithTone and StopDisclosure audio files with Cyanide's bundled silent payloads.\n\nCredits: YangJiiii (@duongduong0908) for the EnsWilde and Disable Call Recording BookRestore reference tools. @Little_34306 is credited by the original projects for the Disable Call Recording concept. Cyanide port, KRW-backed implementation, and generated replacement silent audio assets by zeroxjf.\n\nSystem-file warning: this modifies files under /var/mobile/Library/CallServices/Greetings/default. Cyanide backs up the first originals into its app container, but system file replacement can fail, partially apply, or require a respring/reboot to settle.\n\nLegal note: call-recording disclosure sounds may exist to satisfy consent, notification, or privacy-law requirements in some places. You are responsible for understanding and following the laws that apply to you.\n\nThis port does not use the old Books/BookRestore/sparserestore path. Cyanide runs KRW, unlocks local /private/var write access, then writes directly to the CallServices files.\n\nUse Restore Original Sounds to write Cyanide's backups back when present. You apply or restore this tweak at your own risk."
+                                longDescription:@"Replaces the CallServices StartDisclosureWithTone and StopDisclosure audio files with kslop's bundled silent payloads.\n\nCredits: YangJiiii (@duongduong0908) for the EnsWilde and Disable Call Recording BookRestore reference tools. @Little_34306 is credited by the original projects for the Disable Call Recording concept. kslop port, KRW-backed implementation, and generated replacement silent audio assets by zeroxjf.\n\nSystem-file warning: this modifies files under /var/mobile/Library/CallServices/Greetings/default. kslop backs up the first originals into its app container, but system file replacement can fail, partially apply, or require a respring/reboot to settle.\n\nLegal note: call-recording disclosure sounds may exist to satisfy consent, notification, or privacy-law requirements in some places. You are responsible for understanding and following the laws that apply to you.\n\nThis port does not use the old Books/BookRestore/sparserestore path. kslop runs KRW, unlocks local /private/var write access, then writes directly to the CallServices files.\n\nUse Restore Original Sounds to write kslop's backups back when present. You apply or restore this tweak at your own risk."
                                         version:version
                                          author:@"YangJiiii (@duongduong0908) / zeroxjf"
                                        category:@"Beta"
@@ -368,12 +369,12 @@ static const NSInteger kSecFastLockXLite    = 24;
                                      enabledKey:nil
                                           isNew:YES];
         callRecordingSound.experimental = NO;
-        callRecordingSound.unstableWarning = @"Beta: persistent CallServices system-file replacement. Disclosure sounds may be legally required where you live; you are responsible for your use and apply this at your own risk. Use Restore Original Sounds before removing Cyanide if you want Cyanide's backups written back.";
+        callRecordingSound.unstableWarning = @"Beta: persistent CallServices system-file replacement. Disclosure sounds may be legally required where you live; you are responsible for your use and apply this at your own risk. Use Restore Original Sounds before removing kslop if you want kslop's backups written back.";
 
         Package *hideHomeBar = [[Package alloc] initWithIdentifier:@"com.darksword.hide-home-bar"
                                            name:@"Hide Home Bar"
                                shortDescription:@"Hide the bottom home indicator"
-                                longDescription:@"Zeros the first page of /System/Library/PrivateFrameworks/MaterialKit.framework/Assets.car using a DirtyZero-style file-backed page zero, which hides the bottom home indicator after SpringBoard reloads assets.\n\nRun Hide Home Bar by itself, then respring so SpringBoard refreshes the asset cache. To bring the home indicator back, choose Restore Home Bar and respring again. Other live SpringBoard tweaks, such as App Switcher Grid, should be applied in a separate run after the respring.\n\nCredits: C4ndyF1sh/ZeroCalories for the Home Bar target and jailbreakdotparty/dirtyZero for the page-zeroing idea. Cyanide port by zeroxjf."
+                                longDescription:@"Zeros the first page of /System/Library/PrivateFrameworks/MaterialKit.framework/Assets.car using a DirtyZero-style file-backed page zero, which hides the bottom home indicator after SpringBoard reloads assets.\n\nRun Hide Home Bar by itself, then respring so SpringBoard refreshes the asset cache. To bring the home indicator back, choose Restore Home Bar and respring again. Other live SpringBoard tweaks, such as App Switcher Grid, should be applied in a separate run after the respring.\n\nCredits: C4ndyF1sh/ZeroCalories for the Home Bar target and jailbreakdotparty/dirtyZero for the page-zeroing idea. kslop port by zeroxjf."
                                         version:version
                                          author:@"C4ndyF1sh / jailbreakdotparty / zeroxjf"
                                        category:@"Beta"
@@ -382,6 +383,20 @@ static const NSInteger kSecFastLockXLite    = 24;
                                      enabledKey:nil
                                           isNew:YES];
         hideHomeBar.unstableWarning = @"Beta: DirtyZero-style system asset page zeroing. Run by itself, then respring after hiding. To restore the home indicator, choose Restore Home Bar and respring.";
+
+        Package *fontChanger = [[Package alloc] initWithIdentifier:@"com.darksword.font-changer"
+                                           name:@"Font Changer"
+                               shortDescription:@"Import and apply a local system font family"
+                                longDescription:@"Imports a local Regular / Italic / Mono font family from Files, then overwrites the matching iOS system font files using kslop's KRW-backed system-file overwrite helper.\n\nRegular is required. Italic and Mono are optional. Replacement files must be no larger than the target system font file, matching Lara's in-place overwrite constraint. kslop saves stock font backups in Documents before the first overwrite and can restore those backups.\n\nRun Font Changer by itself, then respring so SpringBoard and apps refresh font caches. Use Restore Stock Fonts to write kslop's saved backups back."
+                                        version:version
+                                         author:@"rooootdev / zeroxjf"
+                                       category:@"System"
+                                     symbolName:@"textformat"
+                                           kind:PackageInstallKindFontChanger
+                                     enabledKey:nil
+                                          isNew:YES];
+        fontChanger.settingsSection = kSecFontChanger;
+        fontChanger.unstableWarning = @"Warning: persistent system font replacement. kslop backs up stock fonts first, but bad or incompatible fonts can cause broken text rendering until stock backups are restored and the device resprings.";
 
         Package *otaBlock = [[Package alloc] initWithIdentifier:@"com.darksword.ota-block"
                                            name:@"OTA Updates"
@@ -491,6 +506,7 @@ static const NSInteger kSecFastLockXLite    = 24;
 #endif
             axon,
             nanoRegistry,
+            fontChanger,
             callRecordingSound,
             hideHomeBar,
 #if CYANIDE_PRIVATE_TWEAKS_AVAILABLE

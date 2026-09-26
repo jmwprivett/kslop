@@ -36,7 +36,7 @@ static NSString *CNDIconBaseName(NSString *name)
                  @"ic_launcher",
                  @"icon",
              ]) {
-            if ([base hasSuffix:suffix]) {
+            if ([base.lowercaseString hasSuffix:suffix]) {
                 base = [base substringToIndex:base.length - suffix.length];
                 changed = YES;
             }
@@ -374,6 +374,9 @@ static NSDictionary<NSString *, NSString *> *CNDAppIconAliases(void)
             @"org.telegram.messenger": @"ph.telegra.Telegraph",
             @"signal": @"org.whispersystems.signal",
             @"org.thoughtcrime.securesms": @"org.whispersystems.signal",
+            @"org.signal.messenger": @"org.whispersystems.signal",
+            @"org.signal.signal": @"org.whispersystems.signal",
+            @"org.signalapp.signal": @"org.whispersystems.signal",
             @"discord": @"com.hammerandchisel.discord",
             @"com.discord": @"com.hammerandchisel.discord",
             @"reddit": @"com.reddit.Reddit",
@@ -387,6 +390,8 @@ static NSDictionary<NSString *, NSString *> *CNDAppIconAliases(void)
             @"com.linkedin.android": @"com.linkedin.LinkedIn",
             @"pinterest": @"pinterest",
             @"com.pinterest": @"pinterest",
+            @"com.pinterest.pinterest": @"pinterest",
+            @"pinterest.pinterest": @"pinterest",
             @"tumblr": @"com.tumblr.tumblr",
             @"com.tumblr": @"com.tumblr.tumblr",
 
@@ -552,6 +557,26 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *CNDAppIconMultiAliases(v
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         aliases = @{
+            @"pinterest": @[
+                @"pinterest",
+                @"com.pinterest",
+                @"com.pinterest.Pinterest",
+            ],
+            @"com.pinterest": @[
+                @"pinterest",
+                @"com.pinterest",
+                @"com.pinterest.Pinterest",
+            ],
+            @"com.pinterest.pinterest": @[
+                @"pinterest",
+                @"com.pinterest",
+                @"com.pinterest.Pinterest",
+            ],
+            @"pinterest.pinterest": @[
+                @"pinterest",
+                @"com.pinterest",
+                @"com.pinterest.Pinterest",
+            ],
             @"ph.telegra.telegraph": @[
                 @"ph.telegra.Telegraph",
                 @"app.nicegram",
@@ -566,6 +591,36 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *CNDAppIconMultiAliases(v
                 @"ph.telegra.Telegraph",
                 @"app.nicegram",
                 @"app.swiftgram.ios",
+            ],
+            @"signal": @[
+                @"org.whispersystems.signal",
+                @"org.signal.messenger",
+                @"org.signal.Signal",
+                @"org.signalapp.Signal",
+            ],
+            @"org.whispersystems.signal": @[
+                @"org.whispersystems.signal",
+                @"org.signal.messenger",
+                @"org.signal.Signal",
+                @"org.signalapp.Signal",
+            ],
+            @"org.signal.messenger": @[
+                @"org.whispersystems.signal",
+                @"org.signal.messenger",
+                @"org.signal.Signal",
+                @"org.signalapp.Signal",
+            ],
+            @"org.signal.signal": @[
+                @"org.whispersystems.signal",
+                @"org.signal.messenger",
+                @"org.signal.Signal",
+                @"org.signalapp.Signal",
+            ],
+            @"org.signalapp.signal": @[
+                @"org.whispersystems.signal",
+                @"org.signal.messenger",
+                @"org.signal.Signal",
+                @"org.signalapp.Signal",
             ],
             @"me.bakumon.moneykeeper": @[
                 @"me.bakumon.moneykeeper",

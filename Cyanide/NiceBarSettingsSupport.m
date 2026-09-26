@@ -328,7 +328,7 @@ typedef NS_ENUM(NSInteger, CyanideNiceBarTrafficRange) {
 NSString *CyanideNiceBarSystemName(NSInteger item)
 {
     switch (item) {
-        case NiceBarLiteSystemBatteryTemp: return @"Battery temp";
+        case NiceBarLiteSystemBatteryTemp: return @"Battery current";
         case NiceBarLiteSystemFreeRAM: return @"Free RAM";
         case NiceBarLiteSystemBatteryPercent: return @"Battery %";
         case NiceBarLiteSystemNetworkSpeed: return @"Network speed";
@@ -346,7 +346,7 @@ NSString *CyanideNiceBarSystemName(NSInteger item)
 NSString *CyanideNiceBarSystemDescription(NSInteger item)
 {
     switch (item) {
-        case NiceBarLiteSystemBatteryTemp: return @"Battery sensor temperature.";
+        case NiceBarLiteSystemBatteryTemp: return @"Live battery charge/discharge current in mA.";
         case NiceBarLiteSystemFreeRAM: return @"Currently free memory.";
         case NiceBarLiteSystemBatteryPercent: return @"Current battery percentage.";
         case NiceBarLiteSystemNetworkSpeed: return @"Live download and upload speed.";

@@ -12,6 +12,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
+#include <limits.h>
 
 #define LOG_MAX_LINES   50000
 #define LOG_TRIM_TO     30000
@@ -212,7 +213,7 @@ void log_session_begin(void) {
         time_t t = time(NULL);
         struct tm tm; localtime_r(&t, &tm);
         fprintf(log_file,
-                "# Cyanide chain session %04d-%02d-%02d %02d:%02d:%02d\n",
+                "# kslop chain session %04d-%02d-%02d %02d:%02d:%02d\n",
                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                 tm.tm_hour, tm.tm_min, tm.tm_sec);
         fflush(log_file);
@@ -309,6 +310,13 @@ static NSString *log_snapshot_from(int fromLine, int *outTotal, int *outTrimGen)
     return s;
 }
 
+static int log_current_line_count(void) {
+    pthread_mutex_lock(&log_mutex);
+    int total = log_count;
+    pthread_mutex_unlock(&log_mutex);
+    return total;
+}
+
 // ---------------------------------------------------------------------------
 // Color map
 
@@ -316,7 +324,7 @@ static UIColor *colorForLogLine(NSString *line) {
     // ASCII banner (cyan bottle art)
     if ([line containsString:@"╭"] || [line containsString:@"╰"] ||
         [line containsString:@"│"] || [line containsString:@"├"] ||
-        [line containsString:@"C Y A N I D E"])
+        [line containsString:@"K S L O P"])
         return [UIColor colorWithRed:0.00 green:0.90 blue:0.95 alpha:1.0]; // bright cyan
 
     // Strip timestamp prefix if present: "[HH:MM:SS.mmm] " -> check what follows
@@ -339,6 +347,18 @@ static UIColor *colorForLogLine(NSString *line) {
     if ([content hasPrefix:@"[SESSION]"])     return [UIColor colorWithRed:0.38 green:0.68 blue:0.98 alpha:1.0]; // bright sky blue
     if ([content hasPrefix:@"[CLEANUP]"])     return [UIColor colorWithRed:0.82 green:0.72 blue:0.56 alpha:1.0]; // warm tan
     if ([content hasPrefix:@"[LOG]"])         return [UIColor colorWithRed:0.60 green:0.62 blue:0.68 alpha:1.0]; // muted gray
+
+    // SnowBoard Remix: batch work is pink; cache/timing and other concise
+    // operational context are yellow so they remain distinct from the work
+    // stream without looking like warnings.
+    if ([content hasPrefix:@"[COLD START]"] ||
+        [content hasPrefix:@"[SBR_CACHE]"] ||
+        [content hasPrefix:@"[SBR_TIME]"] ||
+        [content hasPrefix:@"[SBR_INFO]"] ||
+        [content hasPrefix:@"[SBR_ALPHA]"])
+        return [UIColor colorWithRed:1.00 green:0.86 blue:0.32 alpha:1.0]; // information yellow
+    if ([content hasPrefix:@"[SBR]"])
+        return [UIColor colorWithRed:0.98 green:0.46 blue:0.92 alpha:1.0]; // vivid magenta-pink
 
     // Verbose subsystem labels
     if ([content hasPrefix:@"[SETTINGS]"])    return [UIColor colorWithRed:0.72 green:0.88 blue:1.00 alpha:1.0]; // ice blue (distinct from SESSION)
@@ -423,7 +443,14 @@ static UIColor *colorForLogLine(NSString *line) {
     if (self.window) {
         _renderedLineCount = 0;
         _followTail = YES;
-        [self refreshLogTextForced:YES];
+        // Let the modal finish its presentation before the first attributed
+        // text/layout pass.  This matters when a prior operation left a large
+        // ring buffer; the initialDisplayLineLimit bounds that first pass.
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (strongSelf.window) [strongSelf refreshLogTextForced:YES];
+        });
     }
 }
 
@@ -508,7 +535,17 @@ static UIColor *colorForLogLine(NSString *line) {
 }
 
 - (void)refreshLogTextForced:(BOOL)force {
-    if (force) _renderedLineCount = 0;
+    BOOL initialTail = self.initialDisplayLineLimit > 0 &&
+        _renderedLineCount == 0 && self.textStorage.length == 0;
+    if (force && !initialTail) _renderedLineCount = 0;
+
+    if (initialTail) {
+        int total = log_current_line_count();
+        NSUInteger limit = self.initialDisplayLineLimit;
+        int start = total > (int)MIN(limit, (NSUInteger)INT_MAX)
+            ? total - (int)MIN(limit, (NSUInteger)INT_MAX) : 0;
+        _renderedLineCount = start;
+    }
 
     int totalLines = 0, trimGen = 0;
     NSString *newText = log_snapshot_from(_renderedLineCount, &totalLines, &trimGen);
@@ -516,9 +553,12 @@ static UIColor *colorForLogLine(NSString *line) {
     // Buffer was trimmed: old rendered content is stale — full rebuild.
     BOOL needsRebuild = (trimGen != _renderedTrimGen);
     if (needsRebuild) {
-        _renderedLineCount = 0;
+        _renderedLineCount = initialTail
+            ? MAX(0, totalLines - (int)MIN(self.initialDisplayLineLimit,
+                                            (NSUInteger)INT_MAX)) : 0;
         _renderedTrimGen   = trimGen;
-        newText = log_snapshot_from(0, &totalLines, &trimGen);
+        newText = log_snapshot_from(_renderedLineCount,
+                                    &totalLines, &trimGen);
     }
 
     if (!newText) return;
@@ -526,7 +566,7 @@ static UIColor *colorForLogLine(NSString *line) {
     NSMutableAttributedString *newAttr = [self buildAttrStringForText:newText];
     if (newAttr.length == 0) return;
 
-    BOOL wasEmpty = (_renderedLineCount == 0);
+    BOOL wasEmpty = (_renderedLineCount == 0 || initialTail);
     BOOL userScrolling = self.tracking || self.dragging || self.decelerating;
     if (wasEmpty || (!userScrolling && [self isCloseToBottom])) {
         _followTail = YES;

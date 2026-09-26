@@ -323,7 +323,13 @@ static int rc_refresh_list_view(uint64_t listView, uint64_t clsInv,
     uint64_t subs = r_msg(listView, r_sel("subviews"), 0, 0, 0, 0);
     if (!subs) return 0;
     uint64_t n = r_msg(subs, r_sel("count"), 0, 0, 0, 0);
-    if (n > 512) n = 512;
+    if (n > 4096) {
+        printf("[LAYOUT] refresh skipped implausible subviews count=%llu\n",
+               (unsigned long long)n);
+        n = 0;
+    } else if (n > 512) {
+        n = 512;
+    }
 
     uint64_t selObjAt = r_sel("objectAtIndex:");
     uint64_t selKind  = r_sel("isKindOfClass:");
