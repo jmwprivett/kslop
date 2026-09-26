@@ -28,6 +28,34 @@ xcuserdata/
 ## AI-agent docs (kept local, not pushed)
 /CLAUDE.md
 /AGENTS.md
+/.claude/
+/CLAUDE.md.old.md
+
+## Local lab inputs and generated evidence
+__pycache__/
+*.py[cod]
+/sideloadlydaemon.log
+/purple accent pulsar.theme.zip
+*.dylib
+*.thin
+*.log
+ssh_known_hosts
+known_hosts
+*.pem
+*.p12
+*.p8
+*.key
+*.mobileprovision
+*.token
+.env
+.env.*
+*.ipsw
+*.xcresult/
+*.crash
+*.ips
+*.trace
+/VMs/
+/evidence/
 
 # CocoaPods
 #

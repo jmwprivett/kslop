@@ -1,43 +1,29 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/zeroxjf/cyanide/main/Cyanide/Assets.xcassets/AppIcon.appiconset/icon-ios-1024x1024.png" alt="Cyanide" width="160">
+  <img src="kslop.png" alt="kslop" width="160">
 </p>
 
-<h1 align="center">Cyanide</h1>
+<h1 align="center">kslop</h1>
 
-**By [@zeroxjf](https://github.com/zeroxjf) and [d1y](https://x.com/chenhonzhou)** — an iOS tweak runner built on top of the DarkSword kernel r/w primitive.
+kslop is a continuation and fork of Cyanide, which is itself a fork of
+[`wh1te4ever/darksword-kexploit-fun`](https://github.com/wh1te4ever/darksword-kexploit-fun),
+built on [`opa334/darksword-kexploit`](https://github.com/opa334/darksword-kexploit).
+It preserves the original kernel read/write and RemoteCall foundation while
+substantially reworking the application, tweak runner, recovery behavior, and
+iOS 26 support.
 
-Cyanide is a fork of [`wh1te4ever/darksword-kexploit-fun`](https://github.com/wh1te4ever/darksword-kexploit-fun)
-for iOS kernel research. It wraps the native DarkSword kernel stages in an
-Objective-C iOS app, restructures the UI as an Installer/Settings split, and
-adds a few reliability fixes for repeated local testing. It does not ship
-the browser-delivered WebKit/dyld parts of the original DarkSword chain.
+Most development time has gone into rebuilding SnowBoard support as a persistent
+IconServices-backed theme engine. The goal is complete coverage across Home
+Screen icons, folders, App Library, notifications, the app switcher, Spotlight,
+and launch/return transitions, with recoverable Apply and Restore operations.
+Some materialized SpringBoard surfaces still need a verified refresh path.
 
-## Install
+kslop also includes a system Font Changer adapted from Lara's font-replacement
+approach, with local font importing, size validation, stock backups,
+restoration, and Regular/Italic/Mono family support.
 
-Open this page on your iPhone/iPad and tap one of the buttons below.
-
-<p align="center">
-  <a href="https://celloserenity.github.io/altdirect/?url=https://raw.githubusercontent.com/zeroxjf/cyanide/main/source.json" target="_blank">
-    <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/AltSource_Blue.png?raw=true" alt="Add AltSource" width="200">
-  </a>
-  <a href="https://github.com/zeroxjf/cyanide/releases/latest" target="_blank">
-    <img src="https://github.com/CelloSerenity/altdirect/blob/main/assets/png/Download_Blue.png?raw=true" alt="Download .ipa" width="200">
-  </a>
-</p>
-
-## Feedback
-
-- [Report a bug](https://github.com/zeroxjf/cyanide/issues/new?template=bug_report.yml)
-- [Request a feature](https://github.com/zeroxjf/cyanide/issues/new?template=feature_request.yml)
-- [Join the Signal group](https://signal.group/#CjQKIP0pxjc9V52ddCNk--04DosuoQl-vVOsznJfQ4GwlrlxEhCveFhBS8YdNcILpUFt7IqC) for setup help, support,
-  test notes, and rough ideas before they become issues.
-
-## Patreon
-
-Early access to experimental tweaks (Dynamic Stage Lite, Signal Readouts,
-TypeBanner, and future work) is
-available to [Patreon supporters](https://www.patreon.com/zeroxjf) at the
-Member tier and above.
+Development and integration: [`rooootdev`](https://github.com/rooootdev) /
+[`zeroxjf`](https://github.com/zeroxjf). The upstream contributors and license
+are credited below.
 
 ## Tweaks
 
@@ -84,6 +70,19 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
 - **Disable OTA Updates**: toggles the launchd OTA `disabled.plist` to block or
   unblock update prompts. Persists across reboots.
 
+### Appearance
+
+- **SnowBoard Remix**: imports SnowBoard/IconBundles themes and publishes
+  persistent IconServices records through a pinned daemon session. It keeps
+  original stock records in recovery journals for Apply and Restore; **Update
+  Repair** handles newly installed or updated apps. SpringBoard cache refresh
+  is still under investigation. The import UI began with the SnowBoard Lite
+  port from [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios), then was
+  rebuilt by `rooootdev / zeroxjf`.
+- **Font Changer**: imports local fonts, validates their size, and replaces the
+  system Regular, Italic, and Mono families with stock backups and Restore.
+  Adapted by `rooootdev / zeroxjf` from Lara's font-replacement approach.
+
 ### Beta
 
 > ⚠︎ Work in progress — these work but may change or need re-applying between builds.
@@ -98,10 +97,6 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
   SBIconView hierarchy and swaps each icon's image with a PNG matched on bundle
   ID. Ships with iOS 6 Theme; also accepts a custom folder of `<bundleID>.png`
   files or a binary plist. Pick a theme in Settings before running.
-- **SnowBoard Lite**: imports SnowBoard/IconBundles-style theme folders or
-  archives into Cyanide's local theme library, then applies the selected theme
-  through the existing icon replacement pipeline. Ported from
-  [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios).
 - **LiveWP**: copies a selected MP4/MOV/M4V into Cyanide's app container and
   plays it behind SpringBoard's home and lock screen windows while the live
   RemoteCall session is active. Ported from
@@ -146,6 +141,36 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
 - **TypeBanner**: shows a pill banner below the Dynamic Island when the active
   Messages conversation shows a typing indicator. Detection fires only while
   Messages.app is running.
+
+## SnowBoard Remix and iOS 26 research
+
+The [current research status](docs/research/README.md) and
+[chronological handoff](docs/research/snowboard-remix-current-handoff.md)
+record physical-device and VM evidence, plus the exact iOS 26.0 `23A341`,
+`iPhone17,3` dyld-cache and disassembly work. Publication uses structured
+`IFImage` objects, exact descriptors, one pinned daemon session, and recovery
+journals. Restore and app-update rebasing have been verified. A persistent
+index-token correction addresses unrelated app-install garbage collection;
+its full physical reinstall audit is still pending. The bounded audits compare
+UUIDs, store and pixel hashes, validation tokens, and LaunchServices source
+identities, including the observed 27/28-point shared store unit.
+
+The 3× per-app descriptor profile is 13×13 (appearance 0), 27×27 (0 and 1),
+28×28 (0), 38×38 (0 and 1), 48×48 (0), 64×64 (0 for every app's Spotlight Apps
+result), and 68×68 (0 and 1), plus 68×68 appearance 0 with
+`variantOptions=0x20000`. Safari alone adds a 20×20 SnippetUI badge. Old
+10-record journals safely add only the missing 64-point record.
+
+The research covers Home, folders, App Library, notifications, switcher titles,
+Spotlight, and launch/return transitions, with lab KRW, injected inspection
+dylibs, RemoteCall tracing, local notification probes, app-install invalidation
+tracing, and resident consumer inventories. Spotlight transparency and
+Clock/Calendar source behavior remain active research areas. SpringBoard cache
+invalidation is temporarily disabled; the one-second RemoteCall bootstrap wait
+remains. Screen-recording invalidation was an isolated, unproven observation,
+and failed Clock experiments are retained as negative evidence. Earlier handoff
+notes are chronological and may contain stale validation TODOs.
+
 ## Supported Targets
 
 Tested target range:
@@ -176,9 +201,10 @@ iOS/iPadOS 18.7.2 and 26.1. Later builds are outside this kernel exploit window.
 
 ## Credits
 
+- Lara: font-replacement approach adapted for kslop Font Changer.
 - [`opa334`](https://github.com/opa334): original [`darksword-kexploit`](https://github.com/opa334/darksword-kexploit), ChOma, and XPF — the kernel r/w primitive Cyanide is built on.
 - [`wh1te4ever`](https://github.com/wh1te4ever): [`kfun` / `darksword-kexploit-fun`](https://github.com/wh1te4ever/darksword-kexploit-fun) — the RemoteCall implementation that lets a sideloaded app apply tweaks inside SpringBoard. Cyanide is a fork of this project.
-- [`rooootdev`](https://github.com/rooootdev): working kexploit behavior used to stabilize this fork.
+- [`rooootdev`](https://github.com/rooootdev) / [`zeroxjf`](https://github.com/zeroxjf): kslop development, SnowBoard Remix integration, iOS 26 research, and working kexploit behavior used to stabilize this fork.
 - [`neonmodder123`](https://github.com/neonmodder123): Web Respring method.
 - [`kolbicz`](https://github.com/kolbicz): OTA Disabler, SpringBoard tweaks, and
   the RemoteCall/CLSimulationManager GPS spoofer prototype used as the starting
@@ -193,8 +219,8 @@ iOS/iPadOS 18.7.2 and 26.1. Later builds are outside this kernel exploit window.
 - [`rpetrich`](https://github.com/rpetrich): Powercuff.
 - [Julio Verne](https://github.com/julioverne): the original [Gravity](https://github.com/julioverne/Gravity) tweak that Gravity Lite is a core port of.
 - [`d1y`](https://x.com/chenhonzhou): [`cyanide-ios`](https://github.com/d1y/cyanide-ios)
-  AGPL-3.0 sources used for the NSBar, NiceBar Lite, SnowBoard Lite, and
-  LiveWP ports.
+  AGPL-3.0 sources used for the NSBar, NiceBar Lite, original SnowBoard Lite
+  import UI, and LiveWP ports.
 - [`tomt000`](https://github.com/tomt000): [Dynamic Stage](https://havoc.app/package/dynamicstage) — the original Stage Manager-for-iPhone tweak whose split-view + scene-hosting design Dynamic Stage Lite re-implements over RemoteCall.
 
 ### UI inspiration
@@ -208,8 +234,9 @@ iOS/iPadOS 18.7.2 and 26.1. Later builds are outside this kernel exploit window.
 ./scripts/build.sh
 ```
 
-The build script uses the `Cyanide` scheme, disables code signing, and writes
-an unsigned IPA to:
+The build script keeps the compatible `Cyanide` scheme and executable name,
+disables code signing, and writes a versioned unsigned IPA plus a latest-build
+symlink:
 
 ```text
 build/Cyanide.ipa
@@ -233,8 +260,9 @@ The open-source portion of this repository — everything outside the
 `Cyanide/tweaks/private/` submodule — is licensed under **AGPL-3.0**.
 See `LICENSE`.
 
-The NSBar, NiceBar Lite, SnowBoard Lite, and LiveWP ports adapt AGPL-3.0 code
-from [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios) and remain in the
+The NSBar, NiceBar Lite, original SnowBoard Lite import UI, and LiveWP ports
+adapt AGPL-3.0 code from
+[`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios) and remain in the
 AGPL-covered public tree.
 
 The `Cyanide/tweaks/private/` submodule points at a separate private
