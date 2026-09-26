@@ -2,9 +2,9 @@
   <img src="kslop.png" alt="kslop" width="160">
 </p>
 
-<h1 align="center">kslop</h1>
+<h1 align="center">kSlop</h1>
 
-kslop is a continuation and fork of Cyanide, which is itself a fork of
+kSlop is a continuation and fork of Cyanide, which is itself a fork of
 [`wh1te4ever/darksword-kexploit-fun`](https://github.com/wh1te4ever/darksword-kexploit-fun),
 built on [`opa334/darksword-kexploit`](https://github.com/opa334/darksword-kexploit).
 It preserves the original kernel read/write and RemoteCall foundation while
