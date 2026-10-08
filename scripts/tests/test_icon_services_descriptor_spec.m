@@ -21,15 +21,16 @@ int main(void)
 {
     @autoreleasepool {
         NSArray *core = [CNDIconServicesDescriptorProfile coreIPhoneIOS26SpecsAt3x];
-        Require(core.count == 11u, @"core descriptor count mismatch");
+        Require(core.count == 12u, @"core descriptor count mismatch");
         NSArray *expected = @[ @"13x13@3:a0:v0:o0", @"27x27@3:a0:v0:o0",
                               @"27x27@3:a1:v0:o0", @"28x28@3:a0:v0:o0",
+                              @"28x28@3:a0:v4:o0",
                               @"38x38@3:a0:v0:o0", @"38x38@3:a1:v0:o0",
                               @"48x48@3:a0:v0:o0", @"64x64@3:a0:v0:o0",
                               @"68x68@3:a0:v0:o0",
                               @"68x68@3:a0:v131072:o0",
                               @"68x68@3:a1:v0:o0" ];
-        NSArray *expectedPixels = @[ @60, @87, @87, @87, @114, @114,
+        NSArray *expectedPixels = @[ @60, @87, @87, @87, @87, @114, @114,
                                      @180, @192, @204, @204, @204 ];
         for (NSUInteger index = 0u; index < expected.count; index++) {
             CNDIconServicesDescriptorSpec *spec = core[index];
@@ -43,11 +44,13 @@ int main(void)
         }
         NSArray *extras = [CNDIconServicesDescriptorProfile
             specsForIPhoneIOS26At3xWithConditionalExtras:CNDIconServicesDescriptorProfileExtrasSnippet];
-        Require(extras.count == 12u, @"conditional descriptor count mismatch");
+        Require(extras.count == 13u, @"conditional descriptor count mismatch");
         NSMutableSet *identities = [NSMutableSet set];
         for (CNDIconServicesDescriptorSpec *spec in extras) [identities addObject:spec.canonicalIdentity];
         Require([identities containsObject:@"20x20@3:a0:v0:o0"], @"20-point snippet extra missing");
         Require([identities containsObject:@"64x64@3:a0:v0:o0"], @"64-point core Apps-list descriptor missing");
+        Require([identities containsObject:@"28x28@3:a0:v4:o0"],
+                @"Share-sheet bordered Apps-list descriptor missing");
         Require([identities containsObject:@"68x68@3:a0:v131072:o0"],
                 @"launch/return transition descriptor missing");
         Require(![identities containsObject:@"68x68@3:a0:v20000:o0"],
@@ -65,7 +68,7 @@ int main(void)
             }
         }
         Require(![identities containsObject:@"40x40@3:a0:v0:o0"], @"40-point descriptor was added");
-        Require([CNDIconServicesDescriptorProfile coreIPhoneIOS26SpecsAt3x].count == 11u,
+        Require([CNDIconServicesDescriptorProfile coreIPhoneIOS26SpecsAt3x].count == 12u,
                 @"core descriptor set was mutated by conditional extras");
         Require([CNDIconServicesDescriptorSpec specWithPointWidth:68
             pointHeight:68 scale:3 appearance:0

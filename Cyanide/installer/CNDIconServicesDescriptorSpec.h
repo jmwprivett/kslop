@@ -88,10 +88,10 @@ typedef NS_OPTIONS(NSUInteger, CNDIconServicesDescriptorProfileExtras) {
 - (instancetype)initWithSpecifications:(NSArray<CNDIconServicesDescriptorSpec *> *)specifications NS_DESIGNATED_INITIALIZER;
 + (instancetype)profileWithSpecifications:(NSArray<CNDIconServicesDescriptorSpec *> *)specifications;
 
-/// The exact eleven-record core set observed on an iPhone-class iOS 26 3x
-/// display: 13a0, 27a0, 27a1, 28a0, 38a0, 38a1, 48a0, 64a0, normal 68a0,
-/// transition 68a0/v0x20000 and 68a1. All other values (including 20 and 40
-/// points) are intentionally absent.
+/// The exact twelve-record core set observed on an iPhone-class iOS 26 3x
+/// display: 13a0, 27a0, 27a1, ordinary 28a0, Share-list 28a0/v0x4, 38a0,
+/// 38a1, 48a0, 64a0, normal 68a0, transition 68a0/v0x20000 and 68a1. All
+/// other values (including 20 and 40 points) are intentionally absent.
 + (NSArray<CNDIconServicesDescriptorSpec *> *)coreIPhoneIOS26SpecsAt3x;
 
 /// Returns the core set with explicitly requested conditional records.  The

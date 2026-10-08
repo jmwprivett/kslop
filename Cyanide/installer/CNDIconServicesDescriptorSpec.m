@@ -14,6 +14,10 @@ static NSString * const kCNDDescriptorErrorDomain = @"CNDIconServicesDescriptorS
  * decimal 20000.  `iconVariant` remains the persisted compatibility name for
  * this observed property; it is not the factory preset enum. */
 static const NSUInteger CNDIconServicesTransitionVariantOptions = 0x20000u;
+/* SharingUI sets -drawBorder:YES on the TableUIName descriptor used by the
+ * Share sheet's Apps list. The iOS 26 readback is variantOptions=0x4 and its
+ * descriptor digest is 32AFEB06-1183-3764-B197-7B175B199D11. */
+static const NSUInteger CNDIconServicesShareSheetBorderVariantOptions = 0x4u;
 
 typedef NS_ENUM(NSInteger, CNDDescriptorErrorCode) {
     CNDDescriptorErrorInvalidArgument = 1,
@@ -243,14 +247,17 @@ static NSUInteger CNDObservedPixelDimension(NSUInteger points,
         /* This is the per-application core matrix. Spotlight's vertical Apps
          * results use 64pt/v0 for every application (SearchUI variant 4),
          * while its Top Hit results use the ordinary 68pt records (variant
-         * 5). The 28pt/v0 and 68pt/v0x20000 records are launch/return
-         * consumers for every app, not special cases for dynamic
-         * Clock/Calendar icons. */
+         * 5). SharingUI's Apps list uses a separate 28pt descriptor with the
+         * measured draw-border/variantOptions 0x4 bit. The ordinary 28pt/v0
+         * and 68pt/v0x20000 records are launch/return consumers for every
+         * app. None are special cases for dynamic Clock/Calendar icons. */
         NSArray *fields = @[
             @[@13, @13, @3, @0, @0, @0],
             @[@27, @27, @3, @0, @0, @0],
             @[@27, @27, @3, @1, @0, @0],
             @[@28, @28, @3, @0, @0, @0],
+            @[@28, @28, @3, @0,
+              @(CNDIconServicesShareSheetBorderVariantOptions), @0],
             @[@38, @38, @3, @0, @0, @0],
             @[@38, @38, @3, @1, @0, @0],
             @[@48, @48, @3, @0, @0, @0],
