@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "sourceArchive": "66a65e05-20cf-41ba-b58b-80e46c7d79a2-3683642c-9436-4640-8458-9dc62bd7d68f-zip.zip",
+  "sourceSHA256": "f6040e4930c57d0cccd2b5b5112c733e06c7635f83b2ba6183a6a2362984e6e0",
+  "artworkRole": "supplemental",
+  "additionalSources": [
+    {
+      "source": "User attachments 2026-10-06",
+      "filenames": ["nightshift.png", "truetone.png"]
+    }
+  ],
+  "assets": [
+    {
+      "filename": "nightshift.png",
+      "sha256": "b4fb2266d95a1421b44e2e226a0ae39583da046373c813e31acc40294f006c73",
+      "width": 220,
+      "height": 220,
+      "bytes": 5402
+    },
+    {
+      "filename": "truetone.png",
+      "sha256": "ea4ab8671658d04960e02695c2405e47cb0354b8dcbb7981a053ccf897a1d379",
+      "width": 220,
+      "height": 220,
+      "bytes": 7597
+    },
+    {
+      "filename": "focus_custom_active.png",
+      "sha256": "d705190deb05d48d84b7c0fb612623251b252ab95fbb39d57c1a55fd20e73b69",
+      "width": 220,
+      "height": 220,
+      "bytes": 7042
+    },
+    {
+      "filename": "focus_custom_inactive.png",
+      "sha256": "33125cf36a2a9e8dd3c010d38e36104c6733bc51e987d8bddb4fe9cef192c8a8",
+      "width": 220,
+      "height": 220,
+      "bytes": 5568
+    },
+    {
+      "filename": "focus_driving_inactive.png",
+      "sha256": "31363d22bf478c23af4983f105f5acb94d6de22e8f8bf5b6e97466a18f694830",
+      "width": 220,
+      "height": 220,
+      "bytes": 4621
+    },
+    {
+      "filename": "focus_personal_active.png",
+      "sha256": "5183b38808000bf8cdc9ee888ba63a3276d7fd77841ffe4e81c9cc09cc40c39d",
+      "width": 100,
+      "height": 100,
+      "bytes": 3000
+    },
+    {
+      "filename": "focus_personal_inactive.png",
+      "sha256": "a96436e50d4e2e08f8effeb6ec0a8694b9d5abba873efcb4da02fc714a9b63c9",
+      "width": 220,
+      "height": 220,
+      "bytes": 5400
+    },
+    {
+      "filename": "focus_reduce_interruptions.png",
+      "sha256": "119839f8beacd49758c7d777c9dce32f9cba2436f8bd2eb62bc11c5d3e3f8e16",
+      "width": 220,
+      "height": 220,
+      "bytes": 5272
+    },
+    {
+      "filename": "focus_reduce_interruptions_active.png",
+      "sha256": "6123440d5de6098b83be93349a9c14a21ec032bee0f8f407bcaae32e3e5b4006",
+      "width": 220,
+      "height": 220,
+      "bytes": 6826
+    },
+    {
+      "filename": "focus_sleep_active.png",
+      "sha256": "0c0cf1874f9280aba51976612bc030b030b5b36f326432c8edb9af29d35a3173",
+      "width": 100,
+      "height": 100,
+      "bytes": 1811
+    },
+    {
+      "filename": "focus_sleep_inactive.png",
+      "sha256": "f6aae19e40abe6363fe2cc6cf1eb7853939974ab70bb9ab12b3d9ce718e9130b",
+      "width": 220,
+      "height": 220,
+      "bytes": 3276
+    },
+    {
+      "filename": "focus_work_active.png",
+      "sha256": "9f5384a6a5740a4c1c97306164a1c4044d93bacfd618114ff8c9e740159073df",
+      "width": 220,
+      "height": 220,
+      "bytes": 3219
+    },
+    {
+      "filename": "focus_work_inactive.png",
+      "sha256": "1ff426b54876c7ec7ad0d9ead3e7d0daf74579002a13e54293ce3a11ec0446af",
+      "width": 220,
+      "height": 220,
+      "bytes": 2598
+    },
+    {
+      "filename": "icons8-satellite-220 (1).png",
+      "sha256": "546deb59c6410b6843b1bc90f1f5485d95e9aeb6520f4b72a56ff819f94d2114",
+      "width": 220,
+      "height": 220,
+      "bytes": 11311
+    },
+    {
+      "filename": "icons8-satellite-220.png",
+      "sha256": "958d1404f6b203fb920a02bac91a4f429970b3226e5cf77b08ffaee35271f03a",
+      "width": 220,
+      "height": 220,
+      "bytes": 10850
+    },
+    {
+      "filename": "icons8-satellite-signal-100.png",
+      "sha256": "f69be880d8e988a03dfff84fdd564b8365b45f827d0a603b5d4fbe653772f3db",
+      "width": 100,
+      "height": 100,
+      "bytes": 6844
+    },
+    {
+      "filename": "vpn_stock.png",
+      "sha256": "2b8f52d57227790a65d57d9306cf8cfe3a446bccc00451f0770e7a9a007e009c",
+      "width": 220,
+      "height": 220,
+      "bytes": 6449
+    }
+  ]
+}

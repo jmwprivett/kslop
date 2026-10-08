@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<caml xmlns="http://www.apple.com/CoreAnimation/1.0">
+  <CALayer bounds="0 0 40 40" position="-0.5 0">
+    <sublayers>
+      <CALayer id="#standard" bounds="0 0 40 40" position="0 0" hidden="0" contentsGravity="resizeAspect">
+        <contents type="CGImage" src="standard.png"/>
+      </CALayer>
+      <CALayer id="#selected" bounds="0 0 40 40" position="0 0" hidden="1" contentsGravity="resizeAspect">
+        <contents type="CGImage" src="selected.png"/>
+      </CALayer>
+    </sublayers>
+    <states>
+      <LKState name="off">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="OFF">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="disabled">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="inactive">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="unselected">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="normal">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="disconnected">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="poweroff">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="0">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="on">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="ON">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="enabled">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="active">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="selected">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="connected">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="associated">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="poweron">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="recording">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+      <LKState name="1">
+        <elements>
+          <LKStateSetValue targetId="#standard" keyPath="hidden"><value type="integer" value="1"/></LKStateSetValue>
+          <LKStateSetValue targetId="#selected" keyPath="hidden"><value type="integer" value="0"/></LKStateSetValue>
+        </elements>
+      </LKState>
+    </states>
+    <animations/>
+  </CALayer>
+</caml>

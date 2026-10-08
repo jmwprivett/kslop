@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "sourceArchiveSHA256": "f6040e4930c57d0cccd2b5b5112c733e06c7635f83b2ba6183a6a2362984e6e0",
+  "role": "supplemental",
+  "existingArtworkPreserved": true,
+  "timerArtwork": "Existing Stopwatch compatibility fallback",
+  "routes": {
+    "nightShift": {
+      "standardSource": "nightshift.png",
+      "selectedSource": "nightshift.png",
+      "symbolNames": [],
+      "packageSourcePaths": [],
+      "catalogSourcePath": "/System/Library/ControlCenter/Bundles/DisplayModule.bundle/Assets.car",
+      "catalogRenditionName": "NightShift",
+      "localRoutingStatus": "implemented",
+      "physicalRoutingStatus": "implemented-file-backing-awaiting-device-validation"
+    },
+    "trueTone": {
+      "standardSource": "truetone.png",
+      "selectedSource": "truetone.png",
+      "symbolNames": [],
+      "packageSourcePaths": [],
+      "catalogSourcePath": "/System/Library/ControlCenter/Bundles/DisplayModule.bundle/Assets.car",
+      "catalogRenditionName": "TrueTone",
+      "localRoutingStatus": "implemented",
+      "physicalRoutingStatus": "implemented-file-backing-awaiting-device-validation"
+    },
+    "vpn": {
+      "standardSource": "vpn_stock.png",
+      "selectedSource": "vpn_stock.png",
+      "symbolNames": [
+        "network.connected.to.line.below.fill"
+      ],
+      "packageSourcePaths": [],
+      "localRoutingStatus": "implemented",
+      "physicalRoutingStatus": "implemented-controller-redirect"
+    },
+    "satelliteUnavailable": {
+      "standardSource": "icons8-satellite-220.png",
+      "selectedSource": "icons8-satellite-220.png",
+      "symbolNames": [
+        "satellite.slash.fill"
+      ],
+      "packageSourcePaths": [],
+      "localRoutingStatus": "implemented",
+      "physicalRoutingStatus": "implemented-current-state-controller-redirect"
+    },
+    "satelliteAvailable": {
+      "standardSource": "icons8-satellite-220 (1).png",
+      "selectedSource": "icons8-satellite-220 (1).png",
+      "symbolNames": [
+        "satellite.wave.2"
+      ],
+      "packageSourcePaths": [],
+      "localRoutingStatus": "implemented",
+      "physicalRoutingStatus": "implemented-current-state-controller-redirect"
+    },
+    "satelliteConnected": {
+      "standardSource": "icons8-satellite-signal-100.png",
+      "selectedSource": "icons8-satellite-signal-100.png",
+      "symbolNames": [
+        "satellite.wave.2.fill"
+      ],
+      "packageSourcePaths": [],
+      "localRoutingStatus": "implemented",
+      "physicalRoutingStatus": "implemented-current-state-controller-redirect"
+    },
+    "focusSleep": {
+      "standardSource": "focus_sleep_inactive.png",
+      "selectedSource": "focus_sleep_active.png",
+      "symbolNames": [],
+      "packageSourcePaths": [
+        "/System/Library/PrivateFrameworks/FocusUI.framework/sleep_cg_02.ca"
+      ],
+      "localRoutingStatus": "implemented",
+      "physicalRoutingStatus": "pending-device-resolver-validation"
+    },
+    "focusPersonal": {
+      "standardSource": "focus_personal_inactive.png",
+      "selectedSource": "focus_personal_active.png",
+      "symbolNames": [],
+      "packageSourcePaths": [
+        "/System/Library/PrivateFrameworks/FocusUI.framework/personal_cg_02.ca"
+      ],
+      "localRoutingStatus": "implemented",
+      "physicalRoutingStatus": "pending-device-resolver-validation"
+    },
+    "focusWork": {
+      "standardSource": "focus_work_inactive.png",
+      "selectedSource": "focus_work_active.png",
+      "symbolNames": [],
+      "packageSourcePaths": [
+        "/System/Library/PrivateFrameworks/FocusUI.framework/work_cg_02.ca"
+      ],
+      "localRoutingStatus": "implemented",
+      "physicalRoutingStatus": "pending-device-resolver-validation"
+    },
+    "focusReduceInterruptions": {
+      "standardSource": "focus_reduce_interruptions.png",
+      "selectedSource": "focus_reduce_interruptions_active.png",
+      "symbolNames": [],
+      "packageSourcePaths": [],
+      "localRoutingStatus": "pending-focus-row-raster-adapter",
+      "physicalRoutingStatus": "pending-device-resolver-validation"
+    },
+    "focusCustom": {
+      "standardSource": "focus_custom_inactive.png",
+      "selectedSource": "focus_custom_active.png",
+      "symbolNames": [],
+      "packageSourcePaths": [],
+      "localRoutingStatus": "pending-focus-row-raster-adapter",
+      "physicalRoutingStatus": "pending-device-resolver-validation"
+    }
+  },
+  "deferredArtwork": {
+    "focusDriving": "Active state not supplied; inactive source retained only",
+    "focusFitness": "Not supplied",
+    "focusGaming": "Not supplied",
+    "focusMindful": "Not supplied",
+    "focusReading": "Not supplied",
+    "airpodsListeningModes": "Not supplied",
+    "airpodsSpatialAudio": "Not supplied",
+    "airpodsConversationAwareness": "Not supplied"
+  }
+}
