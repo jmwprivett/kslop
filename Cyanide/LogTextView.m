@@ -355,7 +355,8 @@ static UIColor *colorForLogLine(NSString *line) {
         [content hasPrefix:@"[SBR_CACHE]"] ||
         [content hasPrefix:@"[SBR_TIME]"] ||
         [content hasPrefix:@"[SBR_INFO]"] ||
-        [content hasPrefix:@"[SBR_ALPHA]"])
+        [content hasPrefix:@"[SBR_ALPHA]"] ||
+        [content hasPrefix:@"[SPOTLIGHT]"])
         return [UIColor colorWithRed:1.00 green:0.86 blue:0.32 alpha:1.0]; // information yellow
     if ([content hasPrefix:@"[SBR]"])
         return [UIColor colorWithRed:0.98 green:0.46 blue:0.92 alpha:1.0]; // vivid magenta-pink
