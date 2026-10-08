@@ -29,7 +29,7 @@ xcuserdata/
 /CLAUDE.md
 /AGENTS.md
 /.claude/
-/CLAUDE.md.old.md
+/CLAUDE.md.old*.md
 
 ## Local lab inputs and generated evidence
 __pycache__/
@@ -56,6 +56,7 @@ known_hosts
 *.trace
 /VMs/
 /evidence/
+/.research/
 
 # CocoaPods
 #
