@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Offline derivation of a shared ObjC dispatch-cache redirect; no writer included",
+  "runtimeVerified": false,
+  "os": {
+    "productVersion": "26.0",
+    "productBuildVersion": "23A341",
+    "productType": "iPhone17,2",
+    "deviceClass": "d94ap",
+    "architecture": "arm64e",
+    "identitySource": "local IPSW; device not queried"
+  },
+  "cache": {
+    "main": {
+      "fileName": "dyld_shared_cache_arm64e",
+      "uuid": "DC5F2F67-1FC8-3905-873B-35D17D1A44E8",
+      "sha256": "a54a614e3a24f6a26cea9c3d0f46cd7776635c98ae6bcbdb0f609ddf8a78ab92",
+      "sharedRegionStart": "0x180000000",
+      "codeDirectory": {
+        "sha256": "10faedfde7b44d0ff9c70d323c3601cee1b495d7ec06df115bd2faf700db8742",
+        "cdHash20": "10faedfde7b44d0ff9c70d323c3601cee1b495d7",
+        "hashType": 2,
+        "pageSize": 16384,
+        "verifiedCodePages": 36
+      },
+      "subcache": {
+        "fileName": "dyld_shared_cache_arm64e.19",
+        "uuid": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+        "sha256": "b5b23dff0de2aa23a24e0d600e5dc6368986bad71e1cae6d7b0176913d70be96",
+        "codeDirectory": {
+          "sha256": "acd0de9b9ea6cc0f66011973c6889dcf93757779388b85917eff8f37584c704e",
+          "cdHash20": "acd0de9b9ea6cc0f66011973c6889dcf93757779",
+          "hashType": 2,
+          "pageSize": 16384,
+          "verifiedCodePages": 6753
+        }
+      }
+    },
+    "dataSubcache": {
+      "fileName": "dyld_shared_cache_arm64e.33.dylddata",
+      "uuid": "F193189E-840D-3569-816A-2102BCB0FFE5",
+      "sha256": "50aed49dc4a5a8d212a1054258d30f9cc5dfe784005708726af697e92b62f42e",
+      "codeDirectory": {
+        "sha256": "5427d5241132d73ec4a8b614e24c11ac8622b2b8fb9426b1c6c092c4e8dfc6cb",
+        "cdHash20": "5427d5241132d73ec4a8b614e24c11ac8622b2b8",
+        "hashType": 2,
+        "pageSize": 16384,
+        "verifiedCodePages": 13823
+      }
+    },
+    "readOnlySubcache": {
+      "fileName": "dyld_shared_cache_arm64e.34.dyldreadonly",
+      "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58",
+      "sha256": "932d004fd1b7c92aaeb4d9d4fc32188b0df17eadb8155888180ba84e088b87b2",
+      "codeDirectory": {
+        "sha256": "522e90d6cd7a7fd1f4de1589ddb693d6c970266604a15969a6cad806b7e09474",
+        "cdHash20": "522e90d6cd7a7fd1f4de1589ddb693d6c9702666",
+        "hashType": 2,
+        "pageSize": 16384,
+        "verifiedCodePages": 7971
+      }
+    }
+  },
+  "class": {
+    "name": "SBIconImageView",
+    "unslidVMAddress": "0x1eda00588",
+    "isa": "0x1ed9ffca0",
+    "superclass": "0x1ed69fea0",
+    "initialCacheBuckets": "0x1800d6040",
+    "preoptimizedCache": "0x1ffc26ec0",
+    "classRO": "0x1f3fd3c08",
+    "baseMethods": "0x1be200cf0"
+  },
+  "compactMethodEntry": {
+    "selector": "effectivelyPrefersFlatImageLayers",
+    "types": "B16@0:8",
+    "methodListUnslidVMAddress": "0x1be200cf0",
+    "methodListHeader": {
+      "entsizeAndFlags": "0xc000000f",
+      "count": 147,
+      "entrySize": 12,
+      "relativeEntries": true,
+      "directSelectors": true
+    },
+    "entryIndex": 11,
+    "entryUnslidVMAddress": "0x1be200d7c",
+    "entrySubcacheFileOffset": "0x45a8d7c",
+    "entryBytesHex": "20100b00c3a70f00e820f0ff",
+    "selectorBaseUnslidVMAddress": "0x1fac21900",
+    "selectorOffset": "0xb1020",
+    "selectorUnslidVMAddress": "0x1facd2920",
+    "impFieldUnslidVMAddress": "0x1be200d84",
+    "impFieldEncoding": "signed 32-bit field-relative offset",
+    "impFieldRawWord": "0xfff020e8",
+    "decodedIMPUnslidVMAddress": "0x1be102e6c",
+    "mapping": {
+      "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+      "initProt": 5,
+      "maxProt": 5,
+      "classification": "RX __TEXT; not an 8-byte writable IMP slot"
+    },
+    "guard": {
+      "unslidVMAddress": "0x1be200d7c",
+      "byteLength": 32,
+      "bytesHex": "20100b00c3a70f00e820f0ff00f00b00b7a70f008422f0ff00700d0070ab0f00",
+      "sha256": "193e94026b83fb6e3ae6fec255e91d3bdd8e31a380922af004095af025f8f289"
+    }
+  },
+  "preoptimizedDispatchEntry": {
+    "selector": "effectivelyPrefersFlatImageLayers",
+    "cacheHeaderUnslidVMAddress": "0x1ffc26ec0",
+    "cacheHeader": {
+      "fallbackClassOffset": "0xffffffffffc9f918",
+      "shift": 12,
+      "mask": 255,
+      "capacity": 256,
+      "occupied": 147,
+      "hasInlines": false
+    },
+    "slot": 177,
+    "entryUnslidVMAddress": "0x1ffc27458",
+    "entryOffsetWithin16KFrame": "0x3458",
+    "entrySubcacheFileOffset": "0x78d3458",
+    "encoding": {
+      "kind": "preopt_cache_entry_t packed bitfields; no pointer or PAC bits stored",
+      "selectorOffsetBits": 26,
+      "signedRawIMPOffsetBits": 38,
+      "decodeFormula": "IMP = class - (signedRawIMPOffset << 2)"
+    },
+    "originalValue": "0x2c408000be3f5c7",
+    "originalBytesLE": "c7f5e30b0008c402",
+    "selectorOffset": "0xb1020",
+    "signedRawIMPOffset": "0xbe3f5c7",
+    "decodedOriginalIMPUnslidVMAddress": "0x1be102e6c",
+    "mapping": {
+      "subcacheUUID": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58",
+      "name": "__LINKEDIT",
+      "flags": 32,
+      "readOnlyData": true,
+      "initProt": 1,
+      "maxProt": 1
+    },
+    "guard": {
+      "unslidVMAddress": "0x1ffc27458",
+      "byteLength": 32,
+      "originalBytesHex": "c7f5e30b0008c40200000000c0ffffff0323ed0b0000cc1600000000c0ffffff",
+      "originalSHA256": "81c8a106d2a9e37a93d17d78dc7c54ea3b0ec4f036458a15e2ec1e4403d33677",
+      "redirectedBytesHex": "baece30b0008c40200000000c0ffffff0323ed0b0000cc1600000000c0ffffff",
+      "redirectedSHA256": "4ed8147447733303d0ae8043da89d2634f01af11c671540f8268a22d4dba906f"
+    }
+  },
+  "replacement": {
+    "class": "SBIconImageView",
+    "selector": "hasOpaqueImage",
+    "types": "B16@0:8",
+    "semantics": "returns true without reading self or _cmd",
+    "unslidVMAddress": "0x1be1052a0",
+    "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+    "subcacheFileOffset": "0x44ad2a0",
+    "bytesHex": "20008052c0035fd6",
+    "instructions": [
+      "mov w0, #1",
+      "ret"
+    ],
+    "signedRawIMPOffset": "0xbe3ecba",
+    "redirectedEntryValue": "0x2c408000be3ecba",
+    "redirectedEntryBytesLE": "baece30b0008c402",
+    "sameSubcacheAsOriginalIMP": true,
+    "appleSignedCodePageVerified": true
+  },
+  "writabilityBoundary": {
+    "status": "unproven-for-read-only-data",
+    "reason": "The confirmed aperture probe targeted .33 __DATA_CONST with maxProt rw-, but the 8-byte dispatch entry is in .34 READ_ONLY_DATA with initProt/maxProt r--.",
+    "priorConfirmedProbe": {
+      "unslidVMAddress": "0x1e6b6ed20",
+      "subcacheUUID": "F193189E-840D-3569-816A-2102BCB0FFE5",
+      "name": "__DATA_CONST",
+      "flags": 4,
+      "initProt": 1,
+      "maxProt": 3
+    },
+    "requiredNextStep": "Run an identical-bytes-only aperture permission probe against the exact .34 dispatch-entry page before any semantic redirect."
+  }
+}

@@ -1,0 +1,8419 @@
+{
+  "allTargetVectorAndCachedImageVariantsReplaced": true,
+  "allUnrelatedBlocksByteIdentical": true,
+  "artworkContourTolerance": 0.75,
+  "artworkMaskMaximumDimension": 160,
+  "assetutilValidated": true,
+  "blockOffsetsRepacked": true,
+  "connectivityArtworkSizingScope": "global-native-symbol-identity-compact-and-expanded-shared",
+  "connectivityControlArtworkScale": {
+    "cellular": 2.0,
+    "hotspot": 2.15,
+    "wifi": 1.6
+  },
+  "connectivityOpticalSizingValidation": {
+    "hostRenderedEveryNativeConnectivityRendition": true,
+    "hostRenderedEveryRequestedNativeRendition": true,
+    "nativeRenditionCount": 84,
+    "nativeSymbolImagesUseInkCroppedExtents": true,
+    "renditions": [
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.slash",
+        "nativeBlock": 28147,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi",
+        "nativeBlock": 22933,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 21190,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97561,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot",
+        "nativeBlock": 30350,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97561,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 33734,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.097561,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          52,
+          56
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "cellularbars",
+        "nativeBlock": 33821,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955838,
+        "pixelCanvas": [
+          52,
+          56
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.slash",
+        "nativeBlock": 44943,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi",
+        "nativeBlock": 39722,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 38055,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97561,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot",
+        "nativeBlock": 47211,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97561,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 50501,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.097561,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          52,
+          56
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "cellularbars",
+        "nativeBlock": 50619,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955838,
+        "pixelCanvas": [
+          52,
+          56
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.slash",
+        "nativeBlock": 72276,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.645161,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          16
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "wifi.slash",
+        "nativeBlock": 72282,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.796053,
+        "pixelCanvas": [
+          17,
+          16
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi",
+        "nativeBlock": 61776,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.645161,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          16
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "wifi",
+        "nativeBlock": 61858,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.796053,
+        "pixelCanvas": [
+          17,
+          16
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 58503,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97622,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.297297,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          22,
+          22
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 58515,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.927419,
+        "pixelCanvas": [
+          22,
+          22
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot",
+        "nativeBlock": 76826,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97622,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.297297,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          22,
+          22
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "personalhotspot",
+        "nativeBlock": 76838,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.927419,
+        "pixelCanvas": [
+          22,
+          22
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 83457,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.645161,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          16
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 83467,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.796053,
+        "pixelCanvas": [
+          17,
+          16
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.097561,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          52,
+          56
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "cellularbars",
+        "nativeBlock": 83640,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955838,
+        "pixelCanvas": [
+          52,
+          56
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.536585,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          20,
+          21
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "cellularbars",
+        "nativeBlock": 83638,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.798283,
+        "pixelCanvas": [
+          20,
+          21
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.83871,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          19,
+          18
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "wifi.slash",
+        "nativeBlock": 95342,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.80829,
+        "pixelCanvas": [
+          20,
+          18
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.83871,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          19,
+          18
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "wifi",
+        "nativeBlock": 90126,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.80829,
+        "pixelCanvas": [
+          20,
+          18
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.337838,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          25,
+          25
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 88443,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.945338,
+        "pixelCanvas": [
+          25,
+          25
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.337838,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          25,
+          25
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "personalhotspot",
+        "nativeBlock": 97611,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.945338,
+        "pixelCanvas": [
+          25,
+          25
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.83871,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          19,
+          18
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 100935,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.80829,
+        "pixelCanvas": [
+          20,
+          18
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.243902,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          22,
+          24
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "cellularbars",
+        "nativeBlock": 101021,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.844203,
+        "pixelCanvas": [
+          23,
+          24
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.225806,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          23,
+          21
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "wifi.slash",
+        "nativeBlock": 112124,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.831418,
+        "pixelCanvas": [
+          23,
+          21
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.225806,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          23,
+          21
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "wifi",
+        "nativeBlock": 106913,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.831418,
+        "pixelCanvas": [
+          23,
+          21
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.594595,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          30,
+          29
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 105264,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.935927,
+        "pixelCanvas": [
+          30,
+          29
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.594595,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          30,
+          29
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "personalhotspot",
+        "nativeBlock": 114420,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.935927,
+        "pixelCanvas": [
+          30,
+          29
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.225806,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          23,
+          21
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 117741,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.831418,
+        "pixelCanvas": [
+          23,
+          21
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.04878,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          28
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "cellularbars",
+        "nativeBlock": 117813,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.890411,
+        "pixelCanvas": [
+          26,
+          28
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.slash",
+        "nativeBlock": 128944,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi",
+        "nativeBlock": 123724,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 122052,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97622,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot",
+        "nativeBlock": 131216,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97622,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 134539,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.097561,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          52,
+          56
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "cellularbars",
+        "nativeBlock": 134627,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955838,
+        "pixelCanvas": [
+          52,
+          56
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.slash",
+        "nativeBlock": 145744,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi",
+        "nativeBlock": 140524,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 138848,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97561,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot",
+        "nativeBlock": 148014,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97561,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 151336,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.097561,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          52,
+          56
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "cellularbars",
+        "nativeBlock": 151402,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955838,
+        "pixelCanvas": [
+          52,
+          56
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.290323,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          34,
+          31
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "wifi.slash",
+        "nativeBlock": 164297,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.895522,
+        "pixelCanvas": [
+          34,
+          31
+        ],
+        "pointSize": 15,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.290323,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          34,
+          31
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "wifi",
+        "nativeBlock": 159096,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.895522,
+        "pixelCanvas": [
+          34,
+          31
+        ],
+        "pointSize": 15,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.594595,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          44,
+          44
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 157389,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.959358,
+        "pixelCanvas": [
+          44,
+          44
+        ],
+        "pointSize": 15,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.594595,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          44,
+          44
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot",
+        "nativeBlock": 166598,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.959358,
+        "pixelCanvas": [
+          44,
+          44
+        ],
+        "pointSize": 15,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.290323,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          34,
+          31
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 169910,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.895522,
+        "pixelCanvas": [
+          34,
+          31
+        ],
+        "pointSize": 15,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.073171,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          39,
+          42
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "cellularbars",
+        "nativeBlock": 169992,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.925974,
+        "pixelCanvas": [
+          39,
+          42
+        ],
+        "pointSize": 15,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.677419,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          38,
+          35
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "wifi.slash",
+        "nativeBlock": 181109,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.920236,
+        "pixelCanvas": [
+          39,
+          35
+        ],
+        "pointSize": 17,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.677419,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          38,
+          35
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "wifi",
+        "nativeBlock": 175897,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.920236,
+        "pixelCanvas": [
+          39,
+          35
+        ],
+        "pointSize": 17,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.675676,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          50,
+          50
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 174227,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.945679,
+        "pixelCanvas": [
+          50,
+          50
+        ],
+        "pointSize": 17,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.675676,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          50,
+          50
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot",
+        "nativeBlock": 183383,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.945679,
+        "pixelCanvas": [
+          50,
+          50
+        ],
+        "pointSize": 17,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.677419,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          38,
+          35
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 186716,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.920236,
+        "pixelCanvas": [
+          39,
+          35
+        ],
+        "pointSize": 17,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.512195,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          48
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "cellularbars",
+        "nativeBlock": 186778,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.843362,
+        "pixelCanvas": [
+          45,
+          48
+        ],
+        "pointSize": 17,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.slash",
+        "nativeBlock": 197925,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 20,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi",
+        "nativeBlock": 192557,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 20,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 191031,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97622,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 20,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.202703,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "personalhotspot",
+        "nativeBlock": 200189,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.97622,
+        "pixelCanvas": [
+          59,
+          58
+        ],
+        "pointSize": 20,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.354839,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 203507,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.939825,
+        "pixelCanvas": [
+          45,
+          41
+        ],
+        "pointSize": 20,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.097561,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          52,
+          56
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "cellularbars",
+        "nativeBlock": 203585,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955838,
+        "pixelCanvas": [
+          52,
+          56
+        ],
+        "pointSize": 20,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.064516,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          51,
+          46
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.slash",
+        "nativeBlock": 217335,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.932189,
+        "pixelCanvas": [
+          51,
+          46
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.064516,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          51,
+          46
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi",
+        "nativeBlock": 212112,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.932189,
+        "pixelCanvas": [
+          51,
+          46
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.108108,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          66,
+          66
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 210306,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.981382,
+        "pixelCanvas": [
+          66,
+          66
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.108108,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          66,
+          66
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "personalhotspot",
+        "nativeBlock": 219624,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.981382,
+        "pixelCanvas": [
+          66,
+          66
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.064516,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          51,
+          46
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 222933,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.932189,
+        "pixelCanvas": [
+          51,
+          46
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.609756,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          59,
+          63
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "cellularbars",
+        "nativeBlock": 223019,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.924694,
+        "pixelCanvas": [
+          59,
+          63
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.516129,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          57,
+          52
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.slash",
+        "nativeBlock": 234148,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.957534,
+        "pixelCanvas": [
+          58,
+          52
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.516129,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          57,
+          52
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi",
+        "nativeBlock": 228928,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.957534,
+        "pixelCanvas": [
+          58,
+          52
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.013514,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          75,
+          74
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 227254,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.981118,
+        "pixelCanvas": [
+          75,
+          74
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.013514,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          75,
+          74
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "personalhotspot",
+        "nativeBlock": 236412,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.981118,
+        "pixelCanvas": [
+          75,
+          74
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.516129,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          57,
+          52
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 239736,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.957534,
+        "pixelCanvas": [
+          58,
+          52
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.268293,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          67,
+          72
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "cellularbars",
+        "nativeBlock": 239798,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.884873,
+        "pixelCanvas": [
+          67,
+          72
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.483871,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          67,
+          61
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "wifi.slash",
+        "nativeBlock": 250938,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.963372,
+        "pixelCanvas": [
+          68,
+          61
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.483871,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          67,
+          61
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "wifi",
+        "nativeBlock": 245686,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.963372,
+        "pixelCanvas": [
+          68,
+          61
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.189189,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          88,
+          87
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "personalhotspot.slash",
+        "nativeBlock": 244049,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.984807,
+        "pixelCanvas": [
+          88,
+          87
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.189189,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          88,
+          87
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "personalhotspot",
+        "nativeBlock": 253213,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.984807,
+        "pixelCanvas": [
+          88,
+          87
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.483871,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          67,
+          61
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "wifi.badge.lock",
+        "nativeBlock": 256523,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.963372,
+        "pixelCanvas": [
+          68,
+          61
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.146341,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          78,
+          84
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "cellularbars",
+        "nativeBlock": 256618,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.977536,
+        "pixelCanvas": [
+          78,
+          84
+        ],
+        "pointSize": 20,
+        "scale": 3
+      }
+    ],
+    "templateLayouts": {
+      "cellularbars": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 2.0,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 2.0,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1585.121951219512,
+            1450.77,
+            1714.8780487804877,
+            1590.77
+          ],
+          "M": [
+            1585.121951219512,
+            1020.77,
+            1714.8780487804877,
+            1160.77
+          ],
+          "S": [
+            1585.121951219512,
+            590.77,
+            1714.8780487804877,
+            730.77
+          ]
+        }
+      },
+      "personalhotspot": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 2.15,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 2.15,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1576.7302631578948,
+            1447.5002631578948,
+            1723.2697368421052,
+            1592.0594736842106
+          ],
+          "M": [
+            1576.7302631578948,
+            1017.5002631578948,
+            1723.2697368421052,
+            1162.0594736842106
+          ],
+          "S": [
+            1576.7302631578948,
+            587.5002631578948,
+            1723.2697368421052,
+            732.0594736842105
+          ]
+        }
+      },
+      "personalhotspot.slash": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 2.15,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 2.15,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1576.7302631578948,
+            1447.5002631578948,
+            1723.2697368421052,
+            1592.0594736842106
+          ],
+          "M": [
+            1576.7302631578948,
+            1017.5002631578948,
+            1723.2697368421052,
+            1162.0594736842106
+          ],
+          "S": [
+            1576.7302631578948,
+            587.5002631578948,
+            1723.2697368421052,
+            732.0594736842105
+          ]
+        }
+      },
+      "wifi": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 1.6,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 1.6,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1594.0,
+            1470.1893548387097,
+            1706.0,
+            1571.3506451612902
+          ],
+          "M": [
+            1594.0,
+            1040.1893548387097,
+            1706.0,
+            1141.3506451612902
+          ],
+          "S": [
+            1594.0,
+            610.1893548387096,
+            1706.0,
+            711.3506451612903
+          ]
+        }
+      },
+      "wifi.badge.lock": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 1.6,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 1.6,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1594.0,
+            1470.1893548387097,
+            1706.0,
+            1571.3506451612902
+          ],
+          "M": [
+            1594.0,
+            1040.1893548387097,
+            1706.0,
+            1141.3506451612902
+          ],
+          "S": [
+            1594.0,
+            610.1893548387096,
+            1706.0,
+            711.3506451612903
+          ]
+        }
+      },
+      "wifi.slash": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 1.6,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 1.6,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1594.0,
+            1470.1893548387097,
+            1706.0,
+            1571.3506451612902
+          ],
+          "M": [
+            1594.0,
+            1040.1893548387097,
+            1706.0,
+            1141.3506451612902
+          ],
+          "S": [
+            1594.0,
+            610.1893548387096,
+            1706.0,
+            711.3506451612903
+          ]
+        }
+      }
+    }
+  },
+  "donorCoreUIVersion": 970,
+  "donorSHA256": "b47b3d4f5849a52f432cd2acfe893462605e9c397e8e51bb1b1e29b5d46855f6",
+  "exactNativeFileLengthPreserved": true,
+  "flashlightContourMethod": "bilinear-subpixel-opacity-plane-trace",
+  "flashlightContourSupersampling": 8,
+  "flashlightContourTolerance": 0.08,
+  "flashlightOpticalSizingValidation": {
+    "hostRenderedEveryNativeConnectivityRendition": true,
+    "hostRenderedEveryRequestedNativeRendition": true,
+    "nativeRenditionCount": 28,
+    "nativeSymbolImagesUseInkCroppedExtents": true,
+    "renditions": [
+      {
+        "aspectRoundingErrorPixels": 0.463415,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          1,
+          23,
+          43
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 19696,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.951304,
+        "pixelCanvas": [
+          23,
+          43
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.027027,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          42
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 20802,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.883838,
+        "pixelCanvas": [
+          17,
+          42
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.463415,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          23,
+          43
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 36496,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.951304,
+        "pixelCanvas": [
+          23,
+          43
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.027027,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          42
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 37623,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.883838,
+        "pixelCanvas": [
+          17,
+          42
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.463415,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          23,
+          43
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 55388,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.951304,
+        "pixelCanvas": [
+          23,
+          43
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.414634,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          9,
+          16
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 55386,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.822917,
+        "pixelCanvas": [
+          9,
+          16
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.027027,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          42
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 57635,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.883838,
+        "pixelCanvas": [
+          17,
+          42
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.513514,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          7,
+          16
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 57639,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.684932,
+        "pixelCanvas": [
+          7,
+          16
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.341463,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          10,
+          18
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 86892,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864407,
+        "pixelCanvas": [
+          10,
+          18
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.297297,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          7,
+          18
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 88017,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.788235,
+        "pixelCanvas": [
+          8,
+          18
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.731707,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          12,
+          22
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 103687,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.89375,
+        "pixelCanvas": [
+          12,
+          22
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.486486,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          9,
+          21
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 104818,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.8,
+        "pixelCanvas": [
+          9,
+          21
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.463415,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          1,
+          23,
+          43
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 120500,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.951304,
+        "pixelCanvas": [
+          23,
+          43
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.027027,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          42
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 121602,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.883838,
+        "pixelCanvas": [
+          17,
+          42
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.463415,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          1,
+          23,
+          43
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 137292,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.951304,
+        "pixelCanvas": [
+          23,
+          43
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.027027,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          42
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 138414,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.883838,
+        "pixelCanvas": [
+          17,
+          42
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.170732,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          32
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 155858,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.934524,
+        "pixelCanvas": [
+          17,
+          32
+        ],
+        "pointSize": 15,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.432432,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          13,
+          32
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 156993,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.857143,
+        "pixelCanvas": [
+          13,
+          32
+        ],
+        "pointSize": 15,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.317073,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          19,
+          36
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 172671,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.927059,
+        "pixelCanvas": [
+          20,
+          36
+        ],
+        "pointSize": 17,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.405405,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          15,
+          36
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 173793,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.843854,
+        "pixelCanvas": [
+          15,
+          36
+        ],
+        "pointSize": 17,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.463415,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          23,
+          43
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 189475,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.951304,
+        "pixelCanvas": [
+          23,
+          43
+        ],
+        "pointSize": 20,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.027027,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          17,
+          42
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 190597,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.883838,
+        "pixelCanvas": [
+          17,
+          42
+        ],
+        "pointSize": 20,
+        "scale": 2
+      },
+      {
+        "aspectRoundingErrorPixels": 0.243902,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          48
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 208888,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.927904,
+        "pixelCanvas": [
+          26,
+          48
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.054054,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          19,
+          47
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 209992,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.931959,
+        "pixelCanvas": [
+          19,
+          47
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.02439,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          29,
+          54
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 225676,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.950644,
+        "pixelCanvas": [
+          29,
+          54
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.513514,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          22,
+          54
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 226814,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.934505,
+        "pixelCanvas": [
+          22,
+          54
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.195122,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          34,
+          64
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.off.fill",
+        "nativeBlock": 242495,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.980815,
+        "pixelCanvas": [
+          34,
+          64
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.459459,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          63
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "flashlight.on.fill",
+        "nativeBlock": 243617,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.920415,
+        "pixelCanvas": [
+          26,
+          63
+        ],
+        "pointSize": 20,
+        "scale": 3
+      }
+    ],
+    "templateLayouts": {
+      "flashlight.off.fill": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 1.5,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 1.5,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1621.8292682926829,
+            1468.27,
+            1678.170731707317,
+            1573.27
+          ],
+          "M": [
+            1621.8292682926829,
+            1038.27,
+            1678.170731707317,
+            1143.27
+          ],
+          "S": [
+            1621.8292682926829,
+            608.27,
+            1678.170731707317,
+            713.27
+          ]
+        }
+      },
+      "flashlight.on.fill": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 1.5,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 1.5,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1628.90625,
+            1469.2075,
+            1671.09375,
+            1573.27
+          ],
+          "M": [
+            1628.90625,
+            1039.2075,
+            1671.09375,
+            1143.27
+          ],
+          "S": [
+            1628.90625,
+            609.2075,
+            1671.09375,
+            713.27
+          ]
+        }
+      }
+    }
+  },
+  "highFidelityContourMethod": "bilinear-subpixel-opacity-plane-trace",
+  "highFidelityContourSupersampling": 8,
+  "highFidelityContourSymbolNames": [
+    "flashlight.off.fill",
+    "flashlight.on.fill",
+    "personalhotspot",
+    "personalhotspot.slash",
+    "wifi",
+    "wifi.badge.lock",
+    "wifi.slash"
+  ],
+  "highFidelityContourTolerance": 0.08,
+  "lookupKeysAndTreesPreserved": true,
+  "method": "native-BOM-existing-CSI-slot-graft",
+  "nativeAuthoringRuntimeBuild": "23A343",
+  "nativeButtonGeometryChanged": false,
+  "nativeCoreUIVersion": 970,
+  "nativeHeaderPreserved": true,
+  "nativeStorageVersion": 17,
+  "nativeSymbolCaplineAndBaselineGuidesChanged": false,
+  "payloadLength": 150914088,
+  "payloadSHA256": "33295ba558b49d0fee1453effe2a92ec9c8e8431e10f9f78cec57bd41cdf8e83",
+  "productBuildVersion": "23A341",
+  "schemaVersion": 1,
+  "sourceAlphaPlanes": {
+    "airplay.audio": [
+      77,
+      128
+    ],
+    "camera.fill": [
+      122,
+      255
+    ],
+    "cellularbars": [
+      122,
+      255
+    ],
+    "flashlight.off.fill": [
+      122,
+      255
+    ],
+    "flashlight.on.fill": [
+      122,
+      255
+    ],
+    "personalhotspot": [
+      122,
+      255
+    ],
+    "personalhotspot.slash": [
+      122,
+      255
+    ],
+    "qrcode.viewfinder": [
+      122,
+      255
+    ],
+    "speaker.fill": [
+      128,
+      255
+    ],
+    "speaker.wave.1.fill": [
+      128,
+      255
+    ],
+    "speaker.wave.2.fill": [
+      128,
+      255
+    ],
+    "speaker.wave.3.fill": [
+      128,
+      255
+    ],
+    "wifi": [
+      122,
+      255
+    ],
+    "wifi.badge.lock": [
+      122,
+      255
+    ],
+    "wifi.slash": [
+      122,
+      255
+    ]
+  },
+  "sourceArtworkSHA256": {
+    "airplay.audio": "260bc071a7464e843e55427aef454d6e3fd58bcd15487c5e98c7025036cbe429",
+    "camera.fill": "c37accaf836b3d240f9996f44384c9c332f31c2eea84cdeed04b6cbb76c0adab",
+    "cellularbars": "ff96db2a40e7616140cfa9a156d10de746f0424b1bd2ee138ca076c34f63f2ee",
+    "flashlight.off.fill": "90114c1a704d43a74a2ec583a19f5736cd1dbe17af011762ccc71b04cfe2441f",
+    "flashlight.on.fill": "86fa9579e8dcfb83631758aa6511cb74badc481392df2cc59284b676bb0d39dd",
+    "personalhotspot": "d561e836d2597d077131e364ea33ba3d15cbda5ed9ab729c6b97d9ba3656d074",
+    "personalhotspot.slash": "d561e836d2597d077131e364ea33ba3d15cbda5ed9ab729c6b97d9ba3656d074",
+    "qrcode.viewfinder": "2361becf5abbcc742c836e345f9608873f8ee146ab8f69d7fc7d2b930b49c3f8",
+    "speaker.fill": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+    "speaker.wave.1.fill": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+    "speaker.wave.2.fill": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+    "speaker.wave.3.fill": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+    "wifi": "9097c734ae4ea79e1e86b027b0187474e1b7cc28511c643dbeb8daf5ee9639a1",
+    "wifi.badge.lock": "9097c734ae4ea79e1e86b027b0187474e1b7cc28511c643dbeb8daf5ee9639a1",
+    "wifi.slash": "9097c734ae4ea79e1e86b027b0187474e1b7cc28511c643dbeb8daf5ee9639a1"
+  },
+  "standaloneCachedImages": true,
+  "stockLength": 150914088,
+  "stockSHA256": "64a1699915cf947bc961bc37949b907cffb804ea7e7b8dc810ee8d73c3482553",
+  "symbolArtworkProvenance": {
+    "airplay.audio": {
+      "artworkResource": "MediaAirPlay.png",
+      "artworkSHA256": "260bc071a7464e843e55427aef454d6e3fd58bcd15487c5e98c7025036cbe429",
+      "consumerEvidence": "CCLifecycleOwnerVM-20261005-01/media-complete-before.json:MediaControlsModuleRouteButton.viewModel.some.symbol",
+      "nativeButtonTintAndBackgroundPreserved": true,
+      "source": "upstream-Pulsar-AirPlayControlAudio-Light-and-Dark",
+      "sourceLightAndDarkIdentical": true,
+      "sourceMainSHA256": "25f3acba533310abb168ab10396a8fee5cbadf05dfbe742480d151a92db551a8",
+      "symbolName": "airplay.audio"
+    },
+    "speaker.fill": {
+      "artworkResource": "MediaVolume.png",
+      "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+      "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings",
+      "nativeAliases": {
+        "volume.1.fill": "speaker.wave.1.fill",
+        "volume.2.fill": "speaker.wave.2.fill",
+        "volume.3.fill": "speaker.wave.3.fill",
+        "volume.fill": "speaker.fill"
+      },
+      "nativeButtonTintAndBackgroundPreserved": true,
+      "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+    },
+    "speaker.wave.1.fill": {
+      "artworkResource": "MediaVolume.png",
+      "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+      "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings",
+      "nativeAliases": {
+        "volume.1.fill": "speaker.wave.1.fill",
+        "volume.2.fill": "speaker.wave.2.fill",
+        "volume.3.fill": "speaker.wave.3.fill",
+        "volume.fill": "speaker.fill"
+      },
+      "nativeButtonTintAndBackgroundPreserved": true,
+      "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+    },
+    "speaker.wave.2.fill": {
+      "artworkResource": "MediaVolume.png",
+      "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+      "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings",
+      "nativeAliases": {
+        "volume.1.fill": "speaker.wave.1.fill",
+        "volume.2.fill": "speaker.wave.2.fill",
+        "volume.3.fill": "speaker.wave.3.fill",
+        "volume.fill": "speaker.fill"
+      },
+      "nativeButtonTintAndBackgroundPreserved": true,
+      "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+    },
+    "speaker.wave.3.fill": {
+      "artworkResource": "MediaVolume.png",
+      "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+      "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings",
+      "nativeAliases": {
+        "volume.1.fill": "speaker.wave.1.fill",
+        "volume.2.fill": "speaker.wave.2.fill",
+        "volume.3.fill": "speaker.wave.3.fill",
+        "volume.fill": "speaker.fill"
+      },
+      "nativeButtonTintAndBackgroundPreserved": true,
+      "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+    }
+  },
+  "symbolArtworkScale": {
+    "airplay.audio": 1.0,
+    "camera.fill": 1.0,
+    "cellularbars": 2.0,
+    "flashlight.off.fill": 1.5,
+    "flashlight.on.fill": 1.5,
+    "personalhotspot": 2.15,
+    "personalhotspot.slash": 2.15,
+    "qrcode.viewfinder": 1.0,
+    "speaker.fill": 1.0,
+    "speaker.wave.1.fill": 1.0,
+    "speaker.wave.2.fill": 1.0,
+    "speaker.wave.3.fill": 1.0,
+    "wifi": 1.6,
+    "wifi.badge.lock": 1.6,
+    "wifi.slash": 1.6
+  },
+  "symbolOpacityEncoding": "native-monochrome-multicolor-hierarchical-CSS-annotations",
+  "targetPath": "/System/Library/PrivateFrameworks/SFSymbols.framework/CoreGlyphs.bundle/Assets.car",
+  "targetRenditionCount": 210,
+  "targetRenditions": [
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 19696,
+      "donorBlock": 72,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1025,
+      "payloadLayout": 1017,
+      "payloadLength": 2234
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 28147,
+      "donorBlock": 112,
+      "name": "wifi.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1504,
+      "payloadLayout": 1017,
+      "payloadLength": 3110
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 29092,
+      "donorBlock": 86,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1017,
+      "originalLength": 1285,
+      "payloadLayout": 1017,
+      "payloadLength": 1869
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 22933,
+      "donorBlock": 68,
+      "name": "wifi",
+      "nativeLayout": 1017,
+      "originalLength": 1187,
+      "payloadLayout": 1017,
+      "payloadLength": 3110
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 24461,
+      "donorBlock": 100,
+      "name": "airplay.audio",
+      "nativeLayout": 1017,
+      "originalLength": 1642,
+      "payloadLayout": 1017,
+      "payloadLength": 2229
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 31050,
+      "donorBlock": 108,
+      "name": "camera.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1075,
+      "payloadLayout": 1017,
+      "payloadLength": 1800
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 21190,
+      "donorBlock": 70,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1368,
+      "payloadLayout": 1017,
+      "payloadLength": 2924
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 30350,
+      "donorBlock": 74,
+      "name": "personalhotspot",
+      "nativeLayout": 1017,
+      "originalLength": 999,
+      "payloadLayout": 1017,
+      "payloadLength": 2924
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 20802,
+      "donorBlock": 80,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1022,
+      "payloadLayout": 1017,
+      "payloadLength": 3706
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 33734,
+      "donorBlock": 96,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1017,
+      "originalLength": 1604,
+      "payloadLayout": 1017,
+      "payloadLength": 3110
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 33354,
+      "donorBlock": 84,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1145,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 33821,
+      "donorBlock": 106,
+      "name": "cellularbars",
+      "nativeLayout": 1017,
+      "originalLength": 1266,
+      "payloadLayout": 1017,
+      "payloadLength": 2474
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 32911,
+      "donorBlock": 76,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1521,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 33177,
+      "donorBlock": 82,
+      "name": "speaker.fill",
+      "nativeLayout": 1017,
+      "originalLength": 868,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 33895,
+      "donorBlock": 94,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1334,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 36496,
+      "donorBlock": 492,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1025,
+      "payloadLayout": 1017,
+      "payloadLength": 2234
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 44943,
+      "donorBlock": 508,
+      "name": "wifi.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1536,
+      "payloadLayout": 1017,
+      "payloadLength": 3110
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 45880,
+      "donorBlock": 502,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1017,
+      "originalLength": 1285,
+      "payloadLayout": 1017,
+      "payloadLength": 1869
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 39722,
+      "donorBlock": 504,
+      "name": "wifi",
+      "nativeLayout": 1017,
+      "originalLength": 1200,
+      "payloadLayout": 1017,
+      "payloadLength": 3110
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 41252,
+      "donorBlock": 482,
+      "name": "airplay.audio",
+      "nativeLayout": 1017,
+      "originalLength": 1629,
+      "payloadLayout": 1017,
+      "payloadLength": 2229
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 47983,
+      "donorBlock": 524,
+      "name": "camera.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1069,
+      "payloadLayout": 1017,
+      "payloadLength": 1800
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 38055,
+      "donorBlock": 494,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1394,
+      "payloadLayout": 1017,
+      "payloadLength": 2924
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 47211,
+      "donorBlock": 490,
+      "name": "personalhotspot",
+      "nativeLayout": 1017,
+      "originalLength": 1029,
+      "payloadLayout": 1017,
+      "payloadLength": 2924
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 37623,
+      "donorBlock": 496,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1029,
+      "payloadLayout": 1017,
+      "payloadLength": 3706
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 50501,
+      "donorBlock": 516,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1017,
+      "originalLength": 1596,
+      "payloadLayout": 1017,
+      "payloadLength": 3110
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 50156,
+      "donorBlock": 500,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1163,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 50619,
+      "donorBlock": 510,
+      "name": "cellularbars",
+      "nativeLayout": 1017,
+      "originalLength": 1227,
+      "payloadLayout": 1017,
+      "payloadLength": 2474
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 49714,
+      "donorBlock": 60,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1593,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 49980,
+      "donorBlock": 486,
+      "name": "speaker.fill",
+      "nativeLayout": 1017,
+      "originalLength": 873,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 50691,
+      "donorBlock": 518,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1372,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 55388,
+      "donorBlock": 542,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1053,
+      "payloadLayout": 1017,
+      "payloadLength": 2251
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 55386,
+      "donorBlock": 536,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 493
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 72276,
+      "donorBlock": 608,
+      "name": "wifi.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1575,
+      "payloadLayout": 1017,
+      "payloadLength": 3151
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 72282,
+      "donorBlock": 606,
+      "name": "wifi.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 566
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 74140,
+      "donorBlock": 532,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1017,
+      "originalLength": 1321,
+      "payloadLayout": 1017,
+      "payloadLength": 1896
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 74162,
+      "donorBlock": 564,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 470
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 61776,
+      "donorBlock": 576,
+      "name": "wifi",
+      "nativeLayout": 1017,
+      "originalLength": 1237,
+      "payloadLayout": 1017,
+      "payloadLength": 3151
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 61858,
+      "donorBlock": 574,
+      "name": "wifi",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 566
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 64918,
+      "donorBlock": 572,
+      "name": "airplay.audio",
+      "nativeLayout": 1017,
+      "originalLength": 1686,
+      "payloadLayout": 1017,
+      "payloadLength": 2267
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 64924,
+      "donorBlock": 580,
+      "name": "airplay.audio",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 451
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 78374,
+      "donorBlock": 614,
+      "name": "camera.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1090,
+      "payloadLayout": 1017,
+      "payloadLength": 1826
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 78386,
+      "donorBlock": 618,
+      "name": "camera.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 454
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 58503,
+      "donorBlock": 550,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1413,
+      "payloadLayout": 1017,
+      "payloadLength": 2990
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 58515,
+      "donorBlock": 548,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 690
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 76826,
+      "donorBlock": 528,
+      "name": "personalhotspot",
+      "nativeLayout": 1017,
+      "originalLength": 1032,
+      "payloadLayout": 1017,
+      "payloadLength": 2990
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 76838,
+      "donorBlock": 480,
+      "name": "personalhotspot",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 690
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 57635,
+      "donorBlock": 534,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1051,
+      "payloadLayout": 1017,
+      "payloadLength": 3719
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 57639,
+      "donorBlock": 552,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 464
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 83457,
+      "donorBlock": 594,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1017,
+      "originalLength": 1642,
+      "payloadLayout": 1017,
+      "payloadLength": 3151
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 83467,
+      "donorBlock": 588,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 566
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 82715,
+      "donorBlock": 562,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1200,
+      "payloadLayout": 1017,
+      "payloadLength": 3558
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 82707,
+      "donorBlock": 566,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 460
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 83640,
+      "donorBlock": 598,
+      "name": "cellularbars",
+      "nativeLayout": 1017,
+      "originalLength": 1262,
+      "payloadLayout": 1017,
+      "payloadLength": 2489
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 83638,
+      "donorBlock": 596,
+      "name": "cellularbars",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 708
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 81815,
+      "donorBlock": 522,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1615,
+      "payloadLayout": 1017,
+      "payloadLength": 3558
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 81819,
+      "donorBlock": 530,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 460
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 82344,
+      "donorBlock": 546,
+      "name": "speaker.fill",
+      "nativeLayout": 1017,
+      "originalLength": 903,
+      "payloadLayout": 1017,
+      "payloadLength": 3558
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 82063,
+      "donorBlock": 544,
+      "name": "speaker.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 460
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 83761,
+      "donorBlock": 602,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1413,
+      "payloadLayout": 1017,
+      "payloadLength": 3558
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 83785,
+      "donorBlock": 600,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 460
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 86892,
+      "donorBlock": 610,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 523
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 95342,
+      "donorBlock": 658,
+      "name": "wifi.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 612
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 96286,
+      "donorBlock": 630,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 493
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 90126,
+      "donorBlock": 644,
+      "name": "wifi",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 612
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 91660,
+      "donorBlock": 638,
+      "name": "airplay.audio",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 472
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 98387,
+      "donorBlock": 634,
+      "name": "camera.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 481
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 88443,
+      "donorBlock": 624,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 759
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 97611,
+      "donorBlock": 622,
+      "name": "personalhotspot",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 759
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 88017,
+      "donorBlock": 626,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 496
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 100935,
+      "donorBlock": 636,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 612
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 100560,
+      "donorBlock": 582,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 478
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 101021,
+      "donorBlock": 654,
+      "name": "cellularbars",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 811
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 100120,
+      "donorBlock": 612,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 478
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 100378,
+      "donorBlock": 628,
+      "name": "speaker.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 478
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 101085,
+      "donorBlock": 650,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 478
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 103687,
+      "donorBlock": 662,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 580
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 112124,
+      "donorBlock": 708,
+      "name": "wifi.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 689
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 113086,
+      "donorBlock": 676,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 530
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 106913,
+      "donorBlock": 476,
+      "name": "wifi",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 689
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 108469,
+      "donorBlock": 696,
+      "name": "airplay.audio",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 503
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 115192,
+      "donorBlock": 704,
+      "name": "camera.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 525
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 105264,
+      "donorBlock": 660,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 879
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 114420,
+      "donorBlock": 664,
+      "name": "personalhotspot",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 879
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 104818,
+      "donorBlock": 670,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 538
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 117741,
+      "donorBlock": 692,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 689
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 117360,
+      "donorBlock": 674,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 514
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 117813,
+      "donorBlock": 702,
+      "name": "cellularbars",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 941
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 116911,
+      "donorBlock": 666,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 514
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 117180,
+      "donorBlock": 672,
+      "name": "speaker.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 514
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 117893,
+      "donorBlock": 690,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 514
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 120500,
+      "donorBlock": 810,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1280,
+      "payloadLayout": 1017,
+      "payloadLength": 2227
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 128944,
+      "donorBlock": 836,
+      "name": "wifi.slash",
+      "nativeLayout": 1017,
+      "originalLength": 2158,
+      "payloadLayout": 1017,
+      "payloadLength": 3127
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 129890,
+      "donorBlock": 790,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1017,
+      "originalLength": 1734,
+      "payloadLayout": 1017,
+      "payloadLength": 1872
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 123724,
+      "donorBlock": 818,
+      "name": "wifi",
+      "nativeLayout": 1017,
+      "originalLength": 1653,
+      "payloadLayout": 1017,
+      "payloadLength": 3127
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 125264,
+      "donorBlock": 828,
+      "name": "airplay.audio",
+      "nativeLayout": 1017,
+      "originalLength": 1922,
+      "payloadLayout": 1017,
+      "payloadLength": 2243
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 131956,
+      "donorBlock": 848,
+      "name": "camera.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1338,
+      "payloadLayout": 1017,
+      "payloadLength": 1802
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 122052,
+      "donorBlock": 814,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1929,
+      "payloadLayout": 1017,
+      "payloadLength": 2966
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 131216,
+      "donorBlock": 802,
+      "name": "personalhotspot",
+      "nativeLayout": 1017,
+      "originalLength": 1365,
+      "payloadLayout": 1017,
+      "payloadLength": 2966
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 121602,
+      "donorBlock": 806,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1282,
+      "payloadLayout": 1017,
+      "payloadLength": 3695
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 134539,
+      "donorBlock": 834,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1017,
+      "originalLength": 1864,
+      "payloadLayout": 1017,
+      "payloadLength": 3127
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 134162,
+      "donorBlock": 822,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1462,
+      "payloadLayout": 1017,
+      "payloadLength": 3534
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 134627,
+      "donorBlock": 832,
+      "name": "cellularbars",
+      "nativeLayout": 1017,
+      "originalLength": 1555,
+      "payloadLayout": 1017,
+      "payloadLength": 2465
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 133701,
+      "donorBlock": 804,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1017,
+      "originalLength": 2133,
+      "payloadLayout": 1017,
+      "payloadLength": 3534
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 133974,
+      "donorBlock": 808,
+      "name": "speaker.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1037,
+      "payloadLayout": 1017,
+      "payloadLength": 3534
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 134675,
+      "donorBlock": 838,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1807,
+      "payloadLayout": 1017,
+      "payloadLength": 3534
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 137292,
+      "donorBlock": 1320,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1010,
+      "payloadLayout": 1017,
+      "payloadLength": 2234
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 145744,
+      "donorBlock": 1336,
+      "name": "wifi.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1536,
+      "payloadLayout": 1017,
+      "payloadLength": 3110
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 146678,
+      "donorBlock": 1330,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1017,
+      "originalLength": 1286,
+      "payloadLayout": 1017,
+      "payloadLength": 1869
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 140524,
+      "donorBlock": 1332,
+      "name": "wifi",
+      "nativeLayout": 1017,
+      "originalLength": 1212,
+      "payloadLayout": 1017,
+      "payloadLength": 3110
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 142058,
+      "donorBlock": 1310,
+      "name": "airplay.audio",
+      "nativeLayout": 1017,
+      "originalLength": 1678,
+      "payloadLayout": 1017,
+      "payloadLength": 2229
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 148790,
+      "donorBlock": 1352,
+      "name": "camera.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1044,
+      "payloadLayout": 1017,
+      "payloadLength": 1800
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 138848,
+      "donorBlock": 1322,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1335,
+      "payloadLayout": 1017,
+      "payloadLength": 2924
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 148014,
+      "donorBlock": 1318,
+      "name": "personalhotspot",
+      "nativeLayout": 1017,
+      "originalLength": 966,
+      "payloadLayout": 1017,
+      "payloadLength": 2924
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 138414,
+      "donorBlock": 1324,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1014,
+      "payloadLayout": 1017,
+      "payloadLength": 3706
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 151336,
+      "donorBlock": 1344,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1017,
+      "originalLength": 1613,
+      "payloadLayout": 1017,
+      "payloadLength": 3110
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 150955,
+      "donorBlock": 1328,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1169,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 151402,
+      "donorBlock": 1338,
+      "name": "cellularbars",
+      "nativeLayout": 1017,
+      "originalLength": 1196,
+      "payloadLayout": 1017,
+      "payloadLength": 2474
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 150510,
+      "donorBlock": 888,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1620,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 150770,
+      "donorBlock": 1314,
+      "name": "speaker.fill",
+      "nativeLayout": 1017,
+      "originalLength": 873,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 151484,
+      "donorBlock": 1346,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1403,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 155858,
+      "donorBlock": 1438,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 791
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 164297,
+      "donorBlock": 1486,
+      "name": "wifi.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 961
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 165257,
+      "donorBlock": 1458,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 747
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 159096,
+      "donorBlock": 1472,
+      "name": "wifi",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 961
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 160556,
+      "donorBlock": 1466,
+      "name": "airplay.audio",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 621
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 167332,
+      "donorBlock": 1462,
+      "name": "camera.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 662
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 157389,
+      "donorBlock": 1452,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1226
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 166598,
+      "donorBlock": 1450,
+      "name": "personalhotspot",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1226
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 156993,
+      "donorBlock": 1454,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 710
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 169910,
+      "donorBlock": 1464,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 961
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 169533,
+      "donorBlock": 1410,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 685
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 169992,
+      "donorBlock": 1482,
+      "name": "cellularbars",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1285
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 169086,
+      "donorBlock": 1440,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 685
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 169341,
+      "donorBlock": 1456,
+      "name": "speaker.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 685
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 170072,
+      "donorBlock": 1478,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 685
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 172671,
+      "donorBlock": 1490,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 878
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 181109,
+      "donorBlock": 1536,
+      "name": "wifi.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1062
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 182055,
+      "donorBlock": 1504,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 818
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 175897,
+      "donorBlock": 1304,
+      "name": "wifi",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1062
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 177435,
+      "donorBlock": 1524,
+      "name": "airplay.audio",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 652
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 184167,
+      "donorBlock": 1532,
+      "name": "camera.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 701
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 174227,
+      "donorBlock": 1488,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1322
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 183383,
+      "donorBlock": 1492,
+      "name": "personalhotspot",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1322
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 173793,
+      "donorBlock": 1498,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 799
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 186716,
+      "donorBlock": 1520,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1062
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 186321,
+      "donorBlock": 1502,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 765
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 186778,
+      "donorBlock": 1530,
+      "name": "cellularbars",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1474
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 185888,
+      "donorBlock": 1494,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 765
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 186153,
+      "donorBlock": 1500,
+      "name": "speaker.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 765
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 186862,
+      "donorBlock": 1518,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 765
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 189475,
+      "donorBlock": 1548,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 979
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 197925,
+      "donorBlock": 1580,
+      "name": "wifi.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1197
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 198859,
+      "donorBlock": 1552,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 811
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 192557,
+      "donorBlock": 1556,
+      "name": "wifi",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1197
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 194231,
+      "donorBlock": 1564,
+      "name": "airplay.audio",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 712
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 200959,
+      "donorBlock": 1568,
+      "name": "camera.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 799
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 191031,
+      "donorBlock": 1544,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1526
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 200189,
+      "donorBlock": 1538,
+      "name": "personalhotspot",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1526
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 190597,
+      "donorBlock": 1550,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 909
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 203507,
+      "donorBlock": 1574,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1197
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 203132,
+      "donorBlock": 1542,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 883
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 203585,
+      "donorBlock": 1572,
+      "name": "cellularbars",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1724
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 202679,
+      "donorBlock": 1540,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 883
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 202945,
+      "donorBlock": 1546,
+      "name": "speaker.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 883
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 2,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 203661,
+      "donorBlock": 1570,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 883
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 208888,
+      "donorBlock": 1590,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1143
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 217335,
+      "donorBlock": 1625,
+      "name": "wifi.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1295
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 218279,
+      "donorBlock": 1601,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1008
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 212112,
+      "donorBlock": 1592,
+      "name": "wifi",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1295
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 213650,
+      "donorBlock": 1611,
+      "name": "airplay.audio",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 787
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 220314,
+      "donorBlock": 1623,
+      "name": "camera.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 857
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 210306,
+      "donorBlock": 1599,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1730
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 219624,
+      "donorBlock": 1584,
+      "name": "personalhotspot",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1730
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 209992,
+      "donorBlock": 1566,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1030
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 222933,
+      "donorBlock": 1615,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1295
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 222552,
+      "donorBlock": 1595,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1019
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 223019,
+      "donorBlock": 1613,
+      "name": "cellularbars",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1938
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 222099,
+      "donorBlock": 1586,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1019
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 222364,
+      "donorBlock": 1588,
+      "name": "speaker.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1019
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 223093,
+      "donorBlock": 1627,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1019
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 225676,
+      "donorBlock": 1639,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1223
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 234148,
+      "donorBlock": 1665,
+      "name": "wifi.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1413
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 235080,
+      "donorBlock": 1619,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1142
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 228928,
+      "donorBlock": 1647,
+      "name": "wifi",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1413
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 230446,
+      "donorBlock": 1657,
+      "name": "airplay.audio",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 866
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 237190,
+      "donorBlock": 1677,
+      "name": "camera.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 933
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 227254,
+      "donorBlock": 1643,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1714
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 236412,
+      "donorBlock": 1631,
+      "name": "personalhotspot",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1714
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 226814,
+      "donorBlock": 1635,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1169
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 239736,
+      "donorBlock": 1663,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1413
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 239359,
+      "donorBlock": 1651,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1157
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 239798,
+      "donorBlock": 1661,
+      "name": "cellularbars",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2219
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 238906,
+      "donorBlock": 1633,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1157
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 239173,
+      "donorBlock": 1637,
+      "name": "speaker.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1157
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 239882,
+      "donorBlock": 1667,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1157
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 9228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 242495,
+      "donorBlock": 1683,
+      "name": "flashlight.off.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1377
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 46364,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 250938,
+      "donorBlock": 1707,
+      "name": "wifi.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1630
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 49969,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 251873,
+      "donorBlock": 1685,
+      "name": "qrcode.viewfinder",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1099
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 23604,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 245686,
+      "donorBlock": 1701,
+      "name": "wifi",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1630
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 30540,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 247260,
+      "donorBlock": 1699,
+      "name": "airplay.audio",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 994
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 59031,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 253985,
+      "donorBlock": 1713,
+      "name": "camera.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1029
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 16282,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 244049,
+      "donorBlock": 1689,
+      "name": "personalhotspot.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2201
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 55726,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 253213,
+      "donorBlock": 1679,
+      "name": "personalhotspot",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2201
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 14258,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 243617,
+      "donorBlock": 1671,
+      "name": "flashlight.on.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1345
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 37196,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 256523,
+      "donorBlock": 1703,
+      "name": "wifi.badge.lock",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1630
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20050,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 256153,
+      "donorBlock": 1693,
+      "name": "speaker.wave.1.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1268
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 40797,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 256618,
+      "donorBlock": 1695,
+      "name": "cellularbars",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2552
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 1918,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 255692,
+      "donorBlock": 1675,
+      "name": "speaker.wave.3.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1268
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 12430,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 255684,
+      "donorBlock": 1681,
+      "name": "speaker.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1268
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43752,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 256676,
+      "donorBlock": 1709,
+      "name": "speaker.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1268
+    }
+  ],
+  "themedSymbolNames": [
+    "airplay.audio",
+    "camera.fill",
+    "cellularbars",
+    "flashlight.off.fill",
+    "flashlight.on.fill",
+    "personalhotspot",
+    "personalhotspot.slash",
+    "qrcode.viewfinder",
+    "speaker.fill",
+    "speaker.wave.1.fill",
+    "speaker.wave.2.fill",
+    "speaker.wave.3.fill",
+    "wifi",
+    "wifi.badge.lock",
+    "wifi.slash"
+  ],
+  "unrelatedBlockCount": 313453,
+  "unrelatedBlocksSHA256": "6222176e7d35a607cc437c68c3aec3ea45b56a53153687b79154855f81975903"
+}

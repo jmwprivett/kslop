@@ -31,6 +31,22 @@
 #define CND_ICON_THEME_OPAQUE_BLACK 0
 #endif
 
+#ifndef CND_ICON_THEME_FLAT_PAYLOAD
+#define CND_ICON_THEME_FLAT_PAYLOAD 0
+#endif
+
+#ifndef CND_ICON_THEME_PDF_CANARY
+#define CND_ICON_THEME_PDF_CANARY 0
+#endif
+
+#ifndef CND_ICON_THEME_PDF_CANARY_PATH
+#define CND_ICON_THEME_PDF_CANARY_PATH ""
+#endif
+
+#ifndef CND_ICON_THEME_EXPECTED_PDF_SHA256
+#define CND_ICON_THEME_EXPECTED_PDF_SHA256 ""
+#endif
+
 #ifndef CND_ICON_THEME_TARGET_BUNDLE
 #define CND_ICON_THEME_TARGET_BUNDLE "com.ebay.iphone"
 #endif
@@ -51,10 +67,15 @@
 #define CND_ICON_THEME_PIXEL_SIZE 204
 #endif
 
+#ifndef CND_ICON_THEME_EXPECTED_SOURCE_SHA256
+#define CND_ICON_THEME_EXPECTED_SOURCE_SHA256 \
+    "74122c8aa948fc4e2d9d02148f62b88b8e4c77b1727cd34cf5632f9c6bbdca8b"
+#endif
+
 static const char *const CNDThemeOutputPath =
     "/var/tmp/cyanide-iconservices-theme-cache.log";
 static const char *const CNDThemeExpectedSourceSHA256 =
-    "74122c8aa948fc4e2d9d02148f62b88b8e4c77b1727cd34cf5632f9c6bbdca8b";
+    CND_ICON_THEME_EXPECTED_SOURCE_SHA256;
 static const char *const CNDThemeTargetBundle = CND_ICON_THEME_TARGET_BUNDLE;
 
 typedef struct {
@@ -64,6 +85,9 @@ typedef struct {
 
 static int gCNDThemeFD = -1;
 static CGImageRef gCNDThemeCGImage;
+#if CND_ICON_THEME_PDF_CANARY
+static NSData *gCNDThemePDFCanaryData;
+#endif
 static Method gCNDGenerateMethod;
 static IMP gCNDOriginalGenerate;
 static unsigned gCNDAppliedCount;
@@ -97,6 +121,32 @@ static NSString *CNDThemeSHA256(NSData *data)
     return text;
 }
 
+#if CND_ICON_THEME_PDF_CANARY
+static NSData *CNDThemeLoadPDFCanary(void)
+{
+    NSData *data = [NSData dataWithContentsOfFile:
+        @CND_ICON_THEME_PDF_CANARY_PATH
+        options:NSDataReadingMappedIfSafe error:nil];
+    NSString *digest = CNDThemeSHA256(data);
+    NSData *subject = [@"CND_SPOTLIGHT_PDF_CANARY_V1"
+        dataUsingEncoding:NSASCIIStringEncoding];
+    bool header = data.length >= 8U &&
+        !memcmp(data.bytes, "%PDF-1.", 7U);
+    bool marker = subject.length && data.length >= subject.length &&
+        [data rangeOfData:subject options:0
+                    range:NSMakeRange(0, data.length)].location != NSNotFound;
+    bool hash = CND_ICON_THEME_EXPECTED_PDF_SHA256[0] &&
+        [digest isEqualToString:@CND_ICON_THEME_EXPECTED_PDF_SHA256];
+    CNDThemeLog("[CND_ICON_THEME] pdf-canary-load path=%s bytes=%lu "
+                "sha256=%s header=%d marker=%d hash=%d\n",
+                CND_ICON_THEME_PDF_CANARY_PATH,
+                (unsigned long)data.length, digest.UTF8String ?: "-",
+                header, marker, hash);
+    return header && marker && hash ? data : nil;
+}
+
+#endif
+
 static NSData *CNDThemeRGBAData(CGImageRef image, size_t width,
                                 size_t height)
 {
@@ -117,6 +167,9 @@ static NSData *CNDThemeRGBAData(CGImageRef image, size_t width,
     CGContextRelease(context);
     return pixels;
 }
+
+static CGImageRef CNDThemeCreateInverseAlphaMask(CGImageRef image)
+    __attribute__((unused));
 
 static CGImageRef CNDThemeCreateInverseAlphaMask(CGImageRef image)
 {
@@ -326,6 +379,9 @@ static bool CNDThemeInterestingRuntimeName(const char *name)
 }
 
 static void CNDThemeInspectRuntimeObject(id object, const char *label)
+    __attribute__((unused));
+
+static void CNDThemeInspectRuntimeObject(id object, const char *label)
 {
     if (!object) {
         CNDThemeLog("[CND_ICON_THEME] inspect-object label=%s object=nil\n",
@@ -477,7 +533,375 @@ static CGImageRef CNDThemeLoadImage(void)
 }
 
 static NSData *CNDThemeMakeLayerData(double scale)
+    __attribute__((unused));
+
+#if CND_ICON_THEME_PDF_CANARY
+static const char *CNDThemeTypes(Class cls, const char *selector)
 {
+    Method method = cls
+        ? class_getInstanceMethod(cls, sel_registerName(selector)) : NULL;
+    return method ? method_getTypeEncoding(method) : "-";
+}
+
+static NSData *CNDThemeBuildDirectPDFArchive(
+    id stack, id group, id vector, CNDThemeSize pointSize, NSInteger scale,
+    NSError **errorOut)
+{
+    Class creatorClass = NSClassFromString(@"CUISingleNamedAssetCreator");
+    Class generatorClass = NSClassFromString(@"CUICatalogCSIGenerator");
+    Class referenceClass = NSClassFromString(@"CUIRenditionLayerReference");
+    NSString *stackName = @"CNDThemePDFCanary.v1";
+    NSString *groupName = @"CNDThemePDFCanary.v1/Group 1";
+    NSString *vectorName = @"CNDThemePDFCanary.v1/Group 1/PDFLayer 2";
+    SEL stackDataSelector = sel_registerName("dataRepresentationWithError:");
+    SEL creatorInitializer = sel_registerName(
+        "initWithOutputURL:versionString:");
+    SEL rawInitializer = sel_registerName(
+        "initWithRawData:pixelFormat:layout:");
+    SEL addStack = sel_registerName(
+        "addIconLayerStackWithSize:stackData:name:atScale:");
+    SEL addGroup = sel_registerName("addIconLayerGroupWithName:atScale:");
+    SEL addGroupReference = sel_registerName(
+        "addLayerReference:forGroupToLayerStackWithName:atScale:");
+    SEL addReference = sel_registerName(
+        "addLayerReference:forSVGDocumentToLayerStackWithName:atScale:");
+    SEL distill = sel_registerName("distillAndSave:");
+    id layerReference = referenceClass ? [[referenceClass alloc] init] : nil;
+    id groupReference = referenceClass ? [[referenceClass alloc] init] : nil;
+    bool abi = stack && group && vector && creatorClass && generatorClass &&
+        layerReference && groupReference &&
+        CNDThemeMethodHasTypes(stack, "dataRepresentationWithError:",
+                               "@24@0:8^@16") &&
+        CNDThemeMethodHasTypes(layerReference, "setLayerName:",
+                               "v24@0:8@16") &&
+        CNDThemeMethodHasTypes(
+            layerReference, "setFrame:",
+            "v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16") &&
+        !strcmp(CNDThemeTypes(creatorClass,
+                             "initWithOutputURL:versionString:"),
+                "@32@0:8@16@24") &&
+        !strcmp(CNDThemeTypes(generatorClass,
+                             "initWithRawData:pixelFormat:layout:"),
+                "@32@0:8@16I24s28") &&
+        !strcmp(CNDThemeTypes(
+                    creatorClass,
+                    "addIconLayerStackWithSize:stackData:name:atScale:"),
+                "v56@0:8{CGSize=dd}16@32@40q48") &&
+        !strcmp(CNDThemeTypes(creatorClass,
+                             "addIconLayerGroupWithName:atScale:"),
+                "v32@0:8@16q24") &&
+        !strcmp(CNDThemeTypes(
+                    creatorClass,
+                    "addLayerReference:forGroupToLayerStackWithName:atScale:"),
+                "v40@0:8@16@24q32") &&
+        !strcmp(CNDThemeTypes(
+                    creatorClass,
+                    "addLayerReference:forSVGDocumentToLayerStackWithName:"
+                    "atScale:"),
+                "v40@0:8@16@24q32") &&
+        !strcmp(CNDThemeTypes(creatorClass, "distillAndSave:"),
+                "B24@0:8^@16");
+    if (!abi || scale <= 0) {
+        CNDThemeLog("[CND_ICON_THEME] pdf-direct-failed reason=abi "
+                    "creator=%p generator=%p referenceClass=%p "
+                    "reference=%p init=%s raw=%s stack=%s "
+                    "group=%s groupReference=%s reference=%s distill=%s\n",
+                    creatorClass, generatorClass, referenceClass,
+                    (__bridge void *)layerReference,
+                    CNDThemeTypes(creatorClass,
+                                  "initWithOutputURL:versionString:"),
+                    CNDThemeTypes(generatorClass,
+                                  "initWithRawData:pixelFormat:layout:"),
+                    CNDThemeTypes(
+                        creatorClass,
+                        "addIconLayerStackWithSize:stackData:name:atScale:"),
+                    CNDThemeTypes(creatorClass,
+                                  "addIconLayerGroupWithName:atScale:"),
+                    CNDThemeTypes(
+                        creatorClass,
+                        "addLayerReference:forGroupToLayerStackWithName:"
+                        "atScale:"),
+                    CNDThemeTypes(
+                        creatorClass,
+                        "addLayerReference:forSVGDocumentToLayerStackWithName:"
+                        "atScale:"),
+                    CNDThemeTypes(creatorClass, "distillAndSave:"));
+        return nil;
+    }
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        group, sel_registerName("setName:"), groupName);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        vector, sel_registerName("setName:"), vectorName);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        layerReference, sel_registerName("setLayerName:"), vectorName);
+    ((void (*)(id, SEL, CGRect))objc_msgSend)(
+        layerReference, sel_registerName("setFrame:"),
+        CGRectMake(0.0, 0.0, pointSize.width, pointSize.height));
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        groupReference, sel_registerName("setLayerName:"), groupName);
+    ((void (*)(id, SEL, CGRect))objc_msgSend)(
+        groupReference, sel_registerName("setFrame:"),
+        CGRectMake(0.0, 0.0, pointSize.width, pointSize.height));
+    id stackDataObject = ((id (*)(id, SEL, NSError **))objc_msgSend)(
+        stack, stackDataSelector, errorOut);
+    NSData *stackData = [stackDataObject isKindOfClass:NSData.class]
+        ? stackDataObject : nil;
+    NSString *path = @"/var/tmp/cnd-spotlight-pdf-layer.car";
+    NSURL *url = [NSURL fileURLWithPath:path];
+    [[NSFileManager defaultManager] removeItemAtURL:url error:nil];
+    id creator = ((id (*)(id, SEL, id, id))objc_msgSend)(
+        [creatorClass alloc], creatorInitializer, url, @"CND-PDF-1");
+    if (!stackData.length || !creator) {
+        CNDThemeLog("[CND_ICON_THEME] pdf-direct-failed "
+                    "reason=stack-or-creator stackBytes=%lu creator=%p\n",
+                    (unsigned long)stackData.length,
+                    (__bridge void *)creator);
+        return nil;
+    }
+    if ([creator respondsToSelector:sel_registerName(
+            "setGenerateFlattenedImages:")]) {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(
+            creator, sel_registerName("setGenerateFlattenedImages:"), NO);
+    }
+    ((void (*)(id, SEL, CNDThemeSize, id, id, NSInteger))objc_msgSend)(
+        creator, addStack, pointSize, stackData, stackName, scale);
+    ((void (*)(id, SEL, id, NSInteger))objc_msgSend)(
+        creator, addGroup, groupName, scale);
+    ((void (*)(id, SEL, id, id, NSInteger))objc_msgSend)(
+        creator, addGroupReference, groupReference, stackName, scale);
+
+    const uint32_t pdfPixelFormat = 0x50444620U; /* 'PDF ' */
+    id generator = ((id (*)(id, SEL, id, uint32_t, int16_t))objc_msgSend)(
+        [generatorClass alloc], rawInitializer, gCNDThemePDFCanaryData,
+        pdfPixelFormat, (int16_t)9);
+    id baseKey = ((id (*)(id, SEL, NSInteger))objc_msgSend)(
+        creator, sel_registerName("_vectorImageBaseKeyWithScale:"), scale);
+    ((void (*)(id, SEL, NSInteger))objc_msgSend)(
+        generator, sel_registerName("setTargetPlatform:"),
+        ((NSInteger (*)(id, SEL))objc_msgSend)(
+            creator, sel_registerName("targetPlatform")));
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(
+        generator, sel_registerName("setIsVectorBased:"), YES);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        generator, sel_registerName("setBaseKey:"), baseKey);
+    ((void (*)(id, SEL, NSInteger))objc_msgSend)(
+        baseKey, sel_registerName("setThemeScale:"), scale);
+    ((void (*)(id, SEL, uint32_t))objc_msgSend)(
+        generator, sel_registerName("setScaleFactor:"), (uint32_t)scale);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        generator, sel_registerName("setName:"), vectorName);
+    id generators = ((id (*)(id, SEL))objc_msgSend)(
+        creator, sel_registerName("generators"));
+    id names = ((id (*)(id, SEL))objc_msgSend)(
+        creator, sel_registerName("names"));
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        generators, sel_registerName("addObject:"), generator);
+    ((void (*)(id, SEL, id))objc_msgSend)(
+        names, sel_registerName("addObject:"), vectorName);
+    ((void (*)(id, SEL, id, id, NSInteger))objc_msgSend)(
+        creator, addReference, layerReference, groupName, scale);
+    BOOL saved = ((BOOL (*)(id, SEL, NSError **))objc_msgSend)(
+        creator, distill, errorOut);
+    NSData *archive = saved
+        ? [NSData dataWithContentsOfURL:url
+                               options:NSDataReadingMappedIfSafe
+                                 error:errorOut]
+        : nil;
+    NSData *subject = [@"CND_SPOTLIGHT_PDF_CANARY_V1"
+        dataUsingEncoding:NSASCIIStringEncoding];
+    bool hasPDF = archive.length >= 8U &&
+        [archive rangeOfData:gCNDThemePDFCanaryData options:0
+                       range:NSMakeRange(0, archive.length)].location !=
+            NSNotFound;
+    bool hasSubject = subject.length && archive.length >= subject.length &&
+        [archive rangeOfData:subject options:0
+                       range:NSMakeRange(0, archive.length)].location !=
+            NSNotFound;
+    bool bom = archive.length >= 8U &&
+        !memcmp(archive.bytes, "BOMStore", 8U);
+    CNDThemeLog("[CND_ICON_THEME] PDF_DIRECT_ARCHIVE saved=%d "
+                "stackBytes=%lu archiveBytes=%lu sha256=%s bom=%d "
+                "containsPDF=%d containsSubject=%d path=%s\n",
+                saved, (unsigned long)stackData.length,
+                (unsigned long)archive.length,
+                CNDThemeSHA256(archive).UTF8String ?: "-", bom, hasPDF,
+                hasSubject, path.UTF8String);
+    return saved && bom && hasPDF && hasSubject ? archive : nil;
+}
+
+static NSData *CNDThemeMakePDFCanaryLayerData(double scale)
+{
+    static NSString *const marker = @"CNDThemePDFCanary.v1";
+    typedef void *(*CreateSVGDocument)(CFDataRef, CFDictionaryRef);
+    typedef void (*ReleaseSVGDocument)(void *);
+    CreateSVGDocument createSVG = (CreateSVGDocument)dlsym(
+        RTLD_DEFAULT, "CGSVGDocumentCreateFromData");
+    ReleaseSVGDocument releaseSVG = (ReleaseSVGDocument)dlsym(
+        RTLD_DEFAULT, "CGSVGDocumentRelease");
+    NSString *svgText =
+        @"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"68\" "
+         "height=\"68\" viewBox=\"0 0 68 68\">"
+         "<rect width=\"34\" height=\"68\" fill=\"#ff0000\"/>"
+         "<rect x=\"34\" width=\"34\" height=\"68\" "
+         "fill=\"#00ff00\"/></svg>";
+    NSData *svgData = [svgText dataUsingEncoding:NSUTF8StringEncoding];
+    void *svgDocument = createSVG && svgData.length
+        ? createSVG((__bridge CFDataRef)svgData, NULL) : NULL;
+    Class stackClass = NSClassFromString(@"CUIMutableNamedIconLayerStack");
+    Class colorClass = NSClassFromString(@"CUIMutableNamedColor");
+    Class groupClass = NSClassFromString(@"CUIMutableNamedIconLayerGroup");
+    Class vectorClass = NSClassFromString(
+        @"CUIMutableNamedLayerVectorSVGImage");
+    Class renderingModeClass = NSClassFromString(@"ICRRenderingMode");
+    id stackAllocation = stackClass ? [stackClass alloc] : nil;
+    id chiclet = colorClass ? [[colorClass alloc] init] : nil;
+    id group = groupClass ? [[groupClass alloc] init] : nil;
+    id vector = vectorClass ? [[vectorClass alloc] init] : nil;
+    CNDThemeSize pointSize = {
+        CND_ICON_THEME_POINT_SIZE, CND_ICON_THEME_POINT_SIZE,
+    };
+    bool abi = gCNDThemePDFCanaryData.length && svgDocument &&
+        stackAllocation && chiclet && group && vector &&
+        renderingModeClass &&
+        CNDThemeMethodHasTypes(
+            stackAllocation, "initWithName:withSize:atScale:",
+            "@48@0:8@16{CGSize=dd}24d40") &&
+        CNDThemeMethodHasTypes(
+            stackAllocation,
+            "finalizedIconWithSize:scale:deviceClass:appearance:"
+            "renderingMode:layoutDirection:isLegacyContent:",
+            "@76@0:8{CGSize=dd}16q32q40Q48@56Q64B72") &&
+        CNDThemeMethodHasTypes(
+            chiclet, "setCGColor:", "v24@0:8^{CGColor=}16") &&
+        CNDThemeMethodHasTypes(group, "addLayer:", "v24@0:8@16") &&
+        CNDThemeMethodHasTypes(
+            vector, "setSvgDocument:",
+            "v24@0:8^{CGSVGDocument=}16") &&
+        CNDThemeMethodHasTypes(
+            vector, "setFrame:",
+            "v48@0:8{CGRect={CGPoint=dd}{CGSize=dd}}16") &&
+        CNDThemeMethodHasTypes(vector, "setScale:", "v24@0:8d16") &&
+        CNDThemeMethodHasTypes(renderingModeClass, "color", "@16@0:8");
+    if (!abi || scale <= 0.0) {
+        CNDThemeLog("[CND_ICON_THEME] pdf-layer-failed reason=abi "
+                    "pdf=%lu createSVG=%p svg=%p stack=%p chiclet=%p "
+                    "group=%p vector=%p mode=%p scale=%.2f\n",
+                    (unsigned long)gCNDThemePDFCanaryData.length, createSVG,
+                    svgDocument, (__bridge void *)stackAllocation,
+                    (__bridge void *)chiclet, (__bridge void *)group,
+                    (__bridge void *)vector, renderingModeClass, scale);
+        if (svgDocument && releaseSVG) releaseSVG(svgDocument);
+        return nil;
+    }
+
+    NSData *layerData = nil;
+    @try {
+        id stack =
+            ((id (*)(id, SEL, id, CNDThemeSize, double))objc_msgSend)(
+                stackAllocation,
+                sel_registerName("initWithName:withSize:atScale:"),
+                marker, pointSize, scale);
+        if (!stack || !CNDThemeMethodHasTypes(
+                stack, "addLayer:", "v24@0:8@16")) {
+            CNDThemeLog("[CND_ICON_THEME] pdf-layer-failed "
+                        "reason=stack-init\n");
+            return nil;
+        }
+        CGColorSpaceRef colorSpace =
+            CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+        CGFloat components[4] = {0.0, 0.0, 0.0, 0.0};
+        CGColorRef transparent = colorSpace
+            ? CGColorCreate(colorSpace, components) : NULL;
+        if (colorSpace) CGColorSpaceRelease(colorSpace);
+        if (!transparent) return nil;
+        ((void (*)(id, SEL, CGColorRef))objc_msgSend)(
+            chiclet, sel_registerName("setCGColor:"), transparent);
+        CGColorRelease(transparent);
+        NSString *appearanceName = CND_ICON_THEME_APPEARANCE == 1
+            ? @"dark" : @"light";
+        if (CNDThemeMethodHasTypes(
+                chiclet, "setAppearance:", "v24@0:8@16")) {
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                chiclet, sel_registerName("setAppearance:"), appearanceName);
+        }
+        ((void (*)(id, SEL, void *))objc_msgSend)(
+            vector, sel_registerName("setSvgDocument:"), svgDocument);
+        ((void (*)(id, SEL, CGRect))objc_msgSend)(
+            vector, sel_registerName("setFrame:"),
+            CGRectMake(0.0, 0.0, pointSize.width, pointSize.height));
+        ((void (*)(id, SEL, double))objc_msgSend)(
+            vector, sel_registerName("setScale:"), scale);
+        if (CNDThemeMethodHasTypes(
+                vector, "setAppearance:", "v24@0:8@16")) {
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                vector, sel_registerName("setAppearance:"), appearanceName);
+        }
+        if (CNDThemeMethodHasTypes(
+                group, "setAppearance:", "v24@0:8@16")) {
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                group, sel_registerName("setAppearance:"), appearanceName);
+        }
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            group, sel_registerName("addLayer:"), vector);
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            stack, sel_registerName("addLayer:"), group);
+        if (CNDThemeMethodHasTypes(
+                stack, "setAppearance:", "v24@0:8@16")) {
+            ((void (*)(id, SEL, id))objc_msgSend)(
+                stack, sel_registerName("setAppearance:"), appearanceName);
+        }
+        if (!CNDThemeMethodHasTypes(
+                stack, "setRenderingProperties:", "v24@0:8@16")) {
+            CNDThemeLog("[CND_ICON_THEME] pdf-layer-failed "
+                        "reason=rendering-properties-abi\n");
+            return nil;
+        }
+        NSString *renderingJSON = [NSString stringWithFormat:
+            @"{\"layers\":[{\"contentBounds\":[[0,0],[%d,%d]],"
+             "\"knocksOutBorder\":true}],\"style\":{"
+             "\"renderingMode\":{\"contents\":{\"color\":{}}},"
+             "\"layoutDirection\":{\"leftToRight\":{}},"
+             "\"platform\":0,\"appearance\":\"%@\"}}",
+            CND_ICON_THEME_POINT_SIZE, CND_ICON_THEME_POINT_SIZE,
+            appearanceName];
+        ((void (*)(id, SEL, id))objc_msgSend)(
+            stack, sel_registerName("setRenderingProperties:"),
+            @{ @"json": renderingJSON });
+        NSError *serializationError = nil;
+        layerData = CNDThemeBuildDirectPDFArchive(
+            stack, group, vector, pointSize, (NSInteger)scale,
+            &serializationError);
+        bool bom = layerData.length >= 8U &&
+            !memcmp(layerData.bytes, "BOMStore", 8U);
+        CNDThemeLog("[CND_ICON_THEME] PDF_LAYER_DATA_BUILT "
+                    "stack=%p/%s vector=%p/%s "
+                    "bytes=%lu sha256=%s bom=%d error=%s\n",
+                    (__bridge void *)stack,
+                    class_getName(object_getClass(stack)),
+                    (__bridge void *)vector,
+                    class_getName(object_getClass(vector)),
+                    (unsigned long)layerData.length,
+                    CNDThemeSHA256(layerData).UTF8String ?: "-", bom,
+                    serializationError.description.UTF8String ?: "-");
+        if (!bom) layerData = nil;
+    } @catch (NSException *exception) {
+        CNDThemeLog("[CND_ICON_THEME] pdf-layer-failed "
+                    "reason=exception name=%s detail=%s\n",
+                    exception.name.UTF8String ?: "-",
+                    exception.reason.UTF8String ?: "-");
+        layerData = nil;
+    } @finally {
+        if (svgDocument && releaseSVG) releaseSVG(svgDocument);
+    }
+    return layerData;
+}
+#endif
+
+static NSData *CNDThemeMakeLayerData(double scale)
+{
+#if CND_ICON_THEME_PDF_CANARY
+    return CNDThemeMakePDFCanaryLayerData(scale);
+#else
     static NSString *const CNDThemeLayerMarker = @"CNDThemeIcon.v1";
     Class stackClass = NSClassFromString(@"CUIMutableNamedIconLayerStack");
     Class colorClass = NSClassFromString(@"CUIMutableNamedColor");
@@ -955,12 +1379,26 @@ static NSData *CNDThemeMakeLayerData(double scale)
                     exception.reason.UTF8String ?: "-");
         return nil;
     }
+#endif
 }
 
 static id CNDThemeMakeIFImage(double scale)
 {
     Class imageClass = NSClassFromString(@"IFImage");
     id allocation = imageClass ? [imageClass alloc] : nil;
+#if CND_ICON_THEME_FLAT_PAYLOAD
+    if (!allocation || !CNDThemeMethodHasTypes(
+            allocation, "initWithCGImage:scale:",
+            "@32@0:8^{CGImage=}16d24")) {
+        CNDThemeLog("[CND_ICON_THEME] themed-image-failed "
+                    "reason=flat-abi selector=initWithCGImage:scale:\n");
+        return nil;
+    }
+    CGImageRef transferredImage = CGImageRetain(gCNDThemeCGImage);
+    id image = ((id (*)(id, SEL, CGImageRef, double))objc_msgSend)(
+        allocation, sel_registerName("initWithCGImage:scale:"),
+        transferredImage, scale);
+#else
     NSData *layerData = CNDThemeMakeLayerData(scale);
     if (!allocation || !CNDThemeMethodHasTypes(
             allocation, "initWithCGImage:scale:layerData:",
@@ -975,6 +1413,7 @@ static id CNDThemeMakeIFImage(double scale)
             allocation,
             sel_registerName("initWithCGImage:scale:layerData:"),
             transferredImage, scale, layerData);
+#endif
     if (!image) {
         CNDThemeLog("[CND_ICON_THEME] themed-image-failed reason=init\n");
         return nil;
@@ -1088,10 +1527,17 @@ static id CNDThemeHookGenerate(id self, SEL command,
             replacement, sel_registerName("CGImage"));
     }
     const size_t expectedPixels = (size_t)CND_ICON_THEME_PIXEL_SIZE;
+    bool payloadStructureReady = false;
+#if CND_ICON_THEME_FLAT_PAYLOAD
+    payloadStructureReady = true;
+#else
+    payloadStructureReady = replacementLayerData.length > 0U &&
+        replacementIconLayer;
+#endif
     bool replacementReady = replacement && replacementData.length > 0U &&
         replacementCG && CGImageGetWidth(replacementCG) == expectedPixels &&
         CGImageGetHeight(replacementCG) == expectedPixels &&
-        replacementLayerData.length > 0U && replacementIconLayer;
+        payloadStructureReady;
     if (!replacementReady) {
         CNDThemeLog("[CND_ICON_THEME] replacement-rejected reason=cache-init "
                     "object=%p/%s bytes=%lu pixels=%zux%zu "
@@ -1122,13 +1568,18 @@ static id CNDThemeHookGenerate(id self, SEL command,
 
     gCNDAppliedCount++;
     CNDThemeLog("[CND_ICON_THEME] THEME_APPLIED count=%u bundle=%s "
+                "payload=%s "
                 "geometry=%.1fx%.1f@%.2f appearance=%lld "
                 "variantOptions=%llu stock=%lu/%s themed=%lu/%s "
                 "replacement=%lu/%s layerData=%lu/%s layer=%p/%s "
                 "chicletKnown=%d chicletVisible=%d token=%p/%s "
                 "records=%p/%s\n",
                 gCNDAppliedCount,
-                CNDThemeTargetBundle, size.width, size.height, scale,
+                CNDThemeTargetBundle,
+                CND_ICON_THEME_FLAT_PAYLOAD ? "flat" :
+                    (CND_ICON_THEME_PDF_CANARY
+                        ? "structured-pdf-canary" : "structured"),
+                size.width, size.height, scale,
                 (long long)appearance,
                 (unsigned long long)variantOptions,
                 (unsigned long)stockData.length,
@@ -1140,7 +1591,9 @@ static id CNDThemeHookGenerate(id self, SEL command,
                 (unsigned long)replacementLayerData.length,
                 CNDThemeSHA256(replacementLayerData).UTF8String,
                 (__bridge void *)replacementIconLayer,
-                class_getName(object_getClass(replacementIconLayer)),
+                replacementIconLayer
+                    ? class_getName(object_getClass(replacementIconLayer))
+                    : "-",
                 replacementChicletKnown, replacementChicletVisible,
                 (__bridge void *)stockToken,
                 class_getName(object_getClass(stockToken)),
@@ -1209,6 +1662,15 @@ static void CNDThemeStart(void)
             RTLD_NOW | RTLD_LOCAL);
         CNDThemeLog("[CND_ICON_THEME] LOAD CoreUI end handle=%p error=%s\n",
                     coreUIHandle, dlerror() ?: "-");
+#if CND_ICON_THEME_PDF_CANARY
+        CNDThemeLog("[CND_ICON_THEME] LOAD CoreSVG begin\n");
+        void *coreSVGHandle = dlopen(
+            "/System/Library/PrivateFrameworks/CoreSVG.framework/CoreSVG",
+            RTLD_NOW | RTLD_GLOBAL);
+        CNDThemeLog("[CND_ICON_THEME] LOAD CoreSVG end handle=%p error=%s\n",
+                    coreSVGHandle, dlerror() ?: "-");
+        gCNDThemePDFCanaryData = CNDThemeLoadPDFCanary();
+#endif
         CNDThemeLog("[CND_ICON_THEME] LOAD IconRendering begin\n");
         void *iconRenderingHandle = dlopen(
             "/System/Library/PrivateFrameworks/IconRendering.framework/"
@@ -1219,6 +1681,12 @@ static void CNDThemeStart(void)
         gCNDThemeCGImage = CNDThemeLoadImage();
         CNDThemeLog("[CND_ICON_THEME] LOAD source end image=%p\n",
                     gCNDThemeCGImage);
-        if (gCNDThemeCGImage) (void)CNDThemeInstallHook();
+        if (gCNDThemeCGImage
+#if CND_ICON_THEME_PDF_CANARY
+            && gCNDThemePDFCanaryData.length
+#endif
+        ) {
+            (void)CNDThemeInstallHook();
+        }
     }
 }

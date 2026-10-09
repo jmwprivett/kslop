@@ -312,20 +312,20 @@ static id CNDDescriptorTraceImageForDescriptor(id self, SEL command,
     return result;
 }
 
-static void CNDDescriptorTracePrepareForDescriptor(id self, SEL command,
-                                                   id descriptor)
+static id CNDDescriptorTracePrepareForDescriptor(id self, SEL command,
+                                                 id descriptor)
 {
     if (gCNDDescriptorTraceInsideHook) {
-        ((void (*)(id, SEL, id))gCNDOriginalPrepareForDescriptor)(
+        return ((id (*)(id, SEL, id))gCNDOriginalPrepareForDescriptor)(
             self, command, descriptor);
-        return;
     }
     gCNDDescriptorTraceInsideHook = true;
     CNDDescriptorTraceEvent("prepare-enter", self, descriptor, nil);
-    ((void (*)(id, SEL, id))gCNDOriginalPrepareForDescriptor)(
+    id result = ((id (*)(id, SEL, id))gCNDOriginalPrepareForDescriptor)(
         self, command, descriptor);
-    CNDDescriptorTraceEvent("prepare-return", self, descriptor, nil);
+    CNDDescriptorTraceEvent("prepare-return", self, descriptor, result);
     gCNDDescriptorTraceInsideHook = false;
+    return result;
 }
 
 static id CNDDescriptorTraceGenerateForDescriptor(id self, SEL command,
@@ -523,7 +523,7 @@ static void CNDDescriptorTraceStart(void)
         hooks += CNDDescriptorTraceInstallOne(
             iconClass, "prepareImageForDescriptor:",
             (IMP)CNDDescriptorTracePrepareForDescriptor,
-            &gCNDOriginalPrepareForDescriptor, 'v');
+            &gCNDOriginalPrepareForDescriptor, '@');
         hooks += CNDDescriptorTraceInstallOne(
             iconClass, "generateImageWithDescriptor:",
             (IMP)CNDDescriptorTraceGenerateForDescriptor,

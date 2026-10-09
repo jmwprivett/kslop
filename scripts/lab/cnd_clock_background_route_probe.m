@@ -252,7 +252,9 @@ static id CNDClockRouteOuterRequest(id source, id descriptor)
     if (!source || !descriptor) return nil;
     SEL prepare = sel_registerName("prepareImageForDescriptor:");
     if ([source respondsToSelector:prepare]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(source, prepare, descriptor);
+        id prepared = ((id (*)(id, SEL, id))objc_msgSend)(
+            source, prepare, descriptor);
+        if (prepared) return prepared;
     }
     SEL imageForDescriptor = sel_registerName("imageForDescriptor:");
     SEL imageForImageDescriptor = sel_registerName("imageForImageDescriptor:");

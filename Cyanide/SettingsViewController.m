@@ -27,6 +27,9 @@
 #import "tweaks/appswitchergrid.h"
 #import "tweaks/hide_home_bar.h"
 #import "tweaks/font_changer.h"
+#import "tweaks/CNDLockscreenQuickActionProbe.h"
+#import "tweaks/CNDPulsarArtwork.h"
+#import "tweaks/CNDCCThemingFileBacking.h"
 #import <CoreMotion/CoreMotion.h>
 
 #import <objc/runtime.h>
@@ -34,18 +37,23 @@
 #import "DSKeepAlive.h"
 #import "TaskRop/RemoteCall.h"
 #import "TaskRop/CNDLabRemoteCallClient.h"
+#import "TaskRop/CNDKernelTaskBridge.h"
 #import "kexploit/kutils.h"
+#import "kexploit/krw.h"
 #import "kexploit/persistence.h"
 #import "utils/sandbox.h"
 #import "installer/InstallProgressViewController.h"
 #import "installer/CNDIconDeclarationRedirect.h"
 #import "installer/CNDIconServicesInterceptProof.h"
 #import "installer/CNDIconServicesConsumerLifecycleCoordinator.h"
+#import "installer/CNDIconServicesConsumerHook.h"
 #import "installer/CNDLaunchServicesRegistration.h"
 #import "installer/CNDLaunchServicesRegistrationDictionary.h"
 #import "installer/Package.h"
 #import "installer/PackageCatalog.h"
 #import "installer/PackageQueue.h"
+#import "installer/CNDQueuedActionCatalog.h"
+#import "installer/CNDTransientAppliedState.h"
 #import "installer/CNDDockAppPickerViewController.h"
 #import "installer/CNDDockAppCatalog.h"
 #import "installer/CNDSnowBoardRemix.h"
@@ -57,6 +65,11 @@
 #import "CyanideLabBridge.h"
 #import "CyanideLabProbe.h"
 #import "CNDPhysicalCSAllowInvalidProbe.h"
+#import "CNDHailMaryProbe.h"
+#import "CNDHailMaryPatch.h"
+#import "CNDHailMaryDataPage.h"
+#import "CNDHailMaryReadOnlyDataPage.h"
+#import "CNDHailMaryImpRedirect.h"
 #import "LogTextView.h"
 #import <WebKit/WebKit.h>
 #import <MessageUI/MessageUI.h>
@@ -758,7 +771,8 @@ static BOOL settings_any_registered_live_loop_running(void)
 {
     __block BOOL running = NO;
     settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
-        if (!running && entry->isRunning && entry->isRunning()) running = YES;
+        if (!running && entry->requestStop && entry->isRunning &&
+            entry->isRunning()) running = YES;
     });
     return running;
 }
@@ -767,7 +781,7 @@ static NSString *settings_registered_live_loop_status_string(void)
 {
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
     settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
-        if (!entry->isRunning) return;
+        if (!entry->requestStop || !entry->isRunning) return;
         [parts addObject:[NSString stringWithFormat:@"%s=%d",
                                                     entry->name ?: "tweak",
                                                     entry->isRunning() ? 1 : 0]];
@@ -911,6 +925,9 @@ static NSString * const kSettingsRemoteCallStateDidChangeNotification = @"Settin
 NSString * const kSettingsActionsDidCompleteNotification = @"SettingsActionsDidCompleteNotification";
 NSString * const kSettingsActionsDidCompleteSuccessKey = @"success";
 NSString * const kSettingsActionsDidCompleteMessageKey = @"message";
+NSString * const kSettingsQueuedRunDidCompleteNotification =
+    @"SettingsQueuedRunDidCompleteNotification";
+NSString * const kSettingsQueuedRunCompletionTokenKey = @"queueCompletionToken";
 static NSString * const kSettingsCleanupStateDidChangeNotification = @"SettingsCleanupStateDidChangeNotification";
 
 static void settings_notify_cleanup_state_changed(void)
@@ -933,6 +950,24 @@ static void settings_post_actions_complete_async(BOOL success, NSString *message
             postNotificationName:kSettingsActionsDidCompleteNotification
                           object:nil
                         userInfo:info];
+    });
+}
+
+static void settings_post_queued_run_complete_async(NSString *completionToken,
+                                                     BOOL success,
+                                                     NSString *message)
+{
+    if (completionToken.length == 0) return;
+    NSString *token = [completionToken copy];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:kSettingsQueuedRunDidCompleteNotification
+                          object:nil
+                        userInfo:@{
+                            kSettingsActionsDidCompleteSuccessKey: @(success),
+                            kSettingsActionsDidCompleteMessageKey: message ?: @"",
+                            kSettingsQueuedRunCompletionTokenKey: token
+                        }];
     });
 }
 
@@ -1177,9 +1212,16 @@ BOOL settings_tweak_is_applied(NSString *key)
 {
     if (!key) return NO;
     NSMutableSet *set = settings_applied_keys_set();
+    BOOL applied = NO;
     @synchronized (set) {
-        return [set containsObject:key];
+        applied = [set containsObject:key];
     }
+    if (applied) return YES;
+    if ([key isEqualToString:kSettingsSBCEnabled]) {
+        return CNDTransientAppliedStateIsActive(
+            CNDTransientAppliedStateSBCustomizer);
+    }
+    return NO;
 }
 
 static BOOL settings_clear_all_applied_locked(void)
@@ -2190,8 +2232,15 @@ static BOOL settings_has_active_termination_live_tweak(void)
 
     __block BOOL active = NO;
     settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
-        if (active || !entry->cleanupOnTermination || !entry->key) return;
-        active = [d boolForKey:entry->key] && settings_tweak_is_applied(entry->key);
+        if (active || !entry->cleanupOnTermination) return;
+        if (entry->isRunning && entry->isRunning()) {
+            active = YES;
+            return;
+        }
+        if (entry->key) {
+            active = [d boolForKey:entry->key] &&
+                settings_tweak_is_applied(entry->key);
+        }
     });
     return active;
 }
@@ -2205,8 +2254,15 @@ static BOOL settings_has_persistent_springboard_remote_call_user(void)
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     __block BOOL active = NO;
     settings_each_springboard_cleanup_entry(^(const SettingsSpringBoardTweakCleanupEntry *entry) {
-        if (active || !entry->keepsSpringBoardSession || !entry->key) return;
-        active = [d boolForKey:entry->key] && settings_tweak_is_applied(entry->key);
+        if (active || !entry->keepsSpringBoardSession) return;
+        if (entry->isRunning && entry->isRunning()) {
+            active = YES;
+            return;
+        }
+        if (entry->key) {
+            active = [d boolForKey:entry->key] &&
+                settings_tweak_is_applied(entry->key);
+        }
     });
     return active;
 }
@@ -2335,17 +2391,24 @@ static void settings_present_controller(UIViewController *controller, UIViewCont
     });
 }
 
+static BOOL settings_show_respring_overlay_now(UIViewController *fallback)
+{
+    UIWindow *window = settings_active_window(fallback);
+    if (!window) {
+        printf("[RESPRING] overlay skipped: no active window\n");
+        return NO;
+    }
+    DSRespringOverlayView *overlay =
+        [[DSRespringOverlayView alloc] initWithFrame:window.bounds];
+    [window addSubview:overlay];
+    [overlay loadRespringPayload];
+    return YES;
+}
+
 static void settings_show_respring_overlay(UIViewController *fallback)
 {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *window = settings_active_window(fallback);
-        if (!window) {
-            printf("[RESPRING] overlay skipped: no active window\n");
-            return;
-        }
-        DSRespringOverlayView *overlay = [[DSRespringOverlayView alloc] initWithFrame:window.bounds];
-        [window addSubview:overlay];
-        [overlay loadRespringPayload];
+        (void)settings_show_respring_overlay_now(fallback);
     });
 }
 
@@ -2449,11 +2512,37 @@ static BOOL settings_ensure_kexploit(void)
         settings_notify_remote_call_state_changed();
     }
 
+    // Reaching the acquisition path means there is no verified continuity
+    // with the KRW generation that recorded the persisted ACTIVE markers.
+    // A fresh primitive can operate on the current boot, but it must never be
+    // treated as proof that process-local state survived from an older
+    // Cyanide process/session. SnowBoard's durable marker is retained because
+    // its IconServices records disappear only after an explicit Restore.
+    if (CNDTransientAppliedStateResetAfterKRWLoss()) {
+        settings_notify_package_queue_changed_async();
+    }
+
     int res = kexploit_opa334();
+    CNDKExploitOutcome exploitOutcome = kexploit_last_outcome();
     if (res != 0) {
-        printf("[SETTINGS] kexploit_opa334 failed: %d\n", res);
+        const char *classification =
+            exploitOutcome == CNDKExploitOutcomeCleanFailure ? "clean-failure" :
+            exploitOutcome == CNDKExploitOutcomeVerifiedRollback ? "verified-rollback" :
+            exploitOutcome == CNDKExploitOutcomeSafelyParked ? "safely-parked" :
+            exploitOutcome == CNDKExploitOutcomeUnsafeUnverified ? "unsafe-unverified" :
+            "unclassified";
+        printf("[SETTINGS] kexploit_opa334 failed: %d outcome=%s\n",
+               res, classification);
+        if (exploitOutcome == CNDKExploitOutcomeUnsafeUnverified) {
+            log_user("[KRW] Acquisition stopped with unverified mutated state retained; do not retry in this process.\n");
+        } else if (exploitOutcome == CNDKExploitOutcomeSafelyParked) {
+            log_user("[KRW] Acquisition stopped after the socket pair was safely parked; no resources were torn down unsafely.\n");
+        } else if (exploitOutcome == CNDKExploitOutcomeVerifiedRollback) {
+            log_user("[KRW] Acquisition failed cleanly after a verified PCB rollback.\n");
+        }
         return NO;
     }
+    printf("[SETTINGS] kexploit_opa334 outcome=%d\n", exploitOutcome);
 
     // A zero exploit result only means the acquisition path completed. Before
     // any caller performs raw kernel reads/writes, require the same live socket
@@ -2617,6 +2706,633 @@ static void settings_run_physical_rx_probe_action(void)
                         @"Physical RX probe finished: %@.",
                         result.length ? result : @"unknown-result"]);
             });
+    });
+}
+
+void settings_run_hail_mary_probe_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "Hail Mary Physical Proof",
+                "[HAIL_MARY_PROBE] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, @"Hail Mary Physical Proof blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[HAIL_MARY_PROBE] Acquiring or reusing validated KRW. The observation stage performs kernel reads only and never modifies either target.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[HAIL_MARY_PROBE] Validated KRW is unavailable.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+            NO, @"Hail Mary Physical Proof failed to acquire validated KRW.");
+            return;
+        }
+
+        CNDHailMaryProbeRun(^(NSDictionary<NSString *, id> *report) {
+            NSString *result = settings_lsreg_text(report[@"result"]);
+            NSDictionary<NSString *, id> *comparison = report[@"comparison"];
+            BOOL confirmed = [comparison[@"confirmed"] boolValue];
+            log_user("[HAIL_MARY_PROBE] result=%s same-object-page-slot=%s physical-frame-resolved=%s live-bytes-verified=%s kernel-mutations=%llu\n",
+                result.UTF8String ?: "unknown-result",
+                [comparison[@"sameBackingObjectPageSlot"] boolValue]
+                    ? "yes" : "no",
+                [comparison[@"physicalFrameResolved"] boolValue]
+                    ? "yes" : "no",
+                [report[@"runtimeInstructionBytesVerified"] boolValue]
+                    ? "yes" : "no",
+                [report[@"kernelMutationCount"] unsignedLongLongValue]);
+            log_user("[HAIL_MARY_PROBE] %s\n",
+                [settings_lsreg_text(report[@"message"]) UTF8String] ?: "");
+            log_user("[HAIL_MARY_PROBE] JSON: %s\n",
+                [report[@"reportPath"] UTF8String] ?: "unavailable");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                confirmed,
+                [NSString stringWithFormat:@"Hail Mary Physical Proof finished: %@.",
+                    result.length ? result : @"unknown-result"]);
+        });
+    });
+}
+
+static BOOL settings_hail_mary_spotlight_identity(pid_t *pidOut)
+{
+    uint64_t proc = proc_find_by_name("Spotlight");
+    pid_t pid = is_kaddr_valid(proc)
+        ? (pid_t)kread32(proc + off_proc_p_pid) : 0;
+    BOOL valid = pid > 1 && proc_find(pid) == proc &&
+        strcmp(proc_get_p_name(proc) ?: "", "Spotlight") == 0;
+    if (pidOut) *pidOut = valid ? pid : 0;
+    return valid;
+}
+
+static BOOL settings_hail_mary_patch_preflight_is_retryable(
+    NSDictionary<NSString *, id> *report)
+{
+    if (![report[@"result"] isEqual:@"preflight-refused"] ||
+        [report[@"kernelWritePrimitiveInvocationCount"]
+            unsignedIntegerValue] != 0) {
+        return NO;
+    }
+    NSDictionary<NSString *, id> *probe = report[@"preflightProbe"];
+    NSString *probeResult = settings_lsreg_text(probe[@"result"]);
+    NSString *probeMessage = settings_lsreg_text(probe[@"message"]);
+    BOOL processInspection =
+        [probeResult isEqualToString:@"springboard-inspection-failed"] ||
+        [probeResult isEqualToString:@"spotlight-inspection-failed"];
+    return processInspection &&
+        [probeMessage isEqualToString:@"invalid-or-unstable-entry-list"];
+}
+
+static void settings_run_hail_mary_patch_attempt(
+    CNDHailMaryPatchOperation operation,
+    NSUInteger attempt,
+    void (^completion)(NSDictionary<NSString *, id> *report))
+{
+    CNDHailMaryPatchRun(operation,
+        ^(NSDictionary<NSString *, id> *report) {
+            static const NSUInteger kMaximumAttempts = 3;
+            if (attempt < kMaximumAttempts &&
+                settings_hail_mary_patch_preflight_is_retryable(report)) {
+                log_user("[HAIL_MARY_PATCH] Read-only preflight attempt %lu/%lu observed a transient VM-entry list; retrying in the same process and KRW session.\n",
+                    (unsigned long)attempt,
+                    (unsigned long)kMaximumAttempts);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                             (int64_t)(0.30 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    settings_run_hail_mary_patch_attempt(
+                        operation, attempt + 1, completion);
+                });
+                return;
+            }
+            completion(report);
+        });
+}
+
+static void settings_run_hail_mary_patch_action(
+    CNDHailMaryPatchOperation operation)
+{
+    NSString *operationName = operation == CNDHailMaryPatchOperationApply
+        ? @"apply"
+        : (operation == CNDHailMaryPatchOperationRestore
+            ? @"restore"
+            : (operation == CNDHailMaryPatchOperationVerifyPatched
+                ? @"verify-patched" : @"verify-original"));
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "Hail Mary Patch",
+                "[HAIL_MARY_PATCH] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, @"Hail Mary Patch blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[HAIL_MARY_PATCH] operation=%s acquiring or reusing validated KRW.\n",
+            operationName.UTF8String);
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[HAIL_MARY_PATCH] Validated KRW is unavailable.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, @"Hail Mary Patch failed to acquire validated KRW.");
+            return;
+        }
+
+        pid_t spotlightPID = 0;
+        if (!settings_hail_mary_spotlight_identity(&spotlightPID)) {
+            log_user("[HAIL_MARY_PATCH] Spotlight is absent; opening global search and retaining its lifetime assertion through one bounded SpringBoard RemoteCall.\n");
+            NSDictionary<NSString *, id> *presentation =
+                CNDIconServicesConsumerHookPresentSpotlight();
+            BOOL presented = [presentation[@"ok"] boolValue];
+            log_user("[HAIL_MARY_PATCH] Spotlight presentation stage=%s ok=%s spotlight-pid=%d message=%s\n",
+                [settings_lsreg_text(presentation[@"stage"]) UTF8String],
+                presented ? "yes" : "no",
+                [presentation[@"spotlightPID"] intValue],
+                [settings_lsreg_text(presentation[@"message"]) UTF8String]);
+            if (!presented ||
+                !settings_hail_mary_spotlight_identity(&spotlightPID)) {
+                log_user("[HAIL_MARY_PATCH] Refused: Spotlight did not settle to one validated live identity.\n");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    NO, @"Hail Mary Patch could not open and bind Spotlight.");
+                return;
+            }
+        } else {
+            log_user("[HAIL_MARY_PATCH] Reusing live Spotlight pid=%d; no toggle was sent.\n",
+                spotlightPID);
+        }
+
+        settings_run_hail_mary_patch_attempt(operation, 1,
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL confirmed = [report[@"confirmed"] boolValue];
+                BOOL writeTransportCompleted =
+                    [report[@"writeTransportCompleted"] boolValue];
+                NSUInteger writes =
+                    [report[@"kernelWritePrimitiveInvocationCount"]
+                        unsignedIntegerValue];
+                NSDictionary<NSString *, id> *pageWire =
+                    report[@"springBoardPageWire"];
+                log_user("[HAIL_MARY_PATCH] result=%s confirmed=%s transport-complete=%s writes=%lu mlock-attempted=%s page-wired=%s readback=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    confirmed ? "yes" : "no",
+                    writeTransportCompleted ? "yes" : "no",
+                    (unsigned long)writes,
+                    [pageWire[@"attempted"] boolValue]
+                        ? "yes" : "no",
+                    [pageWire[@"wired"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"physicalReadbackPerformed"] boolValue]
+                        ? "yes" : "no");
+                if ([pageWire isKindOfClass:NSDictionary.class] &&
+                    ![pageWire[@"ok"] boolValue]) {
+                    log_user("[HAIL_MARY_PATCH] page-wire mlock=%s errno-captured=%s errno=%d (%s) leaf=%s->%s\n",
+                        [settings_lsreg_text(pageWire[@"mlockReturn"])
+                            UTF8String],
+                        [pageWire[@"mlockErrnoCaptured"] boolValue]
+                            ? "yes" : "no",
+                        [pageWire[@"mlockErrno"] intValue],
+                        [settings_lsreg_text(
+                            pageWire[@"mlockErrnoDescription"])
+                            UTF8String],
+                        [settings_lsreg_text(
+                            pageWire[@"expectedLeafEntryValue"])
+                            UTF8String],
+                        [settings_lsreg_text(
+                            pageWire[@"finalLeafEntryValue"])
+                            UTF8String]);
+                }
+                log_user("[HAIL_MARY_PATCH] %s\n",
+                    [settings_lsreg_text(report[@"message"]) UTF8String]);
+                log_user("[HAIL_MARY_PATCH] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    confirmed || writeTransportCompleted,
+                    [NSString stringWithFormat:
+                        @"Hail Mary %@ finished: %@.",
+                        operationName,
+                        result.length ? result : @"unknown-result"]);
+
+            });
+    });
+}
+
+void settings_run_hail_mary_patch_apply_action(void)
+{
+    settings_run_hail_mary_patch_action(
+        CNDHailMaryPatchOperationApply);
+}
+
+void settings_run_hail_mary_patch_restore_action(void)
+{
+    settings_run_hail_mary_patch_action(
+        CNDHailMaryPatchOperationRestore);
+}
+
+void settings_run_hail_mary_patch_verify_patched_action(void)
+{
+    settings_run_hail_mary_patch_action(
+        CNDHailMaryPatchOperationVerifyPatched);
+}
+
+void settings_run_hail_mary_patch_verify_original_action(void)
+{
+    settings_run_hail_mary_patch_action(
+        CNDHailMaryPatchOperationVerifyOriginal);
+}
+
+void settings_run_hail_mary_data_page_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "Hail Mary Data-Page Probe",
+                "[HAIL_MARY_DATA_PAGE] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, @"Hail Mary Data-Page Probe blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[HAIL_MARY_DATA_PAGE] Acquiring or reusing validated KRW, then running the full read-only proof before the single identical-bytes data-page dispatch.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[HAIL_MARY_DATA_PAGE] Validated KRW is unavailable.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, @"Hail Mary Data-Page Probe failed to acquire validated KRW.");
+            return;
+        }
+
+        pid_t spotlightPID = 0;
+        if (!settings_hail_mary_spotlight_identity(&spotlightPID)) {
+            log_user("[HAIL_MARY_DATA_PAGE] Spotlight is absent; opening global search and retaining its lifetime assertion through one bounded SpringBoard RemoteCall.\n");
+            NSDictionary<NSString *, id> *presentation =
+                CNDIconServicesConsumerHookPresentSpotlight();
+            BOOL presented = [presentation[@"ok"] boolValue];
+            log_user("[HAIL_MARY_DATA_PAGE] Spotlight presentation stage=%s ok=%s spotlight-pid=%d message=%s\n",
+                [settings_lsreg_text(presentation[@"stage"]) UTF8String],
+                presented ? "yes" : "no",
+                [presentation[@"spotlightPID"] intValue],
+                [settings_lsreg_text(presentation[@"message"]) UTF8String]);
+            if (!presented ||
+                !settings_hail_mary_spotlight_identity(&spotlightPID)) {
+                log_user("[HAIL_MARY_DATA_PAGE] Refused: Spotlight did not settle to one validated live identity.\n");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    NO, @"Hail Mary Data-Page Probe could not open and bind Spotlight.");
+                return;
+            }
+        } else {
+            log_user("[HAIL_MARY_DATA_PAGE] Reusing live Spotlight pid=%d; no toggle was sent.\n",
+                spotlightPID);
+        }
+
+        CNDHailMaryDataPageRun(^(NSDictionary<NSString *, id> *report) {
+            dispatch_async(dispatch_get_global_queue(
+                QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL confirmed = [report[@"confirmed"] boolValue];
+                NSDictionary<NSString *, id> *readback =
+                    report[@"readback"];
+                NSDictionary<NSString *, id> *postTranslation =
+                    report[@"postWriteTranslation"];
+                log_user("[HAIL_MARY_DATA_PAGE] result=%s confirmed=%s readback-identical=%s post-translation-stable=%s writes=%lu semantic-mutations=%lu\n",
+                    result.UTF8String ?: "unknown-result",
+                    confirmed ? "yes" : "no",
+                    [readback[@"identicalToBefore"] boolValue]
+                        ? "yes" : "no",
+                    [postTranslation[@"stable"] boolValue]
+                        ? "yes" : "no",
+                    (unsigned long)[report[
+                        @"kernelWritePrimitiveInvocationCount"]
+                        unsignedIntegerValue],
+                    (unsigned long)[report[
+                        @"dataPageSemanticMutationCount"]
+                        unsignedIntegerValue]);
+                if ([report[@"stage"] isEqual:
+                         @"armed-identical-bytes-noop-write"]) {
+                    log_user("[HAIL_MARY_DATA_PAGE] Journal stopped at the armed checkpoint; the dispatch is in flight and readback is pending.\n");
+                }
+                log_user("[HAIL_MARY_DATA_PAGE] %s\n",
+                    [settings_lsreg_text(report[@"message"]) UTF8String]);
+                log_user("[HAIL_MARY_DATA_PAGE] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    confirmed,
+                    [NSString stringWithFormat:
+                        @"Hail Mary Data-Page Probe finished: %@.",
+                        result.length ? result : @"unknown-result"]);
+            });
+        });
+    });
+}
+
+void settings_run_hail_mary_read_only_data_page_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "Hail Mary .34 RO-Data Probe",
+                "[HAIL_MARY_RO_DATA] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, @"Hail Mary .34 RO-Data Probe blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[HAIL_MARY_RO_DATA] Acquiring or reusing validated KRW, then proving the exact .34 guard before one identical-bytes dispatch. No redirect or fallback is armed.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[HAIL_MARY_RO_DATA] Validated KRW is unavailable.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, @"Hail Mary .34 RO-Data Probe failed to acquire validated KRW.");
+            return;
+        }
+
+        pid_t spotlightPID = 0;
+        if (!settings_hail_mary_spotlight_identity(&spotlightPID)) {
+            log_user("[HAIL_MARY_RO_DATA] Spotlight is absent; opening global search and retaining its lifetime assertion through one bounded SpringBoard RemoteCall.\n");
+            NSDictionary<NSString *, id> *presentation =
+                CNDIconServicesConsumerHookPresentSpotlight();
+            BOOL presented = [presentation[@"ok"] boolValue];
+            log_user("[HAIL_MARY_RO_DATA] Spotlight presentation stage=%s ok=%s spotlight-pid=%d message=%s\n",
+                [settings_lsreg_text(presentation[@"stage"]) UTF8String],
+                presented ? "yes" : "no",
+                [presentation[@"spotlightPID"] intValue],
+                [settings_lsreg_text(presentation[@"message"]) UTF8String]);
+            if (!presented ||
+                !settings_hail_mary_spotlight_identity(&spotlightPID)) {
+                log_user("[HAIL_MARY_RO_DATA] Refused: Spotlight did not settle to one validated live identity.\n");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    NO, @"Hail Mary .34 RO-Data Probe could not open and bind Spotlight.");
+                return;
+            }
+        } else {
+            log_user("[HAIL_MARY_RO_DATA] Reusing live Spotlight pid=%d; no toggle was sent.\n",
+                spotlightPID);
+        }
+
+        CNDHailMaryReadOnlyDataPageRun(
+            ^(NSDictionary<NSString *, id> *report) {
+            dispatch_async(dispatch_get_global_queue(
+                QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL confirmed = [report[@"confirmed"] boolValue];
+                NSDictionary<NSString *, id> *scan = report[@"slideScan"];
+                NSDictionary<NSString *, id> *readback = report[@"readback"];
+                NSDictionary<NSString *, id> *postTranslation =
+                    report[@"postWriteTranslation"];
+                log_user("[HAIL_MARY_RO_DATA] result=%s confirmed=%s slide-candidates=%lu exact-matches=%lu readback-identical=%s post-translation-stable=%s writes=%lu semantic-mutations=%lu fallback-attempted=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    confirmed ? "yes" : "no",
+                    (unsigned long)[scan[@"candidateCount"]
+                        unsignedIntegerValue],
+                    (unsigned long)[scan[@"matchingCandidateCount"]
+                        unsignedIntegerValue],
+                    [readback[@"identicalToBefore"] boolValue]
+                        ? "yes" : "no",
+                    [postTranslation[@"stable"] boolValue]
+                        ? "yes" : "no",
+                    (unsigned long)[report[
+                        @"kernelWritePrimitiveInvocationCount"]
+                        unsignedIntegerValue],
+                    (unsigned long)[report[@"semanticMutationCount"]
+                        unsignedIntegerValue],
+                    [report[@"fallbackAttempted"] boolValue]
+                        ? "yes" : "no");
+                if ([report[@"stage"] isEqual:
+                         @"armed-identical-bytes-noop-write"]) {
+                    log_user("[HAIL_MARY_RO_DATA] Journal stopped at the armed checkpoint; the .34 dispatch is in flight and readback is pending.\n");
+                }
+                log_user("[HAIL_MARY_RO_DATA] %s\n",
+                    [settings_lsreg_text(report[@"message"]) UTF8String]);
+                log_user("[HAIL_MARY_RO_DATA] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    confirmed,
+                    [NSString stringWithFormat:
+                        @"Hail Mary .34 RO-Data Probe finished: %@.",
+                        result.length ? result : @"unknown-result"]);
+            });
+        });
+    });
+}
+
+static void settings_run_hail_mary_imp_redirect_action(
+    CNDHailMaryImpRedirectOperation operation)
+{
+    NSString *operationName =
+        operation == CNDHailMaryImpRedirectOperationApply
+            ? @"apply" : @"restore";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "Hail Mary Dispatch Redirect",
+                "[HAIL_MARY_IMP] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, @"Hail Mary Dispatch Redirect blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[HAIL_MARY_IMP] operation=%s acquiring or reusing validated KRW. A same-boot successful .34 no-op report is mandatory before mutation.\n",
+            operationName.UTF8String);
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[HAIL_MARY_IMP] Validated KRW is unavailable.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, @"Hail Mary Dispatch Redirect failed to acquire validated KRW.");
+            return;
+        }
+
+        BOOL enabled = operation == CNDHailMaryImpRedirectOperationApply;
+        NSDictionary<NSString *, id> *result =
+            [CNDSnowBoardRemix setTransparencyFixEnabled:enabled];
+        BOOL ok = [result[@"ok"] boolValue];
+        log_user("[TRANSPARENCY_FIX] legacy launch route operation=%s ok=%s stage=%s message=%s\n",
+            operationName.UTF8String, ok ? "yes" : "no",
+            [settings_lsreg_text(result[@"stage"]) UTF8String],
+            [settings_lsreg_text(result[@"message"]) UTF8String]);
+        log_session_end();
+        settings_release_actions_lock();
+        settings_post_actions_complete_async(
+            ok, [NSString stringWithFormat:@"Transparency Fix %@: %@.",
+                enabled ? @"apply" : @"restore",
+                settings_lsreg_text(result[@"stage"])]);
+    });
+}
+
+void settings_run_hail_mary_imp_redirect_apply_action(void)
+{
+    settings_run_hail_mary_imp_redirect_action(
+        CNDHailMaryImpRedirectOperationApply);
+}
+
+void settings_run_hail_mary_imp_redirect_restore_action(void)
+{
+    settings_run_hail_mary_imp_redirect_action(
+        CNDHailMaryImpRedirectOperationRestore);
+}
+
+void settings_run_hail_mary_app_library_miniature_refresh_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "App Library Miniature Refresh",
+                "[HAIL_MARY_LIBRARY_REFRESH] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, @"App Library miniature refresh blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[HAIL_MARY_LIBRARY_REFRESH] Acquiring or reusing validated KRW for one exact PID-bound SpringBoard RemoteCall. This purges only the retained folder/category caches, reloads exact themed SBApplicationIcon generations, rebuilds folder composites, reloads App Library category pods, and enqueues their update. It does not install or mutate any Objective-C method, touch the Hail Mary dispatch entry, reload App Library list/search rows, relayout, signal, restart, respring, or write shared-cache data.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[HAIL_MARY_LIBRARY_REFRESH] Validated KRW is unavailable.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, @"App Library miniature refresh failed to acquire validated KRW.");
+            return;
+        }
+
+        NSDictionary<NSString *, id> *presentation =
+            [CNDSnowBoardRemix reconcilePresentationLifecycle] ?: @{};
+        NSArray<NSString *> *activeBundles =
+            [presentation[@"activeBundleIdentifiers"]
+                isKindOfClass:NSArray.class]
+                ? presentation[@"activeBundleIdentifiers"] : @[];
+        if (activeBundles.count == 0) {
+            log_user("[HAIL_MARY_LIBRARY_REFRESH] No active themed IconServices bundle identifiers are journaled; refusing an unbounded or guessed reload.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, @"No active themed applications are available for the miniature refresh.");
+            return;
+        }
+        log_user("[HAIL_MARY_LIBRARY_REFRESH] Configured exact themed targets=%lu.\n",
+            (unsigned long)activeBundles.count);
+
+        pid_t springBoardPID = settings_current_springboard_pid();
+        if (springBoardPID <= 1) {
+            log_user("[HAIL_MARY_LIBRARY_REFRESH] The exact live SpringBoard PID could not be resolved.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, @"App Library miniature refresh could not bind SpringBoard.");
+            return;
+        }
+
+        NSDictionary<NSString *, id> *report =
+            CNDIconServicesConsumerHookRefreshAppLibraryMiniaturesForPID(
+                springBoardPID);
+        BOOL ok = [report[@"ok"] boolValue];
+        log_user("[HAIL_MARY_LIBRARY_REFRESH] result=%s pid=%d identity=%s configured=%lu ignored-non-application=%lu targets=%lu objects=%lu canonical=%lu leaf=%lu misses=%lu caches=%lu/%lu icon-reloads=%lu/%lu rebuilds=%lu pods=%lu/%lu enqueues=%lu/%lu manager-reset=%s list-reload=%s relayout=%s objc-method-mutations=%lu lifecycle-mutations=%lu shared-cache-writes=%lu closed=%s\n",
+            [settings_lsreg_text(report[@"stage"]) UTF8String],
+            springBoardPID,
+            [report[@"finalIdentityStable"] boolValue] ? "stable" : "changed",
+            (unsigned long)[report[@"configuredTargetBundleCount"]
+                unsignedIntegerValue],
+            (unsigned long)[report[@"ignoredNonApplicationTargetCount"]
+                unsignedIntegerValue],
+            (unsigned long)[report[@"targetBundleCount"] unsignedIntegerValue],
+            (unsigned long)[report[@"targetIconObjectCount"] unsignedIntegerValue],
+            (unsigned long)[report[@"canonicalIconMatches"] unsignedIntegerValue],
+            (unsigned long)[report[@"liveLeafIconMatches"] unsignedIntegerValue],
+            (unsigned long)[report[@"iconLookupMisses"] unsignedIntegerValue],
+            (unsigned long)[report[@"cachesPurged"] unsignedIntegerValue],
+            (unsigned long)[report[@"cacheCount"] unsignedIntegerValue],
+            (unsigned long)[report[@"iconReloads"] unsignedIntegerValue],
+            (unsigned long)[report[@"targetIconObjectCount"] unsignedIntegerValue],
+            (unsigned long)[report[@"folderRebuilds"] unsignedIntegerValue],
+            (unsigned long)[report[@"podReloads"] unsignedIntegerValue],
+            (unsigned long)[report[@"libraryFolderControllerCount"] unsignedIntegerValue],
+            (unsigned long)[report[@"updatesEnqueued"] unsignedIntegerValue],
+            (unsigned long)[report[@"libraryControllerCount"] unsignedIntegerValue],
+            [report[@"managerResetIssued"] boolValue] ? "yes" : "no",
+            [report[@"appLibraryListReloadIssued"] boolValue] ? "yes" : "no",
+            [report[@"relayoutIssued"] boolValue] ? "yes" : "no",
+            (unsigned long)[report[@"objectiveCMethodMutationCount"]
+                unsignedIntegerValue],
+            (unsigned long)[report[@"processLifecycleMutationCount"]
+                unsignedIntegerValue],
+            (unsigned long)[report[@"sharedCacheWriteCount"]
+                unsignedIntegerValue],
+            [report[@"closed"] boolValue] ? "yes" : "no");
+        log_user("[HAIL_MARY_LIBRARY_REFRESH] %s\n",
+            [settings_lsreg_text(report[@"message"]) UTF8String]);
+
+        NSMutableDictionary<NSString *, id> *savedReport =
+            [report mutableCopy] ?: [NSMutableDictionary dictionary];
+        savedReport[@"capturedAt"] = [[NSISO8601DateFormatter new]
+            stringFromDate:[NSDate date]];
+        savedReport[@"safety"] = @{
+            @"cachePurgeMessages": report[@"cachesPurged"] ?: @0,
+            @"iconReloadMessages": report[@"iconReloads"] ?: @0,
+            @"folderRebuildMessages": report[@"folderRebuilds"] ?: @0,
+            @"podReloadMessages": report[@"podReloads"] ?: @0,
+            @"categoryUpdateMessages": report[@"updatesEnqueued"] ?: @0,
+            @"managerResetMessages": @0,
+            @"listReloadMessages": @0,
+            @"relayoutMessages": @0,
+            @"objectiveCMethodMutations": @0,
+            @"processLifecycleMutations": @0,
+            @"sharedCacheWrites": @0,
+            @"localReportWrites": @1,
+        };
+        NSError *jsonError = nil;
+        NSData *json = [NSJSONSerialization dataWithJSONObject:savedReport
+            options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+            error:&jsonError];
+        NSURL *documents = [[[NSFileManager defaultManager]
+            URLsForDirectory:NSDocumentDirectory
+            inDomains:NSUserDomainMask] firstObject];
+        NSURL *directory = [documents
+            URLByAppendingPathComponent:@"HailMary" isDirectory:YES];
+        NSURL *reportURL = [directory
+            URLByAppendingPathComponent:
+                @"app-library-miniature-refresh.json" isDirectory:NO];
+        NSError *writeError = nil;
+        if (json && reportURL) {
+            [[NSFileManager defaultManager]
+                createDirectoryAtURL:directory
+                withIntermediateDirectories:YES attributes:nil
+                error:&writeError];
+            if (!writeError && ![json writeToURL:reportURL
+                options:NSDataWritingAtomic error:&writeError]) {
+                // NSData populated writeError.
+            }
+        }
+        if (jsonError || writeError || !reportURL) {
+            NSError *error = jsonError ?: writeError;
+            log_user("[HAIL_MARY_LIBRARY_REFRESH] Saving JSON failed: %s\n",
+                (error.localizedDescription ?: @"Documents URL unavailable")
+                    .UTF8String);
+        } else {
+            log_user("[HAIL_MARY_LIBRARY_REFRESH] JSON: %s\n",
+                reportURL.path.UTF8String);
+        }
+        log_user("[HAIL_MARY_LIBRARY_REFRESH] No Objective-C method mutation, Spotlight action, process lifecycle mutation, or automatic visual check was attempted. The live App Library remains for manual visual confirmation only.\n");
+        log_session_end();
+        settings_release_actions_lock();
+        settings_post_actions_complete_async(
+            ok,
+            ok ? report[@"message"]
+               : @"App Library miniature refresh did not complete safely.");
     });
 }
 
@@ -2964,6 +3680,30 @@ static BOOL settings_ensure_kexploit_recovery_only(void)
     g_kexploit_done = YES;
     settings_notify_remote_call_state_changed();
     return YES;
+}
+
+void settings_reconcile_persisted_applied_state_on_launch(void)
+{
+    BOOL continuity = NO;
+    if (settings_device_supported()) {
+        if (kexploit_krw_ready()) {
+            continuity = YES;
+        } else if (krw_persistence_has_saved_recovery() &&
+                   krw_persistence_recover() &&
+                   kexploit_krw_ready()) {
+            continuity = YES;
+        }
+    }
+
+    BOOL changed = NO;
+    if (continuity) {
+        g_kexploit_done = YES;
+        changed = CNDTransientAppliedStateReconcileCurrentEpoch();
+        log_user("[ACTIVE_STATE] Recovered the prior KRW generation; reconciling SpringBoard and Spotlight identities without acquiring a fresh primitive.\n");
+    } else {
+        changed = CNDTransientAppliedStateResetAfterKRWLoss();
+    }
+    if (changed) settings_notify_package_queue_changed_async();
 }
 
 static void settings_reset_springboard_remote_call_health_locked(void)
@@ -3320,6 +4060,33 @@ static void settings_destroy_springboard_remote_call_locked_internal(const char 
 static void settings_destroy_springboard_remote_call_locked(const char *reason)
 {
     settings_destroy_springboard_remote_call_locked_internal(reason, YES);
+}
+
+// SBCustomizer is a one-shot model mutation. Once the guarded apply returns,
+// its result no longer depends on keeping the synthetic call channel open.
+// Teardown can still take a bounded exception wait, so keep it serialized with
+// every other RemoteCall user but move it off the apply-completion path.
+static void settings_release_sbc_one_shot_channel_async(NSString *reason,
+                                                        NSString *successLog)
+{
+    NSString *reasonCopy = [reason copy];
+    NSString *successLogCopy = [successLog copy];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        BOOL closed = NO;
+        @synchronized (settings_rc_lock()) {
+            // A newer action may have claimed the channel for a live tweak
+            // before this block ran. In that case it owns the session now.
+            if (!settings_has_persistent_springboard_remote_call_user() &&
+                g_springboard_rc_ready) {
+                settings_destroy_springboard_remote_call_locked_internal_ex(
+                    reasonCopy.UTF8String, YES, YES);
+                closed = g_springboard_rc_ready == 0;
+            }
+        }
+        if (closed && successLogCopy.length > 0) {
+            log_user("%s\n", successLogCopy.UTF8String);
+        }
+    });
 }
 
 static void settings_prepare_for_respring_sync(void)
@@ -3883,6 +4650,11 @@ static NSTimeInterval settings_current_boot_epoch_seconds(void)
            [[NSProcessInfo processInfo] systemUptime];
 }
 
+NSTimeInterval settings_current_boot_epoch(void)
+{
+    return settings_current_boot_epoch_seconds();
+}
+
 static BOOL settings_hide_home_bar_materialkit_zero_active(NSUserDefaults *d)
 {
     NSTimeInterval storedBoot = [d doubleForKey:kSettingsHideHomeBarMaterialKitBootTime];
@@ -3914,11 +4686,23 @@ BOOL settings_hide_home_bar_respring_pending(void)
 
 void settings_begin_system_edit_respring(UIViewController *host)
 {
+    settings_begin_system_edit_respring_with_completion(host, nil);
+}
+
+void settings_begin_system_edit_respring_with_completion(
+    UIViewController *host,
+    void (^completion)(BOOL started, NSString *message))
+{
     __weak UIViewController *weakHost = host;
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         if (__sync_lock_test_and_set(&g_settings_actions_running, 1)) {
             printf("[SETTINGS] system edit respring blocked: actions already running\n");
             log_user("[RESPRING] Another action is still running. Try Respring again in a moment.\n");
+            if (completion) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    completion(NO, @"Another action is still running. Tap Retry in a moment to continue the saved respring.");
+                });
+            }
             return;
         }
 
@@ -3933,7 +4717,12 @@ void settings_begin_system_edit_respring(UIViewController *host)
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            settings_show_respring_overlay(weakHost);
+            BOOL started = settings_show_respring_overlay_now(weakHost);
+            if (completion) {
+                completion(started,
+                    started ? @"Respring started."
+                            : @"No active window was available. Tap Retry to continue the saved respring.");
+            }
         });
     });
 }
@@ -4452,24 +5241,18 @@ static void settings_reset_sbc_defaults(void)
     if (!g_springboard_rc_ready) return;
 
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
-        BOOL closedNonLiveRemoteCall = NO;
+        __block bool ok = false;
         @synchronized (settings_rc_lock()) {
             if (!g_springboard_rc_ready) return;
-            bool ok = settings_apply_sbc_from_defaults_locked(d);
+            ok = settings_apply_sbc_from_defaults_locked(d);
             settings_mark_tweak_applied(kSettingsSBCEnabled,
                                         ok && [d boolForKey:kSettingsSBCEnabled]);
             printf("[SETTINGS] SBC reset apply result=%d\n", ok);
-            if (!settings_has_persistent_springboard_remote_call_user() &&
-                g_springboard_rc_ready) {
-                settings_destroy_springboard_remote_call_locked_internal_ex(
-                    "SBC reset one-shot apply complete", YES, YES);
-                closedNonLiveRemoteCall = g_springboard_rc_ready == 0;
-            }
-        }
-        if (closedNonLiveRemoteCall) {
-            log_user("[OK] SpringBoard channel released — SBC defaults were committed.\n");
         }
         settings_notify_package_queue_changed_async();
+        settings_release_sbc_one_shot_channel_async(
+            @"SBC reset one-shot apply complete",
+            @"[OK] SpringBoard channel released — SBC defaults were committed.");
     });
 }
 
@@ -4677,6 +5460,926 @@ BOOL settings_apply_font_changer_now(BOOL apply)
 BOOL settings_font_changer_has_regular_font(void)
 {
     return font_changer_has_regular_font();
+}
+
+BOOL settings_apply_lockscreen_pulsar_runtime(BOOL apply, NSError **error)
+{
+    if (error) *error = nil;
+    if (!settings_try_claim_actions_lock(
+            apply ? "Lockscreen Glyphs runtime apply"
+                  : "Lockscreen Glyphs runtime restore",
+            "[GLYPHS_RUNTIME] Another action is already running.")) {
+        if (error) *error = [NSError errorWithDomain:@"CNDLockscreenGlyphRuntime"
+            code:35 userInfo:@{NSLocalizedDescriptionKey:
+                @"Another system action is already running."}];
+        return NO;
+    }
+
+    @try {
+        PackageQueue *queue = [PackageQueue sharedQueue];
+        if (queue.commitInFlight || queue.hasDurableTransaction ||
+            queue.pendingCount > 0) {
+            NSString *message =
+                @"Finish or clear the saved queue before changing the live lock-screen glyphs.";
+            if (error) *error = [NSError errorWithDomain:@"CNDLockscreenGlyphRuntime"
+                code:36 userInfo:@{NSLocalizedDescriptionKey: message}];
+            log_user("[GLYPHS_RUNTIME] %s\n", message.UTF8String);
+            return NO;
+        }
+        if (!settings_ensure_kexploit()) {
+            if (error) *error = [NSError errorWithDomain:@"CNDLockscreenGlyphRuntime"
+                code:37 userInfo:@{NSLocalizedDescriptionKey:
+                    @"Failed to prepare kernel primitives for the SpringBoard session."}];
+            return NO;
+        }
+
+        __block NSDictionary *report = nil;
+        __block BOOL transportHealthy = NO;
+        @synchronized (settings_rc_lock()) {
+            BOOL hadSpringBoardSession = g_springboard_rc_ready != 0;
+            if (!settings_ensure_springboard_remote_call_locked()) {
+                if (error) *error = [NSError errorWithDomain:@"CNDLockscreenGlyphRuntime"
+                    code:38 userInfo:@{NSLocalizedDescriptionKey:
+                        @"Could not open a stable SpringBoard RemoteCall session."}];
+                return NO;
+            }
+
+            uint64_t pool = r_autorelease_pool_push();
+            if (pool) {
+                report = apply
+                    ? CNDLockscreenQuickActionApplyArtwork(
+                        CNDPulsarCameraPNGData(),
+                        CNDPulsarFlashlightOffPNGData(),
+                        CNDPulsarFlashlightOnPNGData())
+                    : CNDLockscreenQuickActionRestoreStock();
+            }
+            transportHealthy = pool && remote_call_current_success();
+            if (pool && transportHealthy) {
+                transportHealthy = r_autorelease_pool_pop(pool) &&
+                    remote_call_current_success();
+            }
+            settings_note_springboard_remote_call_result_locked(
+                apply ? "Lockscreen quick-action runtime apply"
+                      : "Lockscreen quick-action runtime restore",
+                transportHealthy);
+            if (!hadSpringBoardSession && transportHealthy &&
+                g_springboard_rc_ready) {
+                settings_destroy_springboard_remote_call_locked_internal_ex(
+                    apply ? "Lockscreen glyph runtime apply complete"
+                          : "Lockscreen glyph runtime restore complete",
+                    YES, YES);
+            }
+        }
+
+        NSData *json = report ? [NSJSONSerialization dataWithJSONObject:report
+            options:0 error:nil] : nil;
+        NSString *jsonString = json
+            ? [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding]
+            : nil;
+        if (jsonString.length)
+            log_user("[GLYPHS_RUNTIME] %s result: %s\n",
+                apply ? "Apply" : "Restore", jsonString.UTF8String);
+
+        BOOL success = transportHealthy && [report[@"success"] boolValue];
+        if (!success && error && !*error) {
+            NSString *message = report[@"failureReason"];
+            if (![message isKindOfClass:NSString.class] || message.length == 0) {
+                message = transportHealthy
+                    ? (apply ? @"The Pulsar glyph mutation did not verify."
+                             : @"The stock glyph restore did not verify.")
+                    : @"The SpringBoard RemoteCall transport did not finish cleanly.";
+            }
+            *error = [NSError errorWithDomain:@"CNDLockscreenGlyphRuntime"
+                code:39 userInfo:@{NSLocalizedDescriptionKey: message}];
+        }
+        if (success) {
+            log_user("[GLYPHS_RUNTIME] Live camera and flashlight glyphs %s and verified; no respring was performed.\n",
+                apply ? "themed" : "restored to stock");
+        }
+        return success;
+    } @finally {
+        settings_release_actions_lock();
+    }
+}
+
+#if 0
+// Retired Control Center research UI. Production CC Theming is now only a
+// durable queued file apply/restore operation followed by the shared respring.
+static NSURL *settings_cc_theming_inventory_url(void)
+{
+    NSURL *documents = [[[NSFileManager defaultManager]
+        URLsForDirectory:NSDocumentDirectory
+        inDomains:NSUserDomainMask] firstObject];
+    if (!documents) return nil;
+    return [[documents URLByAppendingPathComponent:@"CCTheming"
+                                       isDirectory:YES]
+        URLByAppendingPathComponent:@"physical-control-inventory.json"
+                          isDirectory:NO];
+}
+
+static NSString *settings_cc_theming_inventory_status(void)
+{
+    NSURL *url = settings_cc_theming_inventory_url();
+    NSDictionary *attributes = url
+        ? [[NSFileManager defaultManager] attributesOfItemAtPath:url.path
+                                                           error:nil]
+        : nil;
+    NSDate *date = attributes[NSFileModificationDate];
+    if (!date) return @"No physical-device inventory has been saved yet.";
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateStyle = NSDateFormatterMediumStyle;
+    formatter.timeStyle = NSDateFormatterMediumStyle;
+    return [NSString stringWithFormat:@"Last saved %@\n%@",
+            [formatter stringFromDate:date], url.path];
+}
+
+static NSURL *settings_cc_theming_media_trace_url(void)
+{
+    NSURL *documents = [[[NSFileManager defaultManager]
+        URLsForDirectory:NSDocumentDirectory
+        inDomains:NSUserDomainMask] firstObject];
+    if (!documents) return nil;
+    return [[documents URLByAppendingPathComponent:@"CCTheming"
+                                       isDirectory:YES]
+        URLByAppendingPathComponent:@"physical-media-connectivity-trace.json"
+                          isDirectory:NO];
+}
+
+static NSURL *settings_cc_theming_media_trace_archive_url(void)
+{
+    NSURL *latest = settings_cc_theming_media_trace_url();
+    if (!latest) return nil;
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+    formatter.dateFormat = @"yyyyMMdd-HHmmss";
+    NSString *name = [NSString stringWithFormat:
+        @"physical-expanded-control-center-trace-%@.json",
+        [formatter stringFromDate:[NSDate date]]];
+    return [[latest URLByDeletingLastPathComponent]
+        URLByAppendingPathComponent:name isDirectory:NO];
+}
+
+static NSString *settings_cc_theming_media_trace_status(void)
+{
+    NSURL *url = settings_cc_theming_media_trace_url();
+    NSDictionary *attributes = url
+        ? [[NSFileManager defaultManager] attributesOfItemAtPath:url.path
+                                                           error:nil]
+        : nil;
+    NSDate *date = attributes[NSFileModificationDate];
+    if (!date) return @"No expanded Control Center trace has been saved yet.";
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateStyle = NSDateFormatterMediumStyle;
+    formatter.timeStyle = NSDateFormatterMediumStyle;
+    return [NSString stringWithFormat:@"Last saved %@\n%@",
+            [formatter stringFromDate:date], url.path];
+}
+
+static NSURL *settings_cc_theming_semantic_trace_url(void)
+{
+    NSURL *existing = settings_cc_theming_media_trace_url();
+    return [[existing URLByDeletingLastPathComponent]
+        URLByAppendingPathComponent:@"physical-media-focus-semantic-trace.json"
+                          isDirectory:NO];
+}
+
+static NSURL *settings_cc_theming_semantic_trace_archive_url(void)
+{
+    NSURL *latest = settings_cc_theming_semantic_trace_url();
+    if (!latest) return nil;
+    NSDateFormatter *formatter = [NSDateFormatter new];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:0];
+    formatter.dateFormat = @"yyyyMMdd-HHmmss";
+    return [[latest URLByDeletingLastPathComponent]
+        URLByAppendingPathComponent:[NSString stringWithFormat:
+            @"physical-media-focus-semantic-trace-%@.json",
+            [formatter stringFromDate:[NSDate date]]] isDirectory:NO];
+}
+
+static NSString *settings_cc_theming_semantic_trace_status(void)
+{
+    NSURL *url = settings_cc_theming_semantic_trace_url();
+    NSDate *date = url ? [[NSFileManager defaultManager]
+        attributesOfItemAtPath:url.path error:nil][NSFileModificationDate] : nil;
+    if (!date) return @"No lifecycle-owner trace has been saved yet.";
+    NSDateFormatter *formatter = [NSDateFormatter new];
+    formatter.dateStyle = NSDateFormatterMediumStyle;
+    formatter.timeStyle = NSDateFormatterMediumStyle;
+    return [NSString stringWithFormat:@"Last saved %@\n%@",
+        [formatter stringFromDate:date], url.path];
+}
+
+static NSURL *settings_cc_theming_refined_trace_url(void)
+{
+    return [[settings_cc_theming_media_trace_url() URLByDeletingLastPathComponent]
+        URLByAppendingPathComponent:@"physical-refined-controlcenter-routes.json"];
+}
+
+static NSURL *settings_cc_theming_refined_trace_archive_url(void)
+{
+    // Unique per capture, including repeated compact/expanded phases.
+    return [[settings_cc_theming_refined_trace_url() URLByDeletingLastPathComponent]
+        URLByAppendingPathComponent:[NSString stringWithFormat:
+            @"physical-refined-controlcenter-routes-%@.json", NSUUID.UUID.UUIDString]];
+}
+
+static NSString *settings_cc_theming_refined_trace_status(void)
+{
+    NSURL *url = settings_cc_theming_refined_trace_url();
+    NSDate *date = url ? [[NSFileManager defaultManager]
+        attributesOfItemAtPath:url.path error:nil][NSFileModificationDate] : nil;
+    if (!date) {
+        return @"No refined physical route report yet. Capture Expanded Focus then Reopened Focus in one SpringBoard process, or choose the Media phases.";
+    }
+    NSDateFormatter *formatter = [NSDateFormatter new];
+    formatter.dateStyle = NSDateFormatterMediumStyle;
+    formatter.timeStyle = NSDateFormatterMediumStyle;
+    NSData *data = [NSData dataWithContentsOfURL:url];
+    id report = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+    if ([report isKindOfClass:NSDictionary.class] && [report[@"captureScope"] isEqualToString:@"focus"]) {
+        NSDictionary *materialized = report[@"focusMaterializationEvidence"];
+        BOOL comparison = [report[@"priorSamePIDComparison"][@"focusReconstructionComparison"][@"comparisonAvailable"] boolValue];
+        return [NSString stringWithFormat:@"Last saved %@ · %@\nFocus chains %lu/%lu; same-PID comparison %@.\n%@",
+            [formatter stringFromDate:date], [report[@"success"] boolValue] ? @"captured" : @"failed",
+            (unsigned long)[materialized[@"completeRowChainCount"] unsignedIntegerValue],
+            (unsigned long)[materialized[@"rowCount"] unsignedIntegerValue],
+            comparison ? @"available" : @"unavailable", url.path];
+    }
+    return [NSString stringWithFormat:@"Last saved %@\n%@",
+        [formatter stringFromDate:date], url.path];
+}
+
+static NSURL *settings_cc_theming_apply_restore_canary_url(void)
+{
+    NSURL *documents = [[[NSFileManager defaultManager]
+        URLsForDirectory:NSDocumentDirectory
+        inDomains:NSUserDomainMask] firstObject];
+    if (!documents) return nil;
+    return [[documents URLByAppendingPathComponent:@"CCTheming"
+                                       isDirectory:YES]
+        URLByAppendingPathComponent:@"physical-apply-restore-canary.json"
+                          isDirectory:NO];
+}
+
+static NSString *settings_cc_theming_apply_restore_canary_status(void)
+{
+    NSURL *url = settings_cc_theming_apply_restore_canary_url();
+    NSDictionary *attributes = url
+        ? [[NSFileManager defaultManager] attributesOfItemAtPath:url.path
+                                                           error:nil]
+        : nil;
+    NSDate *date = attributes[NSFileModificationDate];
+    if (!date) return @"No physical apply/restore canary has been saved yet.";
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateStyle = NSDateFormatterMediumStyle;
+    formatter.timeStyle = NSDateFormatterMediumStyle;
+    return [NSString stringWithFormat:@"Last saved %@\n%@",
+            [formatter stringFromDate:date], url.path];
+}
+
+static NSURL *settings_cc_theming_production_report_url(void)
+{
+    NSURL *documents = [[[NSFileManager defaultManager]
+        URLsForDirectory:NSDocumentDirectory
+        inDomains:NSUserDomainMask] firstObject];
+    if (!documents) return nil;
+    return [[documents URLByAppendingPathComponent:@"CCTheming"
+                                       isDirectory:YES]
+        URLByAppendingPathComponent:@"physical-production-theme.json"
+                          isDirectory:NO];
+}
+
+static NSString *settings_cc_theming_production_status(void)
+{
+    if (CNDCCThemingFileBackingHasJournaledState()) {
+        return @"Pulsar resource files have a durable stock backup journal. Restore Stock reverses the file changes.";
+    }
+    NSURL *url = settings_cc_theming_production_report_url();
+    NSDictionary *attributes = url
+        ? [[NSFileManager defaultManager] attributesOfItemAtPath:url.path
+                                                           error:nil]
+        : nil;
+    NSDate *date = attributes[NSFileModificationDate];
+    if (!date) {
+        return @"Stock state. No full-theme apply or restore report has been saved yet.";
+    }
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateStyle = NSDateFormatterMediumStyle;
+    formatter.timeStyle = NSDateFormatterMediumStyle;
+    return [NSString stringWithFormat:@"Last resource operation saved %@\n%@",
+            [formatter stringFromDate:date], url.path];
+}
+
+static void settings_run_cc_theming_media_connectivity_trace_impl(NSInteger mode, NSString *phase)
+{
+    BOOL actionOK = NO;
+    NSString *completionMessage = @"Control Center trace failed. Check the log.";
+    BOOL semantic = mode != 0;
+    BOOL refined = mode == 2;
+    BOOL focus = refined && [@[@"expanded-focus", @"reopened-focus"] containsObject:phase ?: @""];
+    if (!settings_try_claim_actions_lock(
+            "CC Theming media/connectivity trace",
+            "[CC_THEMING_TRACE] Another system action is already running.")) {
+        settings_post_actions_complete_async(NO, @"Control Center trace blocked: another system action is running.");
+        return;
+    }
+
+    @try {
+        if (remote_call_lab_backend_opted_in() || cnd_lab_vphone_guest()) {
+            log_user("[CC_THEMING_TRACE] Refused: this trace is physical-device-only.\n");
+            return;
+        }
+        PackageQueue *queue = [PackageQueue sharedQueue];
+        if (queue.commitInFlight || queue.hasDurableTransaction) {
+            log_user("[CC_THEMING_TRACE] Finish the active package transaction before tracing.\n");
+            return;
+        }
+        if (!settings_ensure_kexploit()) {
+            log_user("[CC_THEMING_TRACE] Failed to prepare kernel primitives for the SpringBoard session.\n");
+            return;
+        }
+
+        __block NSDictionary<NSString *, id> *rawReport = nil;
+        __block BOOL transportHealthy = NO;
+        __block BOOL hadSpringBoardSession = NO;
+        @synchronized (settings_rc_lock()) {
+            hadSpringBoardSession = g_springboard_rc_ready != 0;
+            if (!settings_ensure_springboard_remote_call_locked()) {
+                log_user("[CC_THEMING_TRACE] Could not open a stable SpringBoard RemoteCall session.\n");
+                return;
+            }
+
+            uint64_t pool = r_autorelease_pool_push();
+            if (pool) rawReport = focus ? CNDCCThemingCopyRefinedFocusRouteTrace()
+                : refined ? CNDCCThemingCopyRefinedPhysicalRouteTrace() : semantic
+                ? CNDCCThemingCopyLifecycleOwnerTrace()
+                : CNDCCThemingCopyMediaConnectivityTrace();
+            transportHealthy = pool && remote_call_current_success();
+            if (pool && transportHealthy) {
+                transportHealthy = r_autorelease_pool_pop(pool) &&
+                    remote_call_current_success();
+            }
+            settings_note_springboard_remote_call_result_locked(
+                "CC Theming media/connectivity trace", transportHealthy);
+            if (!hadSpringBoardSession && transportHealthy &&
+                g_springboard_rc_ready) {
+                settings_destroy_springboard_remote_call_locked_internal_ex(
+                    "CC Theming media/connectivity trace complete", YES, YES);
+            }
+        }
+
+        NSMutableDictionary<NSString *, id> *report = rawReport
+            ? [rawReport mutableCopy]
+            : [@{
+                @"schemaVersion": refined ? @3 : @2,
+                @"mode": refined ? @"physical-read-only-refined-route-trace" : semantic
+                    ? @"physical-read-only-lifecycle-owner-trace"
+                    : @"physical-read-only-expanded-control-center-trace",
+                @"success": @NO,
+                @"readOnly": @YES,
+                @"failureReason": @"The trace did not return a report.",
+              } mutableCopy];
+        report[@"transportHealthy"] = @(transportHealthy);
+        report[@"reusedSpringBoardSession"] = @(hadSpringBoardSession);
+        if (!transportHealthy) {
+            report[@"success"] = @NO;
+            if (![report[@"failureReason"] isKindOfClass:NSString.class]) {
+                report[@"failureReason"] =
+                    @"The SpringBoard RemoteCall transport did not finish cleanly.";
+            }
+        }
+        report[@"capturedAt"] = [[NSISO8601DateFormatter new]
+            stringFromDate:[NSDate date]];
+        if (refined) {
+            report[@"capturePhase"] = phase ?: @"unspecified-user-phase";
+            report[@"phaseIsUserDeclared"] = @YES;
+            if (focus) { report[@"captureScope"] = @"focus"; report[@"refinedRevision"] = @4; }
+            NSURL *priorURL = settings_cc_theming_refined_trace_url();
+            NSData *priorData = priorURL ? [NSData dataWithContentsOfURL:priorURL] : nil;
+            id previous = priorData ? [NSJSONSerialization JSONObjectWithData:priorData options:0 error:nil] : nil;
+            report[@"priorSamePIDComparison"] = CNDCCThemingCompareRefinedPhysicalRoutes(report,
+                [previous isKindOfClass:NSDictionary.class] ? previous : nil);
+        }
+        report[@"safety"] = @{
+            @"controlActions": @0,
+            @"presentationWrites": @0,
+            @"radioWrites": @0,
+            @"targetFileWrites": @0,
+            @"runtimeMetadataWrites": @0,
+            @"localReportWrites": @2,
+        };
+
+        NSError *jsonError = nil;
+        NSData *json = [NSJSONSerialization dataWithJSONObject:report
+            options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+            error:&jsonError];
+        NSURL *url = refined ? settings_cc_theming_refined_trace_url() : semantic ? settings_cc_theming_semantic_trace_url()
+            : settings_cc_theming_media_trace_url();
+        NSURL *archiveURL = refined ? settings_cc_theming_refined_trace_archive_url() : semantic ? settings_cc_theming_semantic_trace_archive_url()
+            : settings_cc_theming_media_trace_archive_url();
+        NSError *writeError = nil;
+        if (json && url) {
+            [[NSFileManager defaultManager]
+                createDirectoryAtURL:[url URLByDeletingLastPathComponent]
+                withIntermediateDirectories:YES attributes:nil error:&writeError];
+            if (!writeError && ![json writeToURL:url
+                options:NSDataWritingAtomic error:&writeError]) {
+                // writeError is populated by NSData.
+            }
+            if (!writeError && archiveURL && ![json writeToURL:archiveURL
+                options:NSDataWritingAtomic error:&writeError]) {
+                // writeError is populated by NSData.
+            }
+        }
+
+        if (jsonError || writeError || !url) {
+            NSError *error = jsonError ?: writeError;
+            log_user("[CC_THEMING_TRACE] Trace finished, but saving failed: %s\n",
+                (error.localizedDescription ?: @"Documents URL unavailable").UTF8String);
+        } else if (refined) {
+            log_user("[CC_THEMING_REFINED] Saved physical named-route evidence for PID %d, phase %s. Diagnostic descendants=%lu; no control or presentation changes.\n",
+                [report[@"targetPID"] intValue], [report[@"capturePhase"] UTF8String],
+                (unsigned long)[report[@"discoveryObjectCount"] unsignedIntegerValue]);
+            log_user("[CC_THEMING_REFINED] Report: %s\n", url.path.UTF8String);
+            if (archiveURL) log_user("[CC_THEMING_REFINED] Archived: %s\n", archiveURL.path.UTF8String);
+            if (focus) {
+                NSDictionary *comparison = report[@"priorSamePIDComparison"][@"focusReconstructionComparison"];
+                log_user("[CC_THEMING_FOCUS] Module owners=%lu; materialized rows=%lu; complete machine-keyed model/row/icon chains=%lu. Named members only; no descendant discovery.\n",
+                    (unsigned long)[report[@"focusMaterializationEvidence"][@"moduleCount"] unsignedIntegerValue],
+                    (unsigned long)[report[@"focusMaterializationEvidence"][@"rowCount"] unsignedIntegerValue],
+                    (unsigned long)[report[@"focusMaterializationEvidence"][@"completeRowChainCount"] unsignedIntegerValue]);
+                log_user("[CC_THEMING_FOCUS] Prior successful same-PID Focus comparison: %s. Changed identified leaves under unchanged owners=%lu. Unchanged addresses do not prove reconstruction.\n",
+                    [comparison[@"comparisonAvailable"] boolValue] ? "available" : "not available",
+                    (unsigned long)[comparison[@"changedLeavesUnderUnchangedOwners"] count]);
+            } else {
+                log_user("[CC_THEMING_REFINED] Prior successful same-PID comparison: %s. Share the refined route report; native Swift structs and unavailable actual extension providers remain unresolved.\n",
+                    [report[@"priorSamePIDComparison"][@"comparisonAvailable"] boolValue] ? "available" : "not available");
+                log_user("[CC_THEMING_REFINED] Target classes inspected=%lu; generic classes=%lu/128 (truncated=%d); additional hosted-class limit=%d. Media wrapper/session/transport receivers=%lu/%lu/%lu.\n",
+                    (unsigned long)[report[@"priorityInspection"][@"inspectedPriorityClassCount"] unsignedIntegerValue],
+                    (unsigned long)[report[@"priorityInspection"][@"genericClassCount"] unsignedIntegerValue],
+                    [report[@"priorityInspection"][@"genericClassBudgetReached"] boolValue],
+                    [report[@"priorityInspection"][@"priorityClassBudgetReached"] boolValue],
+                    (unsigned long)[report[@"mediaMaterializationEvidence"][@"wrapperCount"] unsignedIntegerValue],
+                    (unsigned long)[report[@"mediaMaterializationEvidence"][@"sessionViewCount"] unsignedIntegerValue],
+                    (unsigned long)[report[@"mediaMaterializationEvidence"][@"transportViewCount"] unsignedIntegerValue]);
+            }
+        } else if (semantic) {
+            NSArray *candidates = [report[@"routeCandidates"] isKindOfClass:NSArray.class]
+                ? report[@"routeCandidates"] : @[];
+            NSUInteger direct = 0;
+            for (NSDictionary *candidate in candidates)
+                direct += [candidate[@"hasDirectControllerRoute"] boolValue] ? 1 : 0;
+            log_user("[CC_THEMING_LIFECYCLE] Saved %lu owner/model objects, %lu route candidates (%lu acquired ownership routes), %lu runtime classes, and %lu visited controllers. The trace follows explicit ownership members.\n",
+                (unsigned long)[report[@"tracedObjectCount"] unsignedIntegerValue],
+                (unsigned long)candidates.count, (unsigned long)direct,
+                (unsigned long)[report[@"classContracts"] count],
+                (unsigned long)[report[@"visitedControllerCount"] unsignedIntegerValue]);
+            log_user("[CC_THEMING_LIFECYCLE] Report: %s\n", url.path.UTF8String);
+            if (archiveURL) log_user("[CC_THEMING_LIFECYCLE] Archived: %s\n", archiveURL.path.UTF8String);
+            if ([report[@"captureTruncated"] boolValue])
+                log_user("[CC_THEMING_LIFECYCLE] Capture reached a bounded limit; partial evidence and unresolved paths were saved. Trace each page separately.\n");
+        } else {
+            log_user("[CC_THEMING_TRACE] Saved %lu object(s), %lu getter edge(s), %lu media button candidate(s), %lu connectivity button candidate(s), %lu hosted-icon candidate(s), %lu slider candidate(s), and %lu Focus candidate(s).\n",
+                (unsigned long)[report[@"tracedObjectCount"] unsignedIntegerValue],
+                (unsigned long)[report[@"getterEdgeCount"] unsignedIntegerValue],
+                (unsigned long)[report[@"mediaButtonCandidateCount"] unsignedIntegerValue],
+                (unsigned long)[report[@"connectivityButtonCandidateCount"] unsignedIntegerValue],
+                (unsigned long)[report[@"hostedIconCandidateCount"] unsignedIntegerValue],
+                (unsigned long)[report[@"sliderCandidateCount"] unsignedIntegerValue],
+                (unsigned long)[report[@"focusCandidateCount"] unsignedIntegerValue]);
+            log_user("[CC_THEMING_TRACE] Report: %s\n", url.path.UTF8String);
+            if (archiveURL) {
+                log_user("[CC_THEMING_TRACE] Archived: %s\n",
+                    archiveURL.path.UTF8String);
+            }
+        }
+        log_user("[CC_THEMING_TRACE] Safety proof: control actions=0, presentation writes=0, radio writes=0, target file writes=0.\n");
+        if (![report[@"success"] boolValue]) {
+            NSString *reason = [report[@"failureReason"] isKindOfClass:NSString.class]
+                ? report[@"failureReason"] : @"The loaded graph was not captured.";
+            log_user("[CC_THEMING_TRACE] Trace incomplete: %s\n",
+                     reason.UTF8String);
+        } else if (semantic && !refined) {
+            log_user("[CC_THEMING_LIFECYCLE] Capture complete. Share the owner trace JSON. Stable anchors and target paths still require same-PID redraw/reconstruction validation.\n");
+        } else if (refined) {
+            log_user("[CC_THEMING_REFINED] Capture saved. Continue the next user-selected phase in the same SpringBoard PID, then share Refined Physical CC Routes.\n");
+        } else if ([report[@"mediaButtonCandidateCount"] unsignedIntegerValue] == 0) {
+            log_user("[CC_THEMING_TRACE] Trace complete, but no media button class was loaded. Start playback once and retry with the media tile visible.\n");
+        } else {
+            log_user("[CC_THEMING_TRACE] Trace complete. Share the expanded Control Center JSON for exact owner mapping.\n");
+        }
+        actionOK = [report[@"success"] boolValue] && transportHealthy && json && url && !jsonError && !writeError;
+        completionMessage = actionOK
+            ? @"Control Center trace saved. Share the report for review."
+            : @"Control Center trace incomplete or report not saved. Check the log.";
+    } @finally {
+        settings_release_actions_lock();
+        settings_post_actions_complete_async(actionOK, completionMessage);
+    }
+}
+
+static void settings_run_cc_theming_media_connectivity_trace(void)
+{
+    settings_run_cc_theming_media_connectivity_trace_impl(0, nil);
+}
+
+static void settings_run_cc_theming_media_focus_semantic_trace(void)
+{
+    settings_run_cc_theming_media_connectivity_trace_impl(1, nil);
+}
+
+static void settings_run_cc_theming_refined_physical_trace(NSString *phase)
+{
+    settings_run_cc_theming_media_connectivity_trace_impl(2, phase);
+}
+
+static void settings_run_cc_theming_physical_inventory(void)
+{
+    BOOL actionOK = NO;
+    NSString *completionMessage = @"Control Center inventory failed. Check the log.";
+    if (!settings_try_claim_actions_lock(
+            "CC Theming physical inventory",
+            "[CC_THEMING] Another system action is already running.")) {
+        settings_post_actions_complete_async(NO, @"Control Center inventory blocked: another system action is running.");
+        return;
+    }
+
+    @try {
+        if (remote_call_lab_backend_opted_in() || cnd_lab_vphone_guest()) {
+            log_user("[CC_THEMING] Refused: this canary is physical-device-only and will not consume a vPhone synthetic-control result.\n");
+            return;
+        }
+        PackageQueue *queue = [PackageQueue sharedQueue];
+        if (queue.commitInFlight || queue.hasDurableTransaction) {
+            log_user("[CC_THEMING] Finish the active package transaction before running the physical inventory.\n");
+            return;
+        }
+        if (!settings_ensure_kexploit()) {
+            log_user("[CC_THEMING] Failed to prepare kernel primitives for the SpringBoard session.\n");
+            return;
+        }
+
+        __block NSDictionary<NSString *, id> *rawReport = nil;
+        __block BOOL transportHealthy = NO;
+        __block BOOL hadSpringBoardSession = NO;
+        @synchronized (settings_rc_lock()) {
+            hadSpringBoardSession = g_springboard_rc_ready != 0;
+            if (!settings_ensure_springboard_remote_call_locked()) {
+                log_user("[CC_THEMING] Could not open a stable SpringBoard RemoteCall session.\n");
+                return;
+            }
+
+            uint64_t pool = r_autorelease_pool_push();
+            if (pool) rawReport = CNDCCThemingCopyPhysicalInventory();
+            transportHealthy = pool && remote_call_current_success();
+            if (pool && transportHealthy) {
+                transportHealthy = r_autorelease_pool_pop(pool) &&
+                    remote_call_current_success();
+            }
+            settings_note_springboard_remote_call_result_locked(
+                "CC Theming physical inventory", transportHealthy);
+            if (!hadSpringBoardSession && transportHealthy &&
+                g_springboard_rc_ready) {
+                settings_destroy_springboard_remote_call_locked_internal_ex(
+                    "CC Theming physical inventory complete", YES, YES);
+            }
+        }
+
+        NSMutableDictionary<NSString *, id> *report = rawReport
+            ? [rawReport mutableCopy]
+            : [@{
+                @"schemaVersion": @3,
+                @"mode": @"physical-read-only-control-center-inventory",
+                @"success": @NO,
+                @"readOnly": @YES,
+                @"failureReason": @"The probe did not return a report.",
+              } mutableCopy];
+        report[@"transportHealthy"] = @(transportHealthy);
+        report[@"reusedSpringBoardSession"] = @(hadSpringBoardSession);
+        report[@"capturedAt"] = [[NSISO8601DateFormatter new]
+            stringFromDate:[NSDate date]];
+        report[@"safety"] = @{
+            @"controlActions": @0,
+            @"presentationWrites": @0,
+            @"radioWrites": @0,
+            @"targetFileWrites": @0,
+            @"localReportWrites": @1,
+        };
+
+        NSError *jsonError = nil;
+        NSData *json = [NSJSONSerialization dataWithJSONObject:report
+            options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+            error:&jsonError];
+        NSURL *url = settings_cc_theming_inventory_url();
+        NSError *writeError = nil;
+        if (json && url) {
+            [[NSFileManager defaultManager]
+                createDirectoryAtURL:[url URLByDeletingLastPathComponent]
+                withIntermediateDirectories:YES attributes:nil error:&writeError];
+            if (!writeError && ![json writeToURL:url
+                options:NSDataWritingAtomic error:&writeError]) {
+                // writeError is populated by NSData.
+            }
+        }
+
+        NSUInteger surfaceCount = [report[@"surfaces"] isKindOfClass:NSArray.class]
+            ? [report[@"surfaces"] count] : 0;
+        NSArray *missing = [report[@"missingPriorityControls"]
+            isKindOfClass:NSArray.class] ? report[@"missingPriorityControls"] : @[];
+        if (jsonError || writeError || !url) {
+            NSError *error = jsonError ?: writeError;
+            log_user("[CC_THEMING] Inventory finished, but saving the report failed: %s\n",
+                (error.localizedDescription ?: @"Documents URL unavailable").UTF8String);
+        } else {
+            log_user("[CC_THEMING] Saved read-only inventory: %lu glyph surface(s), missing priority controls: %s\n",
+                (unsigned long)surfaceCount,
+                (missing.count ? [missing componentsJoinedByString:@", "] : @"none").UTF8String);
+            log_user("[CC_THEMING] Report: %s\n", url.path.UTF8String);
+        }
+        log_user("[CC_THEMING] Safety proof: control actions=0, presentation writes=0, radio writes=0, target file writes=0.\n");
+        if (![report[@"success"] boolValue]) {
+            NSString *reason = [report[@"failureReason"] isKindOfClass:NSString.class]
+                ? report[@"failureReason"] : @"Control Center was not captured.";
+            log_user("[CC_THEMING] Canary incomplete: %s\n", reason.UTF8String);
+        } else {
+            log_user("[CC_THEMING] Canary complete. Share the saved JSON for production route review.\n");
+        }
+        actionOK = [report[@"success"] boolValue] && transportHealthy && json && url && !jsonError && !writeError;
+        completionMessage = actionOK
+            ? @"Control Center inventory saved. Share the report for review."
+            : @"Control Center inventory incomplete or report not saved. Check the log.";
+    } @finally {
+        settings_release_actions_lock();
+        settings_post_actions_complete_async(actionOK, completionMessage);
+    }
+}
+
+static void settings_run_cc_theming_file_resources(BOOL apply)
+{
+    BOOL actionOK = NO;
+    NSString *completionMessage = @"Control Center resource operation failed. Check the log.";
+    const char *label = apply ? "CC Theming install Pulsar resources"
+                              : "CC Theming restore native resources";
+    if (!settings_try_claim_actions_lock(label,
+        "[CC_THEMING_FILES] Another system action is already running.")) {
+        settings_post_actions_complete_async(NO, @"Control Center resource operation blocked: another system action is running.");
+        return;
+    }
+
+    @try {
+        if (remote_call_lab_backend_opted_in() || cnd_lab_vphone_guest()) {
+            completionMessage = @"Control Center resource installation requires a physical device.";
+            log_user("[CC_THEMING_FILES] The production file installer is physical-device-only.\n");
+            return;
+        }
+        PackageQueue *queue = [PackageQueue sharedQueue];
+        if (queue.commitInFlight || queue.hasDurableTransaction || queue.pendingCount > 0) {
+            completionMessage = @"Finish or clear the package queue before changing Control Center resources.";
+            log_user("[CC_THEMING_FILES] Finish or clear the package queue before changing Control Center resources.\n");
+            return;
+        }
+        if (!settings_ensure_kexploit()) {
+            completionMessage = @"Control Center resource operation failed: file overwrite primitives are unavailable.";
+            log_user("[CC_THEMING_FILES] The existing file overwrite primitives are unavailable.\n");
+            return;
+        }
+
+        NSMutableDictionary *report = [(apply ? CNDCCThemingFileBackingApply()
+            : CNDCCThemingFileBackingRestore()) mutableCopy];
+        if (!report) report = [@{
+            @"success": @NO,
+            @"failureReason": @"The resource operation returned no report."
+        } mutableCopy];
+        report[@"capturedAt"] = [[NSISO8601DateFormatter new] stringFromDate:[NSDate date]];
+        report[@"recursiveViewWalkUsedForApply"] = @NO;
+        report[@"controlCenterPresentationRequired"] = @NO;
+        NSError *jsonError = nil;
+        NSData *json = [NSJSONSerialization dataWithJSONObject:report
+            options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:&jsonError];
+        NSURL *url = settings_cc_theming_production_report_url();
+        NSError *writeError = nil;
+        if (json && url) {
+            [[NSFileManager defaultManager] createDirectoryAtURL:url.URLByDeletingLastPathComponent
+                withIntermediateDirectories:YES attributes:nil error:&writeError];
+            if (!writeError) [json writeToURL:url options:NSDataWritingAtomic error:&writeError];
+        }
+        if (jsonError || writeError || !url) {
+            log_user("[CC_THEMING_FILES] Saving the theme report failed: %s\n",
+                (jsonError.localizedDescription ?: writeError.localizedDescription ?: @"Documents unavailable").UTF8String);
+        } else log_user("[CC_THEMING_FILES] Report: %s\n", url.path.UTF8String);
+        log_user("[CC_THEMING_FILES] %s=%lu pending=%lu absentVariants=%lu failures=%lu targetFileWrites=%lu glyphPresentationWrites=0 controlActions=0 radioWrites=0\n",
+            apply ? "installed" : "restored",
+            (unsigned long)[report[apply ? @"appliedFileCount" : @"restoredFileCount"] unsignedIntegerValue],
+            (unsigned long)[report[@"pendingFileBackedRoutes"] count],
+            (unsigned long)[report[@"absentOptionalVariants"] count],
+            (unsigned long)[report[@"failed"] count],
+            (unsigned long)[report[@"targetFileWrites"] unsignedIntegerValue]);
+        if (![report[@"success"] boolValue]) {
+            for (NSDictionary *failure in report[@"failed"]) {
+                log_user("[CC_THEMING_FILES] Failed %s: %s\n",
+                    [failure[@"path"] UTF8String], [failure[@"reason"] UTF8String]);
+            }
+            log_user("[CC_THEMING_FILES] Incomplete: %s; rollbackComplete=%d.\n",
+                [report[@"failureReason"] UTF8String],
+                [report[@"rollbackComplete"] boolValue]);
+        } else if ([report[@"requiresSpringBoardRefresh"] boolValue]) {
+            log_user("[CC_THEMING_FILES] Resource readbacks verified. Respring to reload the changed native files.\n");
+        } else {
+            log_user("[CC_THEMING_FILES] Resource readbacks verified; no new target writes were required.\n");
+        }
+        actionOK = [report[@"success"] boolValue];
+        completionMessage = actionOK
+            ? ([report[@"requiresSpringBoardRefresh"] boolValue]
+                ? (apply ? @"Pulsar Control Center resources installed. Respring to reload them."
+                         : @"Stock Control Center resources restored. Respring to reload them.")
+                : (apply ? @"Pulsar Control Center resources installed."
+                         : @"Stock Control Center resources restored."))
+            : @"Control Center resource operation incomplete. Check the log.";
+        if (!json || jsonError || writeError || !url) {
+            actionOK = NO;
+            completionMessage = @"Control Center resource operation finished, but its report could not be saved. Check the log.";
+        }
+    } @catch (NSException *exception) {
+        actionOK = NO;
+        completionMessage = @"Control Center resource operation failed unexpectedly. Check the log.";
+        log_user("[CC_THEMING_FILES] Unexpected failure: %s\n", exception.reason.UTF8String);
+    } @finally {
+        settings_release_actions_lock();
+        settings_post_actions_complete_async(actionOK, completionMessage);
+    }
+}
+
+static void settings_run_cc_theming_flashlight_apply_restore_canary(void)
+{
+    BOOL actionOK = NO;
+    NSString *completionMessage = @"Control Center Flashlight canary failed. Check the log.";
+    if (!settings_try_claim_actions_lock(
+            "CC Theming Flashlight apply/restore canary",
+            "[CC_THEMING_CANARY] Another system action is already running.")) {
+        settings_post_actions_complete_async(NO, @"Control Center Flashlight canary blocked: another system action is running.");
+        return;
+    }
+
+    @try {
+        if (remote_call_lab_backend_opted_in() || cnd_lab_vphone_guest()) {
+            log_user("[CC_THEMING_CANARY] Refused: this mutation canary is physical-device-only.\n");
+            return;
+        }
+        PackageQueue *queue = [PackageQueue sharedQueue];
+        if (queue.commitInFlight || queue.hasDurableTransaction ||
+            queue.pendingCount > 0) {
+            log_user("[CC_THEMING_CANARY] Finish or clear the package queue before running the canary.\n");
+            return;
+        }
+        if (!settings_ensure_kexploit()) {
+            log_user("[CC_THEMING_CANARY] Failed to prepare kernel primitives for the SpringBoard session.\n");
+            return;
+        }
+
+        __block NSDictionary<NSString *, id> *rawReport = nil;
+        __block BOOL transportHealthy = NO;
+        __block BOOL hadSpringBoardSession = NO;
+        @synchronized (settings_rc_lock()) {
+            hadSpringBoardSession = g_springboard_rc_ready != 0;
+            if (!settings_ensure_springboard_remote_call_locked()) {
+                log_user("[CC_THEMING_CANARY] Could not open a stable SpringBoard RemoteCall session.\n");
+                return;
+            }
+
+            uint64_t pool = r_autorelease_pool_push();
+            if (pool) {
+                rawReport = CNDCCThemingRunFlashlightApplyRestoreCanary(
+                    CNDPulsarFlashlightOffPNGData(),
+                    CNDPulsarFlashlightOnPNGData(), 4.0);
+            }
+            transportHealthy = pool && remote_call_current_success();
+            if (pool && transportHealthy) {
+                transportHealthy = r_autorelease_pool_pop(pool) &&
+                    remote_call_current_success();
+            }
+            settings_note_springboard_remote_call_result_locked(
+                "CC Theming Flashlight apply/restore canary",
+                transportHealthy);
+            if (!hadSpringBoardSession && transportHealthy &&
+                g_springboard_rc_ready) {
+                settings_destroy_springboard_remote_call_locked_internal_ex(
+                    "CC Theming Flashlight canary complete", YES, YES);
+            }
+        }
+
+        NSMutableDictionary<NSString *, id> *report = rawReport
+            ? [rawReport mutableCopy]
+            : [@{
+                @"schemaVersion": @1,
+                @"mode": @"physical-flashlight-apply-readback-restore-canary",
+                @"success": @NO,
+                @"failureReason": @"The canary did not return a report.",
+              } mutableCopy];
+        report[@"transportHealthy"] = @(transportHealthy);
+        report[@"reusedSpringBoardSession"] = @(hadSpringBoardSession);
+        report[@"capturedAt"] = [[NSISO8601DateFormatter new]
+            stringFromDate:[NSDate date]];
+        report[@"safety"] = @{
+            @"controlActions": @0,
+            @"glyphPresentationWrites":
+                report[@"glyphPresentationWrites"] ?: @0,
+            @"radioWrites": @0,
+            @"targetFileWrites": @0,
+            @"localReportWrites": @1,
+        };
+
+        NSError *jsonError = nil;
+        NSData *json = [NSJSONSerialization dataWithJSONObject:report
+            options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+            error:&jsonError];
+        NSURL *url = settings_cc_theming_apply_restore_canary_url();
+        NSError *writeError = nil;
+        if (json && url) {
+            [[NSFileManager defaultManager]
+                createDirectoryAtURL:[url URLByDeletingLastPathComponent]
+                withIntermediateDirectories:YES attributes:nil error:&writeError];
+            if (!writeError && ![json writeToURL:url
+                options:NSDataWritingAtomic error:&writeError]) {
+                // writeError is populated by NSData.
+            }
+        }
+
+        if (jsonError || writeError || !url) {
+            NSError *error = jsonError ?: writeError;
+            log_user("[CC_THEMING_CANARY] Canary finished, but saving the report failed: %s\n",
+                (error.localizedDescription ?: @"Documents URL unavailable").UTF8String);
+        } else {
+            log_user("[CC_THEMING_CANARY] Report: %s\n", url.path.UTF8String);
+        }
+        log_user("[CC_THEMING_CANARY] applyVerified=%s restoreVerified=%s pidStable=%s writes=%lu controlActions=0 radioWrites=0 targetFileWrites=0\n",
+            [report[@"applyVerified"] boolValue] ? "yes" : "no",
+            [report[@"restoreVerified"] boolValue] ? "yes" : "no",
+            [report[@"pidStable"] boolValue] ? "yes" : "no",
+            (unsigned long)[report[@"glyphPresentationWrites"] unsignedIntegerValue]);
+        if (![report[@"success"] boolValue]) {
+            NSString *reason = [report[@"failureReason"] isKindOfClass:NSString.class]
+                ? report[@"failureReason"] : @"The bounded mutation did not verify.";
+            log_user("[CC_THEMING_CANARY] Incomplete: %s\n", reason.UTF8String);
+        } else {
+            log_user("[CC_THEMING_CANARY] Complete: Pulsar artwork applied, read back, held for four seconds, and the exact stock image objects were restored.\n");
+        }
+        actionOK = [report[@"success"] boolValue] && transportHealthy && json && url && !jsonError && !writeError;
+        completionMessage = actionOK
+            ? @"Flashlight canary complete. Stock artwork restored and report saved."
+            : @"Flashlight canary incomplete or report not saved. Check the log.";
+    } @finally {
+        settings_release_actions_lock();
+        settings_post_actions_complete_async(actionOK, completionMessage);
+    }
+}
+
+#endif
+
+BOOL settings_apply_cc_theming_now(BOOL apply)
+{
+    BOOL success = NO;
+    const char *label = apply ? "CC Theming apply" : "CC Theming restore";
+    if (!settings_try_claim_actions_lock(
+            label,
+            "[CC_THEMING] Another system action is already running.")) {
+        return NO;
+    }
+
+    @try {
+        if (remote_call_lab_backend_opted_in() || cnd_lab_vphone_guest()) {
+            log_user("[CC_THEMING] File-backed resources require a physical device.\n");
+            return NO;
+        }
+        if (!settings_ensure_kexploit()) {
+            log_user("[CC_THEMING] File overwrite primitives are unavailable.\n");
+            return NO;
+        }
+
+        NSDictionary<NSString *, id> *result = apply
+            ? CNDCCThemingFileBackingApply()
+            : CNDCCThemingFileBackingRestore();
+        success = [result[@"success"] boolValue];
+        if (success) {
+            log_user("[CC_THEMING] %s %lu resource files; the queue will now respring.\n",
+                apply ? "Applied" : "Restored",
+                (unsigned long)[result[apply ? @"appliedFileCount"
+                                             : @"restoredFileCount"] unsignedIntegerValue]);
+        } else {
+            NSString *reason = [result[@"failureReason"] isKindOfClass:NSString.class]
+                ? result[@"failureReason"] : @"The file transaction did not verify.";
+            log_user("[CC_THEMING] %s failed: %s\n",
+                apply ? "Apply" : "Restore", reason.UTF8String);
+        }
+    } @catch (NSException *exception) {
+        log_user("[CC_THEMING] %s failed unexpectedly: %s\n",
+            apply ? "Apply" : "Restore", exception.reason.UTF8String);
+        success = NO;
+    } @finally {
+        settings_release_actions_lock();
+    }
+    return success;
 }
 
 #if 0
@@ -10504,29 +12207,6 @@ static void settings_run_nano_clear_action(void)
     });
 }
 
-static void settings_run_font_changer_action(UIViewController *host, BOOL apply)
-{
-    __weak UIViewController *weakHost = host;
-    dispatch_async(dispatch_get_global_queue(0, 0), ^{
-        BOOL ok = settings_apply_font_changer_now(apply);
-        dispatch_async(dispatch_get_main_queue(), ^{
-            UIViewController *strongHost = weakHost;
-            [[NSNotificationCenter defaultCenter]
-                postNotificationName:kSettingsActionsDidCompleteNotification
-                              object:nil
-                            userInfo:@{
-                                kSettingsActionsDidCompleteSuccessKey: @(ok),
-                                kSettingsActionsDidCompleteMessageKey: ok
-                                    ? @"Font change complete. Respringing now."
-                                    : @"Font change failed — check the log."
-                            }];
-            if (ok && strongHost) {
-                settings_begin_system_edit_respring(strongHost);
-            }
-        });
-    });
-}
-
 static void settings_run_legacy_font_app_restore_action(void)
 {
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
@@ -13003,24 +14683,22 @@ static void settings_schedule_live_apply_for_key(NSString *key)
         if (generation != g_sbc_live_apply_generation) return;
         if (settings_cleanup_in_progress()) return;
 
-        BOOL closedNonLiveRemoteCall = NO;
+        __block bool ok = false;
         @synchronized (settings_rc_lock()) {
             if (settings_cleanup_in_progress() || !g_springboard_rc_ready) return;
-            bool ok = settings_apply_sbc_from_defaults_locked(d);
+            ok = settings_apply_sbc_from_defaults_locked(d);
             settings_mark_tweak_applied(kSettingsSBCEnabled,
                                         ok && [d boolForKey:kSettingsSBCEnabled]);
             printf("[SETTINGS] live SBC apply result=%d\n", ok);
-            if (!settings_has_persistent_springboard_remote_call_user() &&
-                g_springboard_rc_ready) {
-                settings_destroy_springboard_remote_call_locked_internal_ex(
-                    "SBC one-shot apply complete", YES, YES);
-                closedNonLiveRemoteCall = g_springboard_rc_ready == 0;
-            }
         }
-        if (closedNonLiveRemoteCall) {
-            log_user("[OK] SpringBoard channel released — SBC dock/layout state was committed.\n");
-        }
+        settings_post_actions_complete_async(
+            ok,
+            ok ? @"SBCustomizer applied."
+               : @"SBCustomizer did not apply cleanly. Check the log.");
         settings_notify_package_queue_changed_async();
+        settings_release_sbc_one_shot_channel_async(
+            @"SBC one-shot apply complete",
+            @"[OK] SpringBoard channel released — SBC dock/layout state was committed.");
     });
 }
 
@@ -13246,8 +14924,10 @@ void settings_register_defaults(void)
     settings_install_screen_awake_observers();
 }
 
-static void settings_run_actions_internal(BOOL pendingOnly)
+static void settings_run_actions_internal(BOOL pendingOnly,
+                                          NSString *queueCompletionToken)
 {
+    NSString *completionToken = [queueCompletionToken copy];
     if (!settings_device_supported()) {
         NSString *message = settings_unsupported_message();
         printf("[SETTINGS] run blocked: %s\n", message.UTF8String);
@@ -13257,12 +14937,22 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                                                                 object:[PackageQueue sharedQueue]];
         });
         settings_post_actions_complete_async(NO, message);
+        settings_post_queued_run_complete_async(completionToken, NO, message);
         return;
     }
 
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     dispatch_async(dispatch_get_global_queue(0, 0), ^{
         if (__sync_lock_test_and_set(&g_settings_actions_running, 1)) {
+            if (completionToken.length > 0) {
+                NSString *message =
+                    @"Another settings action is already running. Retry the saved queue when it finishes.";
+                printf("[SETTINGS] tokened queue run rejected: actions already running\n");
+                log_user("[RUN] Queue run could not start because another action is still running.\n");
+                settings_post_queued_run_complete_async(
+                    completionToken, NO, message);
+                return;
+            }
             __sync_lock_test_and_set(&g_settings_actions_rerun_requested, 1);
             printf("[SETTINGS] actions already running; queued one follow-up run\n");
             log_user("[RUN] Already running. Queued one follow-up run for the latest package state.\n");
@@ -13276,6 +14966,7 @@ static void settings_run_actions_internal(BOOL pendingOnly)
         cyanide_start_session_uploads();
         BOOL runSucceeded = NO;
         BOOL runHadBlockingFailure = NO;
+        BOOL deferSBCOneShotChannelRelease = NO;
         NSString *runCompletionMessage = @"Run failed. Check the log for details.";
         @try {
             BOOL patchSandboxExt = [d boolForKey:kSettingsRunPatchSandboxExt];
@@ -13841,25 +15532,25 @@ static void settings_run_actions_internal(BOOL pendingOnly)
                 cyanide_upload_log_milestone(@"live-tweaks-started");
 
             if (!settings_has_persistent_springboard_remote_call_user()) {
-                BOOL closedNonLiveRemoteCall = NO;
-                @synchronized (settings_rc_lock()) {
-                    if (!settings_has_persistent_springboard_remote_call_user() &&
-                        g_springboard_rc_ready) {
-                        // Closing the synthetic-call channel does not undo
-                        // one-shot SpringBoard patches like SBCustomizer's
-                        // icon-label/layout changes. Keep the applied marker
-                        // so Installer doesn't immediately re-queue a package
-                        // that just finished successfully; SpringBoard restart,
-                        // manual cleanup, and respring cleanup still clear it.
-                        settings_destroy_springboard_remote_call_locked_internal_ex("non-live run complete",
-                                                                                   YES,
-                                                                                   YES);
-                        closedNonLiveRemoteCall = g_springboard_rc_ready == 0;
+                if (runSBC) {
+                    // The visible and durable SBC work is complete. Publish
+                    // Run/queue completion first, then release this one-shot
+                    // channel without making the activity UI wait for teardown.
+                    deferSBCOneShotChannelRelease = g_springboard_rc_ready != 0;
+                } else {
+                    BOOL closedNonLiveRemoteCall = NO;
+                    @synchronized (settings_rc_lock()) {
+                        if (!settings_has_persistent_springboard_remote_call_user() &&
+                            g_springboard_rc_ready) {
+                            settings_destroy_springboard_remote_call_locked_internal_ex(
+                                "non-live run complete", YES, YES);
+                            closedNonLiveRemoteCall = g_springboard_rc_ready == 0;
+                        }
                     }
-                }
-                if (closedNonLiveRemoteCall) {
-                    log_user("[OK] SpringBoard channel released — no persistent hooks.\n");
-                    cyanide_upload_log_milestone(@"springboard-remote-call-closed");
+                    if (closedNonLiveRemoteCall) {
+                        log_user("[OK] SpringBoard channel released — no persistent hooks.\n");
+                        cyanide_upload_log_milestone(@"springboard-remote-call-closed");
+                    }
                 }
             }
 
@@ -13879,35 +15570,73 @@ static void settings_run_actions_internal(BOOL pendingOnly)
             log_session_end();
             __sync_lock_release(&g_settings_actions_running);
             settings_reconcile_applied_from_defaults();
-            if (__sync_bool_compare_and_swap(&g_settings_actions_rerun_requested, 1, 0)) {
+            BOOL rerunRequested = __sync_bool_compare_and_swap(
+                &g_settings_actions_rerun_requested, 1, 0);
+            if (rerunRequested && completionToken.length == 0) {
                 log_user("[RUN] Applying queued follow-up run.\n");
-                settings_run_actions_internal(pendingOnly);
+                settings_run_actions_internal(pendingOnly, nil);
                 return;
             }
+            BOOL completionSucceeded = runSucceeded && !rerunRequested;
+            NSString *completionMessage = rerunRequested
+                ? @"Another settings run was queued during this queue-owned run. Retry the saved queue after it finishes."
+                : runCompletionMessage;
             dispatch_async(dispatch_get_main_queue(), ^{
                 NSDictionary *completionInfo = @{
-                    kSettingsActionsDidCompleteSuccessKey: @(runSucceeded),
-                    kSettingsActionsDidCompleteMessageKey: runCompletionMessage ?: @""
+                    kSettingsActionsDidCompleteSuccessKey: @(completionSucceeded),
+                    kSettingsActionsDidCompleteMessageKey: completionMessage ?: @""
                 };
                 [[NSNotificationCenter defaultCenter] postNotificationName:PackageQueueDidChangeNotification
                                                                     object:[PackageQueue sharedQueue]];
                 [[NSNotificationCenter defaultCenter] postNotificationName:kSettingsActionsDidCompleteNotification
                                                                     object:nil
                                                                   userInfo:completionInfo];
+                if (completionToken.length > 0) {
+                    [[NSNotificationCenter defaultCenter]
+                        postNotificationName:kSettingsQueuedRunDidCompleteNotification
+                                      object:nil
+                                    userInfo:@{
+                                        kSettingsActionsDidCompleteSuccessKey:
+                                            @(completionSucceeded),
+                                        kSettingsActionsDidCompleteMessageKey:
+                                            completionMessage ?: @"",
+                                        kSettingsQueuedRunCompletionTokenKey:
+                                            completionToken
+                                    }];
+                }
                 cyanide_upload_log_if_enabled();
+                if (deferSBCOneShotChannelRelease) {
+                    settings_release_sbc_one_shot_channel_async(
+                        @"SBC Run completion",
+                        @"[OK] SpringBoard channel released — no persistent hooks.");
+                }
             });
+            if (rerunRequested) {
+                log_user("[RUN] Applying queued follow-up run after rejecting the overlapping queue acknowledgement.\n");
+                settings_run_actions_internal(pendingOnly, nil);
+            }
         }
     });
 }
 
 void settings_run_actions(void)
 {
-    settings_run_actions_internal(NO);
+    settings_run_actions_internal(NO, nil);
 }
 
 void settings_run_pending_actions(void)
 {
-    settings_run_actions_internal(YES);
+    settings_run_actions_internal(YES, nil);
+}
+
+void settings_run_pending_actions_for_queue_token(NSString *completionToken)
+{
+    if (completionToken.length == 0) {
+        settings_post_queued_run_complete_async(
+            completionToken, NO, @"The queue completion token was missing.");
+        return;
+    }
+    settings_run_actions_internal(YES, completionToken);
 }
 
 typedef NS_ENUM(NSInteger, SettingsSection) {
@@ -13937,6 +15666,7 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
     SectionIPADecryptor,
     SectionFastLockXLite,
     SectionFontChanger,
+    SectionCCTheming,
     SectionCount,
 };
 
@@ -13992,6 +15722,31 @@ static NSDictionary<NSString *, id> *settings_snowboard_remix_krw_prerequisite(v
     }
     log_user("[SBR] Kernel read/write is ready; starting the IconServices batch and platform-appropriate presentation lifecycle.\n");
     return nil;
+}
+
+BOOL settings_prepare_queued_system_actions(NSString **failureReason)
+{
+    if (failureReason) *failureReason = nil;
+    NSDictionary<NSString *, id> *failure =
+        settings_snowboard_remix_krw_prerequisite();
+    if (!failure) return YES;
+    NSString *message = [failure[@"message"] isKindOfClass:NSString.class]
+        ? failure[@"message"] : @"Kernel read/write is unavailable.";
+    if (failureReason) *failureReason = message;
+    return NO;
+}
+
+pid_t settings_current_springboard_pid(void)
+{
+    if (!kexploit_krw_ready()) return 0;
+    NSError *error = nil;
+    pid_t pid = CNDKernelTaskBridgeResolveProcessPID(@"SpringBoard", &error);
+    if (pid <= 1) {
+        log_user("[QUEUE] SpringBoard identity unavailable: %s\n",
+                 error.localizedDescription.UTF8String ?: "unknown");
+        return 0;
+    }
+    return pid;
 }
 
 static void settings_run_snowboard_remix_operation(
@@ -14384,6 +16139,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
                                              selector:@selector(snowBoardRemixStatusesDidRefresh:)
                                                  name:CNDSnowBoardRemixStatusesDidRefreshNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(packageQueueDidChange:)
+                                                 name:PackageQueueDidChangeNotification
+                                               object:nil];
 
     // Best-effort background refresh of cached patron status when settings
     // opens. A cancelled / expired pledge silently flips the gate off here.
@@ -14462,6 +16221,17 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
                       withRowAnimation:UITableViewRowAnimationNone];
     } else if (!self.detailMode) {
         [self.tableView reloadData];
+    }
+}
+
+- (void)packageQueueDidChange:(NSNotification *)note
+{
+    (void)note;
+    if (!self.isViewLoaded || !self.tableView.window || !self.detailMode) return;
+    if (self.underlyingSection == SectionSnowBoardLite ||
+        self.underlyingSection == SectionFontChanger) {
+        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
+                      withRowAnimation:UITableViewRowAnimationNone];
     }
 }
 
@@ -15066,6 +16836,37 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 {
     BOOL hasSelection = settings_snowboardlite_has_selected_theme();
     NSString *selected = settings_snowboardlite_selected_theme_display_name();
+    PackageQueue *queue = [PackageQueue sharedQueue];
+    CNDQueuedAction *themeAction = [queue standaloneActionForConflictKey:
+        CNDQueuedActionConflictKeySnowBoardRemix];
+    CNDQueuedAction *transparencyFixAction =
+        [queue standaloneActionForConflictKey:
+            CNDQueuedActionConflictKeyTransparencyFix];
+    CNDQueuedAction *springBoardAction = [queue standaloneActionForConflictKey:
+        CNDQueuedActionConflictKeySpringBoardFixes];
+    CNDQueuedAction *spotlightAction = [queue standaloneActionForConflictKey:
+        CNDQueuedActionConflictKeySpotlightFixes];
+    BOOL applyQueued = [themeAction.operation isEqualToString:
+        CNDQueuedActionOperationApplyTheme];
+    BOOL restoreQueued = [themeAction.operation isEqualToString:
+        CNDQueuedActionOperationRestoreTheme];
+    BOOL transparencyFixApplyQueued =
+        [transparencyFixAction.operation isEqualToString:
+            CNDQueuedActionOperationApplyTransparencyFix];
+    BOOL transparencyFixRestoreQueued =
+        [transparencyFixAction.operation isEqualToString:
+            CNDQueuedActionOperationRestoreTransparencyFix];
+    NSString *transparencyFixSupportReason = nil;
+    BOOL transparencyFixSupported = CNDHailMaryImpRedirectIsSupported(
+        &transparencyFixSupportReason);
+    BOOL springBoardQueued = springBoardAction != nil;
+    BOOL spotlightQueued = spotlightAction != nil;
+    BOOL springBoardActive = CNDTransientAppliedStateIsActive(
+        CNDTransientAppliedStateSpringBoardFixes);
+    BOOL spotlightActive = CNDTransientAppliedStateIsActive(
+        CNDTransientAppliedStateSpotlightFixes);
+    BOOL transparencyEnabled = [NSUserDefaults.standardUserDefaults
+        boolForKey:kSettingsSnowBoardRemixInstallConsumerMappings];
 #if 0
     // Retired Spotlight/IconServices experiment UI. SnowBoard Remix is a
     // durable application-bundle operation and has no SearchUI dependency.
@@ -15118,33 +16919,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
            (unsigned long)themedCount,
            themedCount == 1 ? @"" : @"s",
            (unsigned long)recoveryCount];
-    NSDictionary *presentationStatus =
-        CNDIconServicesConsumerLifecycleStatus();
-    NSDictionary *presentationHosts =
-        [presentationStatus[@"hosts"] isKindOfClass:NSDictionary.class]
-            ? presentationStatus[@"hosts"] : @{};
-    NSDictionary *springBoardPresentation =
-        presentationHosts[@"SpringBoard"] ?: @{};
-    NSDictionary *spotlightPresentation =
-        presentationHosts[@"Spotlight"] ?: @{};
-    NSString *presentationSubtitle = nil;
-    if (![presentationStatus[@"running"] boolValue]) {
-        presentationSubtitle = @"Watcher stopped. Existing process mappings, if any, remain marker-gated until their hosts restart.";
-    } else {
-        NSString *springBoardState =
-            [springBoardPresentation[@"installedPID"] intValue] > 1
-                ? @"ready" : (springBoardPresentation[@"lastStage"] ?: @"pending");
-        NSString *spotlightState =
-            [spotlightPresentation[@"installedPID"] intValue] > 1
-                ? @"ready" : (spotlightPresentation[@"lastStage"] ?: @"pending");
-        presentationSubtitle = [NSString stringWithFormat:
-            @"SpringBoard: %@ (PID %d) • Spotlight: %@ (PID %d) • RemoteCall: %@",
-            springBoardState,
-            [springBoardPresentation[@"observedPID"] intValue],
-            spotlightState,
-            [spotlightPresentation[@"observedPID"] intValue],
-            [presentationStatus[@"remoteCallUsed"] boolValue] ? @"yes" : @"no"];
-    }
     NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithArray:@[
         @{ @"kind": @"info",
            @"title": @"Selected Theme",
@@ -15166,9 +16940,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"kind": @"info",
            @"title": @"Themed Apps / Status",
            @"subtitle": remixStatusSubtitle },
-        @{ @"kind": @"info",
-           @"title": @"Transparent Presentation",
-           @"subtitle": presentationSubtitle },
         @{ @"kind": @"toggle",
            @"key": kSettingsSnowBoardRemixDebugThreeAppLimit,
            @"title": @"Debug: Apply 4 Named Apps",
@@ -15176,27 +16947,54 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"kind": @"toggle",
            @"key": kSettingsSnowBoardRemixInstallConsumerMappings,
            @"title": @"Transparent Icon Presentation",
-           @"subtitle": @"Enables manually requested presentation mappings. It does not start a watcher; SpringBoard remains one-shot and the explicit watcher monitors Spotlight only." },
+           @"subtitle": @"Controls whether SpringBoard and Spotlight install transparency plus Clock/Calendar presentation fixes. Spotlight's process assertion is always applied." },
         @{ @"kind": @"button",
-           @"title": @"Start Spotlight Watcher",
-           @"subtitle": @"Explicitly starts PID monitoring for Spotlight only. SpringBoard is never watched and remains available through its separate one-shot repair button.",
-           @"action": @"sbl-start-kernel-consumer-watcher" },
+           @"title": transparencyFixApplyQueued
+                ? @"Transparency Fix ✓ Queued"
+                : @"Queue Transparency Fix",
+           @"subtitle": transparencyFixSupported
+                ? @"Applies the guarded shared-cache flat-image redirect for this boot. It survives resprings, never kills a consumer, and requires manual visual confirmation."
+                : (transparencyFixSupportReason ?:
+                    @"Transparency Fix is unavailable on this device."),
+           @"action": @"sbl-queue-transparency-fix",
+           @"disabled": @(!transparencyFixSupported),
+           @"tintColor": UIColor.systemGreenColor },
         @{ @"kind": @"button",
-           @"title": @"Apply SpringBoard Tweaks",
-           @"subtitle": @"Apply SpringBoard transparency, Clock hands, and the bounded Clock/Calendar face-source redirects. Clock launch and return variants remain complete static icons.",
-           @"action": @"sbl-repair-springboard-transparency" },
+           @"title": transparencyFixRestoreQueued
+                ? @"Restore Transparency Fix ✓ Queued"
+                : @"Queue Restore Transparency Fix",
+           @"subtitle": transparencyFixSupported
+                ? @"Restores the original guarded dispatch entry. No process is killed or restarted afterward."
+                : (transparencyFixSupportReason ?:
+                    @"Transparency Fix is unavailable on this device."),
+           @"action": @"sbl-queue-transparency-fix-restore",
+           @"disabled": @(!transparencyFixSupported),
+           @"destructive": @YES },
         @{ @"kind": @"button",
-           @"title": @"Repair Spotlight Transparency",
-           @"subtitle": @"Apply Spotlight transparency and its independent Clock/Calendar face-source redirects for the current process.",
-           @"action": @"sbl-repair-spotlight-transparency" },
+           @"title": springBoardQueued
+                ? @"SpringBoard Fixes ✓ Queued"
+                : (springBoardActive
+                    ? @"SpringBoard Fixes ✓ Active"
+                    : @"Queue SpringBoard Fixes"),
+           @"subtitle": transparencyEnabled
+                ? @"Installs the bounded SpringBoard transparency and Clock/Calendar presentation repair in the current or post-respring SpringBoard."
+                : @"Enable Transparent Icon Presentation to queue this process-local repair.",
+           @"action": @"sbl-queue-springboard-fixes",
+           @"disabled": @(!transparencyEnabled) },
         @{ @"kind": @"button",
-           @"title": @"Stop Spotlight Watcher",
-           @"subtitle": @"Stops future Spotlight PID monitoring. Existing process-local redirects remain until that host exits.",
-           @"action": @"sbl-stop-kernel-consumer-watcher" },
+           @"title": spotlightQueued
+                ? @"Spotlight Fixes ✓ Queued"
+                : (spotlightActive
+                    ? @"Spotlight Fixes ✓ Active"
+                    : @"Queue Spotlight Fixes"),
+           @"subtitle": transparencyEnabled
+                ? @"Prompts you to open Spotlight, installs its presentation repair, then acquires the required SpringBoard-owned lifetime assertion."
+                : @"Acquires the Spotlight lifetime assertion without installing transparency or Clock/Calendar presentation hooks.",
+           @"action": @"sbl-queue-spotlight-fixes" },
         @{ @"kind": @"button",
-           @"title": @"Apply Theme",
-           @"subtitle": @"Replace persistent icon records, including launch and return variants. SpringBoard cache invalidation is temporarily disabled for the current experiment; presentation tweaks remain separate actions.",
-           @"action": @"sbl-apply-permanent",
+           @"title": applyQueued ? @"Apply Theme ✓ Queued" : @"Queue Apply Theme",
+           @"subtitle": @"Publish and verify the selected theme's persistent icon records before the shared respring.",
+           @"action": @"sbl-queue-apply",
            @"tintColor": UIColor.systemGreenColor },
         @{ @"kind": @"button",
            @"title": @"Update Repair",
@@ -15208,9 +17006,27 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
            @"subtitle": @"Run after Apply to save a local reinstall baseline, reinstall Cyanide as an update, then run again. Compares every journaled Home, folder, switcher, App Library, notification, and transition descriptor UUID, validation token, cache/store hash, plus live SpringBoard identity without refreshing or modifying icons.",
            @"action": @"sbl-audit-applied-icons" },
         @{ @"kind": @"button",
-           @"title": @"Restore All Icons",
-           @"subtitle": @"Regenerate and verify each journaled descriptor's stock IconServices response. Recovery clears per app as soon as its persistent records verify.",
-           @"action": @"sbl-restore-all",
+           @"title": restoreQueued ? @"Restore All Icons ✓ Queued" : @"Queue Restore All Icons",
+           @"subtitle": @"Regenerate and verify each journaled descriptor's stock IconServices response before the shared respring. This replaces a queued theme Apply.",
+           @"action": @"sbl-queue-restore",
+           @"destructive": @YES },
+        @{ @"kind": @"info",
+           @"title": @"Isolated AirDrop Share-Menu Test",
+           @"subtitle": @"A three-step physical-device diagnostic, separate from full Apply. It targets only com.apple.Sharing.AirDrop's 64 pt activity tile and bordered 28 pt Apps-list record. Apply, open a Share sheet to inspect the tile, run Audit, then Restore. The selected theme must contain IconBundles/com.apple.Sharing.AirDrop.png." },
+        @{ @"kind": @"button",
+           @"title": @"1. Apply AirDrop Test",
+           @"subtitle": @"Recover any prior AirDrop-only journal, force one fresh stock-to-theme cycle for its two records, verify both source associations, and refresh only SharingUIService.",
+           @"action": @"sbl-airdrop-test-apply",
+           @"disabled": @(!hasSelection),
+           @"tintColor": UIColor.systemGreenColor },
+        @{ @"kind": @"button",
+           @"title": @"2. Audit AirDrop Test",
+           @"subtitle": @"Read back only the two AirDrop indexed store units, themed hashes, validation tokens, and native source associations. Makes no icon or presentation change.",
+           @"action": @"sbl-airdrop-test-audit" },
+        @{ @"kind": @"button",
+           @"title": @"3. Restore AirDrop Test",
+           @"subtitle": @"Regenerate and verify stock for only the AirDrop records, then refresh only SharingUIService. Other themed applications and SpringBoard presentation state are untouched.",
+           @"action": @"sbl-airdrop-test-restore",
            @"destructive": @YES },
     ]];
 #if 0
@@ -15336,6 +17152,16 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
 
 - (NSArray<NSDictionary *> *)fontChangerRows
 {
+    Package *fontPackage = nil;
+    for (Package *package in [PackageCatalog allPackagesIncludingExperimental]) {
+        if ([package.identifier isEqualToString:@"com.darksword.font-changer"]) {
+            fontPackage = package;
+            break;
+        }
+    }
+    PackageQueueIntent fontIntent = fontPackage
+        ? [[PackageQueue sharedQueue] intentForPackage:fontPackage]
+        : PackageQueueIntentNone;
     NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithArray:@[
         @{ @"kind": @"info",
            @"title": @"Selected Family",
@@ -15359,10 +17185,14 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
            @"title": @"Import Mono Font...",
            @"action": @"font-import-mono" },
         @{ @"kind": @"button",
-           @"title": @"Apply Selected Family",
+           @"title": fontIntent == PackageQueueIntentInstall
+                ? @"Apply Selected Family ✓ Queued"
+                : @"Queue Selected Family",
            @"action": @"font-apply" },
         @{ @"kind": @"button",
-           @"title": @"Restore Stock Fonts",
+           @"title": fontIntent == PackageQueueIntentUninstall
+                ? @"Restore Stock Fonts ✓ Queued"
+                : @"Queue Restore Stock Fonts",
            @"action": @"font-restore",
            @"destructive": @YES },
     ]];
@@ -15383,6 +17213,140 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
                            @"destructive": @YES }];
     }
     return rows;
+}
+
+- (NSArray<NSDictionary *> *)ccThemingRows
+{
+    return @[
+        @{ @"kind": @"info",
+           @"title": @"Pulsar Control Center Resources",
+           @"subtitle": CNDCCThemingFileBackingHasJournaledState()
+                ? @"Pulsar resources are journaled. Apply or Restore is saved to the durable queue and automatically resprings."
+                : @"Stock resources are active. Apply or Restore is saved to the durable queue and automatically resprings." },
+        @{ @"kind": @"button",
+           @"title": @"Queue Apply",
+           @"subtitle": @"Apply the validated Pulsar resource set before the queue's automatic respring.",
+           @"action": @"cc-theming-queue-apply" },
+        @{ @"kind": @"button",
+           @"title": @"Queue Restore",
+           @"subtitle": @"Restore every journaled stock resource before the queue's automatic respring.",
+           @"action": @"cc-theming-queue-restore",
+           @"destructive": @YES },
+    ];
+#if 0
+    NSURL *productionURL = settings_cc_theming_production_report_url();
+    BOOL hasProductionReport = productionURL && [[NSFileManager defaultManager]
+        fileExistsAtPath:productionURL.path];
+    NSURL *reportURL = settings_cc_theming_inventory_url();
+    BOOL hasReport = reportURL && [[NSFileManager defaultManager]
+        fileExistsAtPath:reportURL.path];
+    NSURL *traceURL = settings_cc_theming_media_trace_url();
+    BOOL hasTrace = traceURL && [[NSFileManager defaultManager]
+        fileExistsAtPath:traceURL.path];
+    NSURL *semanticTraceURL = settings_cc_theming_semantic_trace_url();
+    BOOL hasSemanticTrace = semanticTraceURL && [[NSFileManager defaultManager]
+        fileExistsAtPath:semanticTraceURL.path];
+    NSURL *refinedURL = settings_cc_theming_refined_trace_url();
+    BOOL hasRefinedTrace = refinedURL && [[NSFileManager defaultManager] fileExistsAtPath:refinedURL.path];
+    NSURL *canaryURL = settings_cc_theming_apply_restore_canary_url();
+    BOOL hasCanary = canaryURL && [[NSFileManager defaultManager]
+        fileExistsAtPath:canaryURL.path];
+    NSMutableArray<NSDictionary *> *rows = [NSMutableArray arrayWithArray:@[
+        @{ @"kind": @"info",
+           @"title": @"Pulsar Control Center Resources",
+           @"subtitle": settings_cc_theming_production_status() },
+        @{ @"kind": @"button",
+           @"title": @"Install Pulsar CC Resources",
+           @"subtitle": @"Backs up and replaces proven native resource files. Respring once to reload cached artwork.",
+           @"action": @"cc-theming-apply-all" },
+        @{ @"kind": @"button",
+           @"title": @"Restore Stock CC Icons",
+           @"subtitle": @"Restores verified original resource files from the durable backup journal, including across app sessions. Respring afterward to reload stock artwork.",
+           @"action": @"cc-theming-restore-all",
+           @"destructive": @YES },
+        @{ @"kind": @"info",
+           @"title": @"Diagnostics · Expanded CC Trace",
+           @"subtitle": settings_cc_theming_media_trace_status() },
+        @{ @"kind": @"button",
+           @"title": @"Trace Current Control Center Page",
+           @"subtitle": @"Open one target page during the five-second countdown: Connectivity, Now Playing, Brightness, Volume, or Focus. Captures visible owners, geometry, getter edges, and package contracts without toggling anything.",
+           @"action": @"cc-theming-trace-media" },
+        @{ @"kind": @"info",
+           @"title": @"Diagnostics · Lifecycle Owners",
+           @"subtitle": settings_cc_theming_semantic_trace_status() },
+        @{ @"kind": @"button",
+           @"title": @"Trace CC Lifecycle Owners",
+           @"subtitle": @"Open a Control Center page during the five-second countdown. Captures controller, registry, model, and package-provider ownership routes and stable-anchor evidence for redraw and page reconstruction. Run once per page.",
+           @"action": @"cc-theming-trace-semantic" },
+        @{ @"kind": @"info",
+           @"title": @"Diagnostics · Refined Physical Routes",
+           @"subtitle": settings_cc_theming_refined_trace_status() },
+        @{ @"kind": @"button",
+           @"title": @"Trace Refined Physical CC Routes",
+           @"subtitle": @"Read-only Focus owner/model/row/icon routes and Media/Flashlight/hosted evidence. Focus phases prioritize exact members, compare rows by activityIdentifier, and use no descendant discovery. Keeps phase archives and same-PID comparisons.",
+           @"action": @"cc-theming-trace-refined" },
+        @{ @"kind": @"info",
+           @"title": @"Diagnostics · Physical Control Inventory",
+           @"subtitle": settings_cc_theming_inventory_status() },
+        @{ @"kind": @"button",
+           @"title": @"Run Physical Control Inventory",
+           @"subtitle": @"After starting, immediately pull Control Center down and leave it open until the five-second countdown finishes. Nothing is toggled.",
+           @"action": @"cc-theming-discover" },
+        @{ @"kind": @"info",
+           @"title": @"Diagnostics · Flashlight Canary",
+           @"subtitle": settings_cc_theming_apply_restore_canary_status() },
+        @{ @"kind": @"button",
+           @"title": @"Test Pulsar Flashlight Glyph",
+           @"subtitle": @"After a five-second countdown, applies the Pulsar off/on images for four seconds, verifies them, and restores the exact original images. It never toggles the flashlight.",
+           @"action": @"cc-theming-flashlight-canary" },
+    ]];
+    if (hasProductionReport) {
+        [rows addObject:@{
+            @"kind": @"button",
+            @"title": @"Share Full Theme Report",
+            @"subtitle": @"Exports applied/restored surfaces, missing mappings, exact readbacks, and safety counters.",
+            @"action": @"cc-theming-share-production",
+        }];
+    }
+    if (hasTrace) {
+        [rows addObject:@{
+            @"kind": @"button",
+            @"title": @"Share Expanded CC Trace",
+            @"subtitle": @"Exports the loaded controller/view graph, hosted-icon owners, geometry, getter-return edges, package contracts, and safety counters.",
+            @"action": @"cc-theming-share-media-trace",
+        }];
+    }
+    if (hasSemanticTrace) {
+        [rows addObject:@{
+            @"kind": @"button",
+            @"title": @"Share CC Lifecycle Owner Trace",
+            @"subtitle": @"Exports visited controllers, ABI contracts, machine identities, stable anchors, downstream target paths, unresolved routes, and safety counters.",
+            @"action": @"cc-theming-share-semantic-trace",
+        }];
+    }
+    if (hasRefinedTrace) {
+        [rows addObject:@{@"kind": @"button", @"title": @"Share Refined Physical CC Routes",
+            @"subtitle": @"Exports current PID, named-slot/class contracts, scoped provider evidence, explicit discovery provenance, and prior same-PID comparison.",
+            @"action": @"cc-theming-share-refined-trace"}];
+    }
+    if (hasReport) {
+        [rows addObject:@{
+            @"kind": @"button",
+            @"title": @"Share Last Inventory",
+            @"subtitle": @"Exports the JSON containing controller classes, glyph contracts, images, states, and missing controls.",
+            @"action": @"cc-theming-share",
+        }];
+    }
+    if (hasCanary) {
+        [rows addObject:@{
+            @"kind": @"button",
+            @"title": @"Share Apply/Restore Report",
+            @"subtitle": @"Exports the physical mutation, readback, PID, and exact-restore proof.",
+            @"action": @"cc-theming-share-canary",
+        }];
+    }
+    return rows;
+#endif
 }
 
 - (NSArray<NSDictionary *> *)liveWPRows
@@ -15530,6 +17494,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         [out addObject:@{@"title": @"Regular", @"value": font_changer_role_summary(CNDFontChangerRoleRegular)}];
         [out addObject:@{@"title": @"Italic", @"value": font_changer_role_summary(CNDFontChangerRoleItalic)}];
         [out addObject:@{@"title": @"Mono", @"value": font_changer_role_summary(CNDFontChangerRoleMono)}];
+    } else if (section == SectionCCTheming) {
+        [out addObject:@{@"title": @"Pulsar resources",
+                         @"value": CNDCCThemingFileBackingHasJournaledState()
+                            ? @"Journaled" : @"Stock"}];
     } else if (section == SectionLiveWP) {
         [out addObject:@{@"title": @"Video", @"value": settings_livewp_video_detail()}];
     } else if (section == SectionLocationSim) {
@@ -15574,6 +17542,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         case SectionIPADecryptor: return self.ipaDecryptorRows;
         case SectionSnowBoardLite: return self.snowboardLiteRows;
         case SectionFontChanger: return self.fontChangerRows;
+        case SectionCCTheming: return self.ccThemingRows;
         case SectionLiveWP: return self.liveWPRows;
         default: return @[];
     }
@@ -15608,6 +17577,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"title": @"Location Simulator", @"icon": @"location.fill",                       @"color": [UIColor systemGreenColor],  @"section": @(SectionLocationSim) },
         @{ @"title": @"SnowBoard Remix",    @"icon": @"square.stack.3d.up.fill",             @"color": [UIColor systemCyanColor],   @"section": @(SectionSnowBoardLite) },
         @{ @"title": @"LiveWP",             @"icon": @"play.rectangle.fill",                 @"color": [UIColor systemPurpleColor], @"section": @(SectionLiveWP) },
+        @{ @"title": @"CC Theming",         @"icon": @"switch.2",                            @"color": [UIColor systemBlueColor],   @"section": @(SectionCCTheming) },
         @{ @"title": @"Powercuff",          @"icon": @"bolt.slash.fill",                     @"color": [UIColor systemOrangeColor], @"section": @(SectionPowercuff) },
         @{ @"title": @"SpringBoard Tweaks", @"icon": @"apps.iphone",                         @"color": [UIColor systemIndigoColor], @"section": @(SectionDarkSwordTweaks) },
         @{ @"title": @"Drag Coefficient",   @"icon": @"dial.medium.fill",                    @"color": [UIColor systemIndigoColor], @"section": @(SectionDragCoefficient) },
@@ -15677,7 +17647,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         return (NSInteger)[self rowsForSection:self.underlyingSection].count;
     }
     switch ((RootSection)section) {
-        case RootSectionActions:        return 9;
+        case RootSectionActions:        return 4;
         case RootSectionAbout:          return 6;
         case RootSectionWarning:        return 0;
         case RootSectionCount:          return 0;
@@ -15781,6 +17751,9 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     }
     if (s == SectionFontChanger) {
         return @"Imports a local font family and overwrites iOS system font files using kslop's KRW-backed system-file overwrite helper.\n\nRegular is required. Italic and Mono are optional. kslop backs up stock fonts before the first overwrite and can restore those backups.\n\nPer-app font overrides are retired. If an older kslop build changed app-bundled fonts, a recovery-only restore action appears while legacy backups remain.\n\nRespring after applying or restoring system fonts.";
+    }
+    if (s == SectionCCTheming) {
+        return @"Apply and Restore are durable queued file transactions. Cyanide validates the target resources, preserves stock backups, verifies each write, and automatically resprings after completion. No trace, inventory probe, canary, live glyph adapter, or view override is installed.";
     }
     if (s == SectionLiveWP) {
         return @"Video wallpaper ported from d1y/cyanide-ios. Select an MP4, MOV, or M4V; kslop copies it into Documents/LiveWP and plays it in SpringBoard while the RemoteCall session stays alive.";
@@ -16570,6 +18543,69 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
     } else {
         [self.tableView reloadData];
     }
+}
+
+- (void)presentQueueAdmissionError:(NSString *)message
+{
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"Could Not Queue Change"
+                         message:message.length > 0
+                            ? message : @"The queued plan could not be saved."
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                              style:UIAlertActionStyleDefault
+                                            handler:nil]];
+    settings_present_controller(alert, self);
+}
+
+- (BOOL)queueStandaloneActionFromSettings:(CNDQueuedAction *)action
+{
+    NSString *reason = nil;
+    BOOL queued = [[PackageQueue sharedQueue]
+        queueStandaloneAction:action reason:&reason];
+    if (!queued) {
+        [self presentQueueAdmissionError:reason];
+        return NO;
+    }
+    log_user("[QUEUE] Staged %s (%s).\n",
+             action.kind.UTF8String ?: "action",
+             action.operation.UTF8String ?: "unknown");
+    return YES;
+}
+
+- (Package *)fontChangerPackage
+{
+    for (Package *package in [PackageCatalog allPackagesIncludingExperimental]) {
+        if ([package.identifier isEqualToString:@"com.darksword.font-changer"]) {
+            return package;
+        }
+    }
+    return nil;
+}
+
+- (BOOL)queueFontChangerIntent:(PackageQueueIntent)intent
+{
+    Package *package = [self fontChangerPackage];
+    if (!package) {
+        [self presentQueueAdmissionError:
+            @"Font Changer is missing from the package catalog."];
+        return NO;
+    }
+    NSString *reason = nil;
+    PackageQueue *queue = [PackageQueue sharedQueue];
+    if (![queue canQueueIntent:intent forPackage:package reason:&reason]) {
+        [self presentQueueAdmissionError:reason];
+        return NO;
+    }
+    [queue queueIntent:intent forPackage:package];
+    if ([queue intentForPackage:package] != intent) {
+        [self presentQueueAdmissionError:
+            @"Font Changer could not be written to the durable queue."];
+        return NO;
+    }
+    log_user("[QUEUE] Staged Font Changer %s.\n",
+             intent == PackageQueueIntentInstall ? "apply" : "restore");
+    return YES;
 }
 
 - (void)presentSBCDockAppPicker
@@ -18191,7 +20227,7 @@ void cyanide_present_contact(UIViewController *host)
                     ? @"Forget kslop's local recovery only"
                     : @"Another action is running")
                 : @"Forget any stale local recovery records";
-        } else {
+        } else if (indexPath.row == 8) {
             NSString *supportReason = nil;
             BOOL exactTarget = CNDPhysicalCSAllowInvalidProbeIsSupported(
                 &supportReason);
@@ -18208,6 +20244,177 @@ void cyanide_present_contact(UIViewController *host)
                 cell.detailTextLabel.text = @"Another action is running";
             } else {
                 cell.detailTextLabel.text = @"Automatic KRW • resprings and closes Cyanide";
+            }
+        } else if (indexPath.row == 9) {
+            NSString *supportReason = nil;
+            BOOL exactTarget = CNDHailMaryProbeIsSupported(&supportReason);
+            rowEnabled = exactTarget && !g_settings_actions_running &&
+                !CNDHailMaryProbeIsRunning() &&
+                !CNDHailMaryPatchIsRunning() &&
+                !CNDHailMaryDataPageIsRunning() &&
+                !CNDHailMaryReadOnlyDataPageIsRunning() &&
+                !CNDHailMaryImpRedirectIsRunning();
+            symbol = @"scope";
+            color = UIColor.systemIndigoColor;
+            cell.textLabel.text = CNDHailMaryProbeIsRunning()
+                ? @"Hail Mary Physical Proof Running…"
+                : @"Run Hail Mary Physical Proof";
+            if (!exactTarget) {
+                cell.detailTextLabel.text = supportReason;
+            } else if (g_settings_actions_running) {
+                cell.detailTextLabel.text = @"Another action is running";
+            } else {
+                cell.detailTextLabel.text = @"Read-only frame + exact live-byte proof";
+            }
+        } else if (indexPath.row == 10) {
+            NSString *supportReason = nil;
+            BOOL exactTarget = CNDHailMaryPatchIsSupported(&supportReason);
+            rowEnabled = exactTarget && !g_settings_actions_running &&
+                !CNDHailMaryProbeIsRunning() &&
+                !CNDHailMaryPatchIsRunning() &&
+                !CNDHailMaryDataPageIsRunning() &&
+                !CNDHailMaryReadOnlyDataPageIsRunning() &&
+                !CNDHailMaryImpRedirectIsRunning();
+            symbol = @"bolt.shield.fill";
+            color = UIColor.systemOrangeColor;
+            cell.textLabel.text = CNDHailMaryPatchIsRunning()
+                ? @"Hail Mary Patch Running…"
+                : @"Apply Hail Mary Patch";
+            if (!exactTarget) {
+                cell.detailTextLabel.text = supportReason;
+            } else if (g_settings_actions_running) {
+                cell.detailTextLabel.text = @"Another action is running";
+            } else {
+                cell.detailTextLabel.text = @"Guarded shared-cache word • verifies then resprings";
+            }
+        } else if (indexPath.row == 11) {
+            NSString *supportReason = nil;
+            BOOL exactTarget = CNDHailMaryPatchIsSupported(&supportReason);
+            rowEnabled = exactTarget && !g_settings_actions_running &&
+                !CNDHailMaryProbeIsRunning() &&
+                !CNDHailMaryPatchIsRunning() &&
+                !CNDHailMaryDataPageIsRunning() &&
+                !CNDHailMaryReadOnlyDataPageIsRunning() &&
+                !CNDHailMaryImpRedirectIsRunning();
+            symbol = @"arrow.uturn.backward.circle.fill";
+            color = UIColor.systemGreenColor;
+            cell.textLabel.text = CNDHailMaryPatchIsRunning()
+                ? @"Hail Mary Patch Running…"
+                : @"Restore Hail Mary Patch";
+            if (!exactTarget) {
+                cell.detailTextLabel.text = supportReason;
+            } else if (g_settings_actions_running) {
+                cell.detailTextLabel.text = @"Another action is running";
+            } else {
+                cell.detailTextLabel.text = @"Exact inverse word • verifies then resprings";
+            }
+        } else if (indexPath.row == 12) {
+            NSString *supportReason = nil;
+            BOOL exactTarget = CNDHailMaryDataPageIsSupported(
+                &supportReason);
+            rowEnabled = exactTarget && !g_settings_actions_running &&
+                !CNDHailMaryProbeIsRunning() &&
+                !CNDHailMaryPatchIsRunning() &&
+                !CNDHailMaryDataPageIsRunning() &&
+                !CNDHailMaryReadOnlyDataPageIsRunning() &&
+                !CNDHailMaryImpRedirectIsRunning();
+            symbol = @"memorychip";
+            color = UIColor.systemTealColor;
+            cell.textLabel.text = CNDHailMaryDataPageIsRunning()
+                ? @"Hail Mary Data-Page Probe Running…"
+                : @"Hail Mary Data-Page Write Probe";
+            if (!exactTarget) {
+                cell.detailTextLabel.text = supportReason;
+            } else if (g_settings_actions_running) {
+                cell.detailTextLabel.text = @"Another action is running";
+            } else {
+                cell.detailTextLabel.text = @"Identical-bytes no-op • tests data-page aperture writes";
+            }
+        } else if (indexPath.row == 13) {
+            NSString *supportReason = nil;
+            BOOL exactTarget = CNDHailMaryReadOnlyDataPageIsSupported(
+                &supportReason);
+            rowEnabled = exactTarget && !g_settings_actions_running &&
+                !CNDHailMaryProbeIsRunning() &&
+                !CNDHailMaryPatchIsRunning() &&
+                !CNDHailMaryDataPageIsRunning() &&
+                !CNDHailMaryReadOnlyDataPageIsRunning() &&
+                !CNDHailMaryImpRedirectIsRunning();
+            symbol = @"lock.square.stack.fill";
+            color = UIColor.systemPinkColor;
+            cell.textLabel.text = CNDHailMaryReadOnlyDataPageIsRunning()
+                ? @"Hail Mary .34 RO-Data Probe Running…"
+                : @"Hail Mary .34 RO-Data Write Probe";
+            if (!exactTarget) {
+                cell.detailTextLabel.text = supportReason;
+            } else if (g_settings_actions_running) {
+                cell.detailTextLabel.text = @"Another action is running";
+            } else {
+                cell.detailTextLabel.text = @"Exact guard • identical bytes • may panic on maxProt r--";
+            }
+        } else if (indexPath.row == 14) {
+            NSString *supportReason = nil;
+            BOOL exactTarget = CNDHailMaryImpRedirectIsSupported(
+                &supportReason);
+            rowEnabled = exactTarget && !g_settings_actions_running &&
+                !CNDHailMaryProbeIsRunning() &&
+                !CNDHailMaryPatchIsRunning() &&
+                !CNDHailMaryDataPageIsRunning() &&
+                !CNDHailMaryReadOnlyDataPageIsRunning() &&
+                !CNDHailMaryImpRedirectIsRunning();
+            symbol = @"arrow.triangle.branch";
+            color = UIColor.systemPurpleColor;
+            cell.textLabel.text = CNDHailMaryImpRedirectIsRunning()
+                ? @"Hail Mary Dispatch Redirect Running…"
+                : @"Apply Hail Mary Dispatch Redirect";
+            if (!exactTarget) {
+                cell.detailTextLabel.text = supportReason;
+            } else if (g_settings_actions_running) {
+                cell.detailTextLabel.text = @"Another action is running";
+            } else {
+                cell.detailTextLabel.text = @"One packed-word write • manual visual check";
+            }
+        } else if (indexPath.row == 15) {
+            NSString *supportReason = nil;
+            BOOL exactTarget = CNDHailMaryImpRedirectIsSupported(
+                &supportReason);
+            rowEnabled = exactTarget && !g_settings_actions_running &&
+                !CNDHailMaryProbeIsRunning() &&
+                !CNDHailMaryPatchIsRunning() &&
+                !CNDHailMaryDataPageIsRunning() &&
+                !CNDHailMaryReadOnlyDataPageIsRunning() &&
+                !CNDHailMaryImpRedirectIsRunning();
+            symbol = @"arrow.uturn.backward.square.fill";
+            color = UIColor.systemGreenColor;
+            cell.textLabel.text = CNDHailMaryImpRedirectIsRunning()
+                ? @"Hail Mary Dispatch Redirect Running…"
+                : @"Restore Hail Mary Dispatch Entry";
+            if (!exactTarget) {
+                cell.detailTextLabel.text = supportReason;
+            } else if (g_settings_actions_running) {
+                cell.detailTextLabel.text = @"Another action is running";
+            } else {
+                cell.detailTextLabel.text = @"Exact inverse • no process restart";
+            }
+        } else {
+            NSString *supportReason = nil;
+            BOOL exactTarget = CNDHailMaryImpRedirectIsSupported(
+                &supportReason);
+            rowEnabled = exactTarget && !g_settings_actions_running &&
+                !CNDHailMaryProbeIsRunning() &&
+                !CNDHailMaryPatchIsRunning() &&
+                !CNDHailMaryDataPageIsRunning() &&
+                !CNDHailMaryReadOnlyDataPageIsRunning() &&
+                !CNDHailMaryImpRedirectIsRunning();
+            symbol = @"square.grid.2x2.fill";
+            color = UIColor.systemCyanColor;
+            cell.textLabel.text = @"Refresh App Library Miniatures";
+            if (!exactTarget) {
+                cell.detailTextLabel.text = supportReason;
+            } else if (g_settings_actions_running) {
+                cell.detailTextLabel.text = @"Another action is running";
+            } else {
+                cell.detailTextLabel.text = @"Targeted generations + category composites";
             }
         }
 
@@ -18516,14 +20723,37 @@ void cyanide_present_contact(UIViewController *host)
     }
     if ([key isEqualToString:
             kSettingsSnowBoardRemixInstallConsumerMappings]) {
-        /* Presentation is explicitly armed by the manual Spotlight action.
-         * Toggling the feature must never auto-start a watcher. */
-        if (!sender.isOn &&
-            CNDIconServicesConsumerLifecycleIsRunning()) {
-            dispatch_async(
-                dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                    (void)CNDIconServicesConsumerLifecycleStop();
-                });
+        // The toggle is configuration only. Refresh independently queued
+        // snapshots. Turning presentation off removes the now-meaningless
+        // SpringBoard action while preserving Spotlight's assertion action.
+        PackageQueue *queue = [PackageQueue sharedQueue];
+        if ([queue standaloneActionForConflictKey:
+                CNDQueuedActionConflictKeySpringBoardFixes]) {
+            NSString *reason = nil;
+            BOOL updated = sender.isOn
+                ? [queue queueStandaloneAction:
+                    CNDQueuedSpringBoardFixesAction(YES) reason:&reason]
+                : [queue removeStandaloneActionForConflictKey:
+                    CNDQueuedActionConflictKeySpringBoardFixes];
+            if (!updated) {
+                sender.on = !sender.isOn;
+                [[NSUserDefaults standardUserDefaults]
+                    setBool:sender.isOn forKey:key];
+                [self presentQueueAdmissionError:reason];
+                return;
+            }
+        }
+        if ([queue standaloneActionForConflictKey:
+                CNDQueuedActionConflictKeySpotlightFixes]) {
+            NSString *reason = nil;
+            if (![queue queueStandaloneAction:
+                    CNDQueuedSpotlightFixesAction(sender.isOn)
+                                     reason:&reason]) {
+                sender.on = !sender.isOn;
+                [[NSUserDefaults standardUserDefaults]
+                    setBool:sender.isOn forKey:key];
+                [self presentQueueAdmissionError:reason];
+            }
         }
         return;
     }
@@ -19721,7 +21951,7 @@ void cyanide_present_contact(UIViewController *host)
             [self presentActivityLogWithCompletion:^{
                 settings_run_icon_redirect_reset_recovery_state();
             }];
-        } else {
+        } else if (indexPath.row == 8) {
             UIAlertController *ac = [UIAlertController
                 alertControllerWithTitle:@"Run SpringBoard RX Probe?"
                                  message:@"Exact iPhone 16 Pro Max (iPhone17,2) / 23A341 test. Cyanide automatically reuses or acquires KRW, invokes PT_ATTACHEXC on SpringBoard, and attempts one private anonymous RX page there. It never opens or injects Spotlight and never uses PT_TRACE_ME. If the attach succeeds, the result is saved, SpringBoard is restarted once, KRW is parked, and Cyanide closes to clear both processes' temporary debug state. Any explicitly running Cyanide Spotlight watcher is stopped first and is not restarted automatically."
@@ -19737,6 +21967,158 @@ void cyanide_present_contact(UIViewController *host)
                 if (!strongSelf) return;
                 [strongSelf presentActivityLogWithCompletion:^{
                     settings_run_physical_rx_probe_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 9) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Run Hail Mary Physical Proof?"
+                                 message:@"Exact iPhone17,2 / 23A341 diagnostic. After validated KRW is available, the observation stage follows both VM maps, walks each live pmap with the exact kernel geometry, requires one shared physical address, verifies the original instruction and its 188-byte guard, then repeats both translations. It performs kernel reads only and does not patch or inject either process."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Run Probe"
+                                                   style:UIAlertActionStyleDefault
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_hail_mary_probe_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 10) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Apply Hail Mary Patch?"
+                                 message:@"Exact iPhone17,2 / 23A341 legacy-landing experiment. Cyanide opens Spotlight when needed and proves SpringBoard and Spotlight share the exact dyld-cache physical frame and 188-byte original guard. It skips the denied SpringBoard mlock, fully syncs the recovery journal, repeats the legacy final 188-byte guard read, and immediately uses the original kwrite32 read/merge/write route to change only 0x1a9f17f4 to 0x52800034. It performs no physical readback, rollback write, or automatic respring afterward. The write may cause a userspace restart or kernel panic."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Apply Once (Legacy Landing)"
+                                                   style:UIAlertActionStyleDestructive
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_hail_mary_patch_apply_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 11) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Restore Hail Mary Patch?"
+                                 message:@"Exact inverse for iPhone17,2 / 23A341. Cyanide requires the patched 188-byte guard on the same proven shared physical frame, syncs the recovery journal, repeats the legacy final 188-byte guard read, and immediately uses the original kwrite32 route to restore 0x52800034 to 0x1a9f17f4. It performs no post-write physical readback and does not respring automatically; verification is a separate operation."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Restore Once"
+                                                   style:UIAlertActionStyleDestructive
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_hail_mary_patch_restore_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 12) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Hail Mary Data-Page Write Probe?"
+                                 message:@"Identical-bytes aperture experiment for iPhone17,2 / 23A341. Cyanide runs the full read-only proof first, then decodes the guarded method's adrp/ldr global-object slot from the exact 188-byte original guard and translates that data page through both live pmaps. One single kwrite32 dispatch then writes the exact identical 32-byte window over that slot: identical bytes exercise the physical aperture's write permission with zero semantic change. The window is read back and both translations are repeated. The aperture maps the guarded text frame read-only, so every text write has panicked; this answers whether shared-cache data pages accept kernel writes. The dispatch may still panic; the durable journal records the exact target for the postmortem."
+                           preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Run Data-Page Probe"
+                                                   style:UIAlertActionStyleDestructive
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_hail_mary_data_page_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 13) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Hail Mary .34 RO-Data Write Probe?"
+                                 message:@"Exact iPhone17,2 / 23A341 permission-boundary experiment. Cyanide first runs the complete read-only physical proof. It then deduplicates the independently recorded SpringBoard and Spotlight shared-cache slide anchors, translates the unslid .34 dispatch-entry address for every candidate, and requires exactly one candidate to expose the exact offline 32-byte guard in one shared physical frame. After a final translation and byte check, one kwrite32 dispatch writes that identical 32-byte window back unchanged. No redirect, fallback, rollback write, or panic mechanism is installed. Because .34 has initProt=maxProt=r--, the store is expected to panic if the aperture honors maxProt; the durable journal records the exact target and an unreturned dispatch. If it returns, Cyanide requires exact readback and stable translations."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Run .34 Probe"
+                                                   style:UIAlertActionStyleDestructive
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_hail_mary_read_only_data_page_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 14) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Apply Hail Mary Dispatch Redirect?"
+                                 message:@"Exact iPhone17,2 / 23A341 semantic experiment. This requires the successful .34 identical-bytes probe from this same boot, then reruns the full physical proof and requires the exact original 32-byte dispatch guard on that same slide, frame, physical address, and aperture KVA. Cyanide durably journals the inverse before one kwrite32 changes only 0x0be3f5c7 to 0x0be3ecba. It then requires exact readback and stable translations and stops. It does not kill, restart, reopen, or otherwise mutate Spotlight or SpringBoard after the write. Judge the live visual result manually. No panic mechanism or automatic rollback is installed."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Redirect Once"
+                                                   style:UIAlertActionStyleDestructive
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_hail_mary_imp_redirect_apply_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else if (indexPath.row == 15) {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Restore Hail Mary Dispatch Entry?"
+                                 message:@"Exact inverse for iPhone17,2 / 23A341. This requires the successful .34 identical-bytes probe from this same boot, then proves the exact redirected 32-byte guard and the same permission-bound slide, frame, physical address, and aperture KVA. Cyanide durably journals the redirected inverse before one kwrite32 restores 0x0be3ecba to 0x0be3f5c7. It then requires exact readback and stable translations and stops. It does not kill, restart, reopen, or otherwise mutate Spotlight or SpringBoard after the write. Judge the live visual result manually; no automatic rollback is performed."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Restore Once"
+                                                   style:UIAlertActionStyleDestructive
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_hail_mary_imp_redirect_restore_action();
+                }];
+            }]];
+            settings_present_controller(ac, self);
+        } else {
+            UIAlertController *ac = [UIAlertController
+                alertControllerWithTitle:@"Refresh App Library Miniatures?"
+                                 message:@"Runs one exact PID-bound SpringBoard RemoteCall. It resolves the journaled themed applications' canonical and live-leaf SBApplicationIcon objects before mutation, purges only the retained folder/category caches, reloads those exact icon generations, rebuilds folder composites, reloads App Library category pods, and enqueues their update. It does not install or mutate an Objective-C method, touch the Hail Mary dispatch entry, reload App Library list/search rows, reset the icon manager, relayout, signal, kill, restart, respring, or write shared-cache data. Judge the miniature result manually."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                   style:UIAlertActionStyleCancel
+                                                 handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [ac addAction:[UIAlertAction actionWithTitle:@"Refresh Once"
+                                                   style:UIAlertActionStyleDefault
+                                                 handler:^(UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    settings_run_hail_mary_app_library_miniature_refresh_action();
                 }];
             }]];
             settings_present_controller(ac, self);
@@ -20274,12 +22656,44 @@ void cyanide_present_contact(UIViewController *host)
         NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
         if (![row[@"kind"] isEqualToString:@"button"]) return;
         NSString *action = row[@"action"];
-        if ([action isEqualToString:@"sbl-apply-permanent"]) {
-            [self presentActivityLogWithCompletion:^{
-                settings_run_snowboard_remix_operation(@"Apply Theme", YES, ^{
-                    return settings_apply_snowboard_remix();
-                });
-            }];
+        if ([action isEqualToString:@"sbl-queue-apply"]) {
+            NSString *themeIdentifier = [NSUserDefaults.standardUserDefaults
+                stringForKey:kSettingsSnowBoardRemixSelectedThemeID];
+            if (themeIdentifier.length == 0) {
+                [self presentQueueAdmissionError:
+                    @"Select or import a theme before queuing Apply."];
+                return;
+            }
+            [self queueStandaloneActionFromSettings:
+                CNDQueuedSnowBoardRemixAction(YES, themeIdentifier)];
+        } else if ([action isEqualToString:@"sbl-queue-restore"]) {
+            [self queueStandaloneActionFromSettings:
+                CNDQueuedSnowBoardRemixAction(NO, nil)];
+        } else if ([action isEqualToString:
+                    @"sbl-queue-transparency-fix"]) {
+            [self queueStandaloneActionFromSettings:
+                CNDQueuedTransparencyFixAction(YES)];
+        } else if ([action isEqualToString:
+                    @"sbl-queue-transparency-fix-restore"]) {
+            [self queueStandaloneActionFromSettings:
+                CNDQueuedTransparencyFixAction(NO)];
+        } else if ([action isEqualToString:
+                    @"sbl-queue-springboard-fixes"]) {
+            BOOL transparency = [NSUserDefaults.standardUserDefaults
+                boolForKey:kSettingsSnowBoardRemixInstallConsumerMappings];
+            if (!transparency) {
+                [self presentQueueAdmissionError:
+                    @"Enable Transparent Icon Presentation before queuing SpringBoard Fixes."];
+                return;
+            }
+            [self queueStandaloneActionFromSettings:
+                CNDQueuedSpringBoardFixesAction(YES)];
+        } else if ([action isEqualToString:
+                    @"sbl-queue-spotlight-fixes"]) {
+            BOOL transparency = [NSUserDefaults.standardUserDefaults
+                boolForKey:kSettingsSnowBoardRemixInstallConsumerMappings];
+            [self queueStandaloneActionFromSettings:
+                CNDQueuedSpotlightFixesAction(transparency)];
         } else if ([action isEqualToString:@"sbl-update-repair"]) {
             [self presentActivityLogWithCompletion:^{
                 settings_run_snowboard_remix_operation(
@@ -20294,51 +22708,25 @@ void cyanide_present_contact(UIViewController *host)
                     return [CNDSnowBoardRemix auditAppliedIconState];
                 });
             }];
-        } else if ([action isEqualToString:@"sbl-restore-all"]) {
-            [self presentActivityLogWithCompletion:^{
-                settings_run_snowboard_remix_operation(@"Restore All Icons", YES, ^{
-                    return settings_restore_all_snowboard_remix();
-                });
-            }];
-        } else if ([action isEqualToString:@"sbl-start-kernel-consumer-watcher"]) {
+        } else if ([action isEqualToString:@"sbl-airdrop-test-apply"]) {
             [self presentActivityLogWithCompletion:^{
                 settings_run_snowboard_remix_operation(
-                    @"Start Spotlight Watcher", NO, ^{
-                    NSDictionary<NSString *, id> *result =
-                        settings_snowboard_remix_krw_prerequisite();
-                    if (!result) {
-                        result = CNDIconServicesConsumerLifecycleStart(
-                            UIScreen.mainScreen.scale);
-                    }
-                    return result ?: @{
-                        @"ok": @NO,
-                        @"stage": @"presentation-watcher-no-result",
-                        @"message": @"The Spotlight watcher returned no result."
-                    };
+                    @"Isolated AirDrop Test Apply", YES, ^{
+                    return [CNDSnowBoardRemix applyIsolatedAirDropTest];
                 });
             }];
-        } else if ([action isEqualToString:@"sbl-stop-kernel-consumer-watcher"]) {
+        } else if ([action isEqualToString:@"sbl-airdrop-test-audit"]) {
             [self presentActivityLogWithCompletion:^{
                 settings_run_snowboard_remix_operation(
-                    @"Stop Spotlight Watcher", NO, ^{
-                    return CNDIconServicesConsumerLifecycleStop();
+                    @"Isolated AirDrop Test Audit", YES, ^{
+                    return [CNDSnowBoardRemix auditIsolatedAirDropTest];
                 });
             }];
-        } else if ([action isEqualToString:
-                    @"sbl-repair-springboard-transparency"]) {
+        } else if ([action isEqualToString:@"sbl-airdrop-test-restore"]) {
             [self presentActivityLogWithCompletion:^{
                 settings_run_snowboard_remix_operation(
-                    @"Apply SpringBoard Tweaks", YES, ^{
-                    return [CNDSnowBoardRemix
-                        applySpringBoardTweaks];
-                });
-            }];
-        } else if ([action isEqualToString:
-                    @"sbl-repair-spotlight-transparency"]) {
-            [self presentActivityLogWithCompletion:^{
-                settings_run_snowboard_remix_operation(
-                    @"Repair Spotlight Transparency", YES, ^{
-                    return [CNDSnowBoardRemix repairSpotlightPresentation];
+                    @"Isolated AirDrop Test Restore", YES, ^{
+                    return [CNDSnowBoardRemix restoreIsolatedAirDropTest];
                 });
             }];
         } else if ([action isEqualToString:@"sbl-import-folder"]) {
@@ -20432,6 +22820,309 @@ void cyanide_present_contact(UIViewController *host)
         return;
     }
 
+    if (indexPath.section == SectionCCTheming) {
+        NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
+        if (![row[@"kind"] isEqualToString:@"button"]) return;
+        NSString *action = row[@"action"];
+        PackageQueueIntent intent = [action isEqualToString:@"cc-theming-queue-apply"]
+            ? PackageQueueIntentInstall
+            : [action isEqualToString:@"cc-theming-queue-restore"]
+                ? PackageQueueIntentUninstall : PackageQueueIntentNone;
+        if (intent == PackageQueueIntentNone) return;
+
+        Package *package = nil;
+        for (Package *candidate in [PackageCatalog allPackagesIncludingExperimental]) {
+            if ([candidate.identifier isEqualToString:@"com.darksword.cc-theming"]) {
+                package = candidate;
+                break;
+            }
+        }
+        if (!package) {
+            [self presentQueueAdmissionError:
+                @"CC Theming is missing from the package catalog."];
+            return;
+        }
+        NSString *reason = nil;
+        PackageQueue *queue = [PackageQueue sharedQueue];
+        if (![queue canQueueIntent:intent forPackage:package reason:&reason]) {
+            [self presentQueueAdmissionError:reason];
+            return;
+        }
+        [queue queueIntent:intent forPackage:package];
+        if ([queue intentForPackage:package] != intent) {
+            [self presentQueueAdmissionError:
+                @"The Control Center operation could not be written to the durable queue."];
+            return;
+        }
+        log_user("[QUEUE] Staged Control Center resource %s.\n",
+            intent == PackageQueueIntentInstall ? "apply" : "restore");
+        [self reloadSectionOrAll:SectionCCTheming];
+        return;
+#if 0
+        NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
+        if (![row[@"kind"] isEqualToString:@"button"]) return;
+        NSString *action = row[@"action"];
+        if ([action isEqualToString:@"cc-theming-apply-all"]) {
+            __weak typeof(self) weakSelf = self;
+            [self presentActivityLogWithCompletion:^{
+                log_user("[CC_THEMING_FILES] Starting resource installation.\n");
+                dispatch_async(
+                    dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                    settings_run_cc_theming_file_resources(YES);
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        __strong typeof(weakSelf) currentSelf = weakSelf;
+                        [currentSelf reloadSectionOrAll:SectionCCTheming];
+                    });
+                });
+            }];
+        } else if ([action isEqualToString:@"cc-theming-restore-all"]) {
+            UIAlertController *alert = [UIAlertController
+                alertControllerWithTitle:@"Restore Stock Control Center Icons?"
+                                 message:@"Cyanide will restore each modified resource from its verified original backup. The backups survive app restarts. Respring afterward to reload stock packages and catalogs."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                       style:UIAlertActionStyleCancel
+                                                     handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [alert addAction:[UIAlertAction actionWithTitle:@"Restore"
+                                                       style:UIAlertActionStyleDestructive
+                                                     handler:^(__unused UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    log_user("[CC_THEMING_FILES] Starting stock resource restoration.\n");
+                    dispatch_async(
+                        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                        settings_run_cc_theming_file_resources(NO);
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            __strong typeof(weakSelf) currentSelf = weakSelf;
+                            [currentSelf reloadSectionOrAll:SectionCCTheming];
+                        });
+                    });
+                }];
+            }]];
+            settings_present_controller(alert, self);
+        } else if ([action isEqualToString:@"cc-theming-trace-refined"]) {
+            UIAlertController *alert = [UIAlertController
+                alertControllerWithTitle:@"Trace Refined Physical CC Routes?"
+                message:@"Choose a phase, open its page during the five-second countdown, and leave it visible. For Focus, capture Expanded Focus, dismiss CC yourself, then capture Reopened Focus without respringing. Focus reads exact module/model/list/row/icon members and machine identifiers from the loaded picker; it performs no descendant discovery. Media phases remain available: Compact, Expanded Media, then Reopened Media. Every run is archived. The capture never presses controls, changes Focus state or presentation, or applies artwork. Reopened comparisons require consecutive successful captures of the same scope and SpringBoard PID; unchanged addresses do not prove reconstruction."
+                preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            for (NSArray *entry in @[@[@"Compact · Start 5s", @"compact"],
+                @[@"Expanded Media · Start 5s", @"expanded-media"],
+                @[@"Reopened Media · Start 5s", @"reopened-media"],
+                @[@"Expanded Focus · Start 5s", @"expanded-focus"],
+                @[@"Reopened Focus · Start 5s", @"reopened-focus"]]) {
+                NSString *phase = entry[1];
+                [alert addAction:[UIAlertAction actionWithTitle:entry[0]
+                    style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf) return;
+                    [strongSelf presentActivityLogWithCompletion:^{
+                        log_user("[CC_THEMING_REFINED] Starts in five seconds. Open the chosen page yourself; do not tap control actions.\n");
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+                            dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                            settings_run_cc_theming_refined_physical_trace(phase);
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                __strong typeof(weakSelf) currentSelf = weakSelf;
+                                [currentSelf reloadSectionOrAll:SectionCCTheming];
+                            });
+                        });
+                    }];
+                }]];
+            }
+            settings_present_controller(alert, self);
+        } else if ([action isEqualToString:@"cc-theming-trace-semantic"]) {
+            UIAlertController *alert = [UIAlertController
+                alertControllerWithTitle:@"Trace CC Lifecycle Owners?"
+                                 message:@"Tap Start, open a Control Center page, and leave it open. Run once for each page; start audio first for Now Playing. The bounded read-only capture follows controller, registry, model, descriptor, and provider ownership links and reports stable anchors with downstream target paths. The UIKit view hierarchy is never traversed. Captured evidence still needs validation across redraws and page reconstruction within the same SpringBoard process."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                style:UIAlertActionStyleCancel handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [alert addAction:[UIAlertAction actionWithTitle:@"Start 5s Countdown"
+                style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    log_user("[CC_THEMING_LIFECYCLE] Starts in five seconds. Keep a Control Center page visible; run each page separately.\n");
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                        (int64_t)(5 * NSEC_PER_SEC)),
+                        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                        settings_run_cc_theming_media_focus_semantic_trace();
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            __strong typeof(weakSelf) currentSelf = weakSelf;
+                            [currentSelf reloadSectionOrAll:SectionCCTheming];
+                        });
+                    });
+                }];
+            }]];
+            settings_present_controller(alert, self);
+        } else if ([action isEqualToString:@"cc-theming-trace-media"]) {
+            UIAlertController *alert = [UIAlertController
+                alertControllerWithTitle:@"Trace Current Control Center Page?"
+                                 message:@"Before tapping Start, choose one page to inspect: Connectivity, Now Playing, Brightness, Volume, or Focus. Start audio first for Now Playing. Tap Start, open that page, and leave it visible. After five seconds, kslop reads its owner graph, geometry, and package contracts. It does not press a button, toggle a radio, or change presentation state."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                       style:UIAlertActionStyleCancel
+                                                     handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [alert addAction:[UIAlertAction actionWithTitle:@"Start 5s Countdown"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(__unused UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    log_user("[CC_THEMING_TRACE] Trace starts in five seconds. Open the target Control Center page now and leave it visible.\n");
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                        (int64_t)(5 * NSEC_PER_SEC)),
+                        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                        settings_run_cc_theming_media_connectivity_trace();
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            __strong typeof(weakSelf) currentSelf = weakSelf;
+                            [currentSelf reloadSectionOrAll:SectionCCTheming];
+                        });
+                    });
+                }];
+            }]];
+            settings_present_controller(alert, self);
+        } else if ([action isEqualToString:@"cc-theming-discover"]) {
+            UIAlertController *alert = [UIAlertController
+                alertControllerWithTitle:@"Capture Physical Control Center?"
+                                 message:@"Tap Start, then immediately pull Control Center down and leave it open. The read-only capture begins after five seconds. It will not toggle Wi-Fi, Airplane Mode, Cellular, Bluetooth, Flashlight, or any other control."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                       style:UIAlertActionStyleCancel
+                                                     handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [alert addAction:[UIAlertAction actionWithTitle:@"Start 5s Countdown"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(__unused UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    log_user("[CC_THEMING] Capture starts in five seconds. Pull Control Center down now and leave it open.\n");
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                        (int64_t)(5 * NSEC_PER_SEC)),
+                        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                        settings_run_cc_theming_physical_inventory();
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            __strong typeof(weakSelf) currentSelf = weakSelf;
+                            [currentSelf reloadSectionOrAll:SectionCCTheming];
+                        });
+                    });
+                }];
+            }]];
+            settings_present_controller(alert, self);
+        } else if ([action isEqualToString:@"cc-theming-flashlight-canary"]) {
+            UIAlertController *alert = [UIAlertController
+                alertControllerWithTitle:@"Test Pulsar Flashlight Glyph?"
+                                 message:@"Tap Start, then pull Control Center down and keep the Flashlight control visible. After five seconds, kslop will install the Pulsar off/on images, verify them for four seconds, and restore the exact original image objects. The flashlight is never activated."
+                          preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                       style:UIAlertActionStyleCancel
+                                                     handler:nil]];
+            __weak typeof(self) weakSelf = self;
+            [alert addAction:[UIAlertAction actionWithTitle:@"Start 5s Countdown"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(__unused UIAlertAction *_) {
+                __strong typeof(weakSelf) strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf presentActivityLogWithCompletion:^{
+                    log_user("[CC_THEMING_CANARY] Starts in five seconds. Keep the Flashlight control visible; no control will be activated.\n");
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                        (int64_t)(5 * NSEC_PER_SEC)),
+                        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                        settings_run_cc_theming_flashlight_apply_restore_canary();
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            __strong typeof(weakSelf) currentSelf = weakSelf;
+                            [currentSelf reloadSectionOrAll:SectionCCTheming];
+                        });
+                    });
+                }];
+            }]];
+            settings_present_controller(alert, self);
+        } else if ([action isEqualToString:@"cc-theming-share-media-trace"] ||
+                   [action isEqualToString:@"cc-theming-share-semantic-trace"] ||
+                   [action isEqualToString:@"cc-theming-share-refined-trace"]) {
+            BOOL refined = [action isEqualToString:@"cc-theming-share-refined-trace"];
+            BOOL semantic = [action isEqualToString:@"cc-theming-share-semantic-trace"];
+            NSURL *url = refined ? settings_cc_theming_refined_trace_url() : semantic ? settings_cc_theming_semantic_trace_url()
+                : settings_cc_theming_media_trace_url();
+            if (!url || ![[NSFileManager defaultManager]
+                    fileExistsAtPath:url.path]) {
+                [self presentQueueAdmissionError:
+                    refined ? @"No refined physical Control Center route report is available to share yet."
+                    : semantic ? @"No lifecycle-owner Control Center trace is available to share yet."
+                    : @"No expanded Control Center trace is available to share yet."];
+                return;
+            }
+            UIActivityViewController *share = [[UIActivityViewController alloc]
+                initWithActivityItems:@[url] applicationActivities:nil];
+            UIPopoverPresentationController *popover = share.popoverPresentationController;
+            if (popover) {
+                popover.sourceView = self.view;
+                popover.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                    CGRectGetMidY(self.view.bounds), 1.0, 1.0);
+            }
+            settings_present_controller(share, self);
+        } else if ([action isEqualToString:@"cc-theming-share-production"]) {
+            NSURL *url = settings_cc_theming_production_report_url();
+            if (!url || ![[NSFileManager defaultManager]
+                    fileExistsAtPath:url.path]) {
+                [self presentQueueAdmissionError:
+                    @"No full CC Theming report is available to share yet."];
+                return;
+            }
+            UIActivityViewController *share = [[UIActivityViewController alloc]
+                initWithActivityItems:@[url] applicationActivities:nil];
+            UIPopoverPresentationController *popover = share.popoverPresentationController;
+            if (popover) {
+                popover.sourceView = self.view;
+                popover.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                    CGRectGetMidY(self.view.bounds), 1.0, 1.0);
+            }
+            settings_present_controller(share, self);
+        } else if ([action isEqualToString:@"cc-theming-share"]) {
+            NSURL *url = settings_cc_theming_inventory_url();
+            if (!url || ![[NSFileManager defaultManager]
+                    fileExistsAtPath:url.path]) {
+                [self presentQueueAdmissionError:
+                    @"No CC Theming inventory is available to share yet."];
+                return;
+            }
+            UIActivityViewController *share = [[UIActivityViewController alloc]
+                initWithActivityItems:@[url] applicationActivities:nil];
+            UIPopoverPresentationController *popover = share.popoverPresentationController;
+            if (popover) {
+                popover.sourceView = self.view;
+                popover.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                    CGRectGetMidY(self.view.bounds), 1.0, 1.0);
+            }
+            settings_present_controller(share, self);
+        } else if ([action isEqualToString:@"cc-theming-share-canary"]) {
+            NSURL *url = settings_cc_theming_apply_restore_canary_url();
+            if (!url || ![[NSFileManager defaultManager]
+                    fileExistsAtPath:url.path]) {
+                [self presentQueueAdmissionError:
+                    @"No CC Theming apply/restore report is available yet."];
+                return;
+            }
+            UIActivityViewController *share = [[UIActivityViewController alloc]
+                initWithActivityItems:@[url] applicationActivities:nil];
+            UIPopoverPresentationController *popover = share.popoverPresentationController;
+            if (popover) {
+                popover.sourceView = self.view;
+                popover.sourceRect = CGRectMake(CGRectGetMidX(self.view.bounds),
+                    CGRectGetMidY(self.view.bounds), 1.0, 1.0);
+            }
+            settings_present_controller(share, self);
+        }
+        return;
+#endif
+    }
+
     if (indexPath.section == SectionFontChanger) {
         NSDictionary *row = [self rowsForSection:indexPath.section][indexPath.row];
         if (![row[@"kind"] isEqualToString:@"button"]) return;
@@ -20458,22 +23149,22 @@ void cyanide_present_contact(UIViewController *host)
             settings_present_controller(ac, self);
         } else if ([action isEqualToString:@"font-apply"]) {
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:@"Apply Font Family?"
-                                 message:@"kslop will overwrite selected system font files and save stock backups first. Replacement files must be no larger than the originals. Respring after applying."
+                alertControllerWithTitle:@"Queue Font Family?"
+                                 message:@"The selected system font files will be backed up and replaced before the shared respring. Replacement files must be no larger than the originals."
                           preferredStyle:UIAlertControllerStyleAlert];
             [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Apply" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
-                settings_run_font_changer_action(self, YES);
+            [ac addAction:[UIAlertAction actionWithTitle:@"Queue" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+                [self queueFontChangerIntent:PackageQueueIntentInstall];
             }]];
             settings_present_controller(ac, self);
         } else if ([action isEqualToString:@"font-restore"]) {
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:@"Restore Stock Fonts?"
-                                 message:@"kslop will write its saved stock font backups back to the system font files. Respring after restoring."
+                alertControllerWithTitle:@"Queue Stock Font Restore?"
+                                 message:@"Saved stock font backups will be restored before the shared respring."
                           preferredStyle:UIAlertControllerStyleAlert];
             [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            [ac addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
-                settings_run_font_changer_action(self, NO);
+            [ac addAction:[UIAlertAction actionWithTitle:@"Queue Restore" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {
+                [self queueFontChangerIntent:PackageQueueIntentUninstall];
             }]];
             settings_present_controller(ac, self);
         }

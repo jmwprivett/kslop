@@ -27,9 +27,38 @@ static dispatch_source_t g_sigterm_source;
     [self logBootIdentity];
     settings_register_defaults();
     log_set_verbose(YES);
+    // This is intentionally launch-only, not a foreground callback. A living
+    // Cyanide process keeps its current state; a new process must prove that
+    // it recovered the old parked KRW generation before trusting process-local
+    // ACTIVE bits. SnowBoard's persistent state survives independently.
+    settings_reconcile_persisted_applied_state_on_launch();
     ds_keepalive_apply_enabled([[NSUserDefaults standardUserDefaults] boolForKey:kSettingsKeepAlive]);
     [self installTerminationHandlers];
     [self installBarAppearances];
+    NSArray<NSString *> *arguments = NSProcessInfo.processInfo.arguments;
+    void (^hailMaryLaunchAction)(void) = nil;
+    if ([arguments containsObject:@"--hail-mary-apply"]) {
+        hailMaryLaunchAction = ^{ settings_run_hail_mary_patch_apply_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-restore"]) {
+        hailMaryLaunchAction = ^{ settings_run_hail_mary_patch_restore_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-verify-patched"]) {
+        hailMaryLaunchAction = ^{ settings_run_hail_mary_patch_verify_patched_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-verify-original"]) {
+        hailMaryLaunchAction = ^{ settings_run_hail_mary_patch_verify_original_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-probe"]) {
+        hailMaryLaunchAction = ^{ settings_run_hail_mary_probe_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-imp-apply"]) {
+        hailMaryLaunchAction = ^{ settings_run_hail_mary_imp_redirect_apply_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-imp-restore"]) {
+        hailMaryLaunchAction = ^{ settings_run_hail_mary_imp_redirect_restore_action(); };
+    }
+    if (hailMaryLaunchAction) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     (int64_t)(1.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            hailMaryLaunchAction();
+        });
+    }
     return YES;
 }
 

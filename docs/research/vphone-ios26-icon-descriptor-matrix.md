@@ -62,6 +62,8 @@ a live Spotlight search for eBay.
 | App Library category mini-icon | SpringBoard | 27×27@3, appearances 0 and 1 | 87×87 final cache image | Separate UUIDs. This is the small four-up content in category tiles. |
 | App Library alphabetical/search-list row | SpringBoard | 48×48@3 | 180×180 final cache image | A separate UUID. `SBHIconLibraryTableViewController` configures `SBHIconTableViewCell`, whose `SBIconImageView` reads this record. |
 | App switcher title icon | SpringBoard | 28×28@3 | 87×87 final cache image | A separate UUID. The stack reaches `SBFluidSwitcherSpaceTitleItemController`. |
+| Share sheet Apps/More row | `SharingUIService` / SharingUI | 28×28@3, appearance 0, `variantOptions=0x4` | 87×87 | `_UIActivityUserDefaultsViewController` requests `iconFormat=0`; `SFUIActivityImageProvider` copies `TableUIName` and sets `drawBorder=YES`. This is distinct from the ordinary 28-point switcher/transition record. |
+| Share sheet horizontal activity icon | `SharingUIService` / SharingUI | 64×64@3 | 192×192 | `iconFormat=10` selects the named HomeScreen descriptor. Ordinary apps already have this core record. AirDrop uses the pseudo-bundle identity `com.apple.Sharing.AirDrop`. |
 | Lock-screen/notification icon | SpringBoard | 38×38@3 | 114×114 | A separate UUID. The stack reaches `NCIconImageForApplicationIdentifierWithFormat` in UserNotificationsUIKit. Both appearance 0 and appearance 1 were requested. |
 | Spotlight Top Hit application | Spotlight | 68×68@3 | 204×204 | Reuses the normal 68-point store response. |
 | Spotlight/SearchUI small result icon | Spotlight | 28×28@3 | 87×87 | A separate UUID. This covers the small app icon beside a SearchUI suggestion/result. |
@@ -219,8 +221,116 @@ hash unchanged to `SBIconImageView setDisplayedImage:`. This closes the VM
 publication and animation-path proof; a physical-device run remains the final
 platform validation.
 
-All ordinary application requests in the earlier capture used icon variant 0 and
-options 0. Appearance was not uniformly zero:
+The Share-sheet follow-up adds another required core descriptor without adding
+a new size. Disassembly of
+`-[_UIActivityUserDefaultsViewController _provideCellForTableView:indexPath:itemIdentifier:]`
+shows every application row calling
+`requestImageForBundleIdentifier:activityCategory:contentSizeCategory:userInterfaceStyle:iconFormat:synchronous:resultHandler:`
+with activity category 1, icon format 0, and asynchronous delivery.
+`-[SFUIActivityImageProvider _fetchBundleImageForIdentifier:...]` therefore
+copies `TableUIName` (28×28@3), sets `templateVariant=NO`, and sets
+`drawBorder=YES`. On iOS 26.0 that border state reads back as
+`variantOptions=0x4`; the independently constructed descriptor exactly matched
+the captured consumer digest
+`32AFEB06-1183-3764-B197-7B175B199D11`. Calling SharingUI's own
+`+tintImageDescriptor:withUserInterfaceStyle:forGraphicIcon:` for both light
+and dark interface styles under the normal Home Screen icon-style
+configuration retained appearance 0, appearance variant 0, no tint, and the
+same digest. The core record is consequently
+`28x28@3:a0:v4:o0`, not a speculative appearance-1 record.
+
+`UIAirDropActivity -_bundleIdentifierForActivityImageCreation` returns the
+exact pseudo-bundle `com.apple.Sharing.AirDrop`. It has an IconServices resource
+provider but no installed-application catalog row. Production admits only this
+explicit pseudo-bundle, and only when the selected theme includes
+`com.apple.Sharing.AirDrop.png`; it publishes the ordinary 64-point horizontal
+activity record and the bordered 28-point More-list record. Its recovery
+fingerprint is OS-bound, and Restore accepts this one journaled non-installed
+identity without broadening publication to arbitrary pseudo-bundles.
+
+The horizontal AirDrop consumer was also checked below the bundle-identifier
+method. `SFUIActivityImageProvider` asks `UIAirDropActivity` for
+`-_activityImage`; UIKit resolves the pseudo-bundle with the named Home Screen
+descriptor. On the iPhone17,3 23A341 runtime, both light and dark Share-sheet
+styles resolved that named descriptor to `64x64@3:a0:v0:o0`, so the existing
+producer record is exact and another descriptor size is not warranted.
+
+On iOS 26 the Share sheet is hosted by the separate
+`/Applications/SharingUIService.app/SharingUIService` process, not by the
+presenting application or SpringBoard. `UIActivityContentViewController` owns
+one `SFUIActivityImageProvider`, whose `SFUIImageProvider.imageCache` getter
+returns the process-local decoded-image `NSCache`. The provider has no purge
+selector, while the materialized activity cell can separately retain its
+already-delivered `UIImage`. A SpringBoard respring does not guarantee that
+this service exits.
+
+The controlled VM proof separated that consumer state from publication. PID
+6173 returned the stock 192×192 RGBA hash
+`48fb01c492ba5308d05ef5763f0c61916a4fe3a5ecf9bcb12fe4167fa4a123f4`
+from the real `UIAirDropActivity -_activityImage` path. Cyanide then published
+and read back the pseudo-bundle's themed `64x64@3:a0:v0:o0` record (UUID
+`979F2325-5ABB-3767-BE84-DEFDC9BAB44C`, structured-data SHA-256
+`f408d828e50de66e88bf547fe002e92606790478a9637676ab4a30f1f72b3850`,
+decoded IFCacheImage RGBA SHA-256
+`e5e540dc45b522884fb8b874a826912e9484ba0051affd68f69ba1719f15088d`).
+The still-live sheet remained backed by PID 6173's old consumer. Retiring only
+that exact service produced fresh PID 6736, and the already-presented AirDrop
+tile immediately displayed the theme without a SpringBoard restart.
+
+A second bounded resident probe then verified the final materialized view,
+not merely provider delivery. In PID 6736, `UIAirDropActivity -_activityImage`
+and `SFUIImageProvider -deliverImage:identifier:placeholder:error:` both
+reported the themed `e5e540dc...088d` hash. The visible 72×72 `UIImageView`
+inside `UIShareGroupActivityCell`, paired with the live `AirDrop` title label,
+held that same 192×192 decoded image in two consecutive main-thread
+snapshots. The stock `48fb01c4...23f4` hash was absent from the displayed
+path. This closes the remaining provider-versus-cell ambiguity: after the
+bounded service retirement, no additional Share-sheet cell invalidation is
+required.
+
+Production therefore performs one bounded, identity-checked RemoteCall only
+after the AirDrop persistent record verifies: if `SharingUIService` is absent,
+the next launch is already fresh; if present, its exact PID/proc/task receives
+a terminal self-SIGKILL and Cyanide independently proves that incarnation
+exited. Apply/Restore persistent journal success remains independent of this
+optional presentation cleanup. No descriptor was added and no view hierarchy
+is scanned.
+
+The physical-device durability audit subsequently isolated a separate AirDrop
+producer defect. Both measured records retained their expected UUIDs, themed
+structured bytes, and always-valid index tokens, but
+`store-source-registry.map` returned zero source identifiers for each UUID.
+The missing association is not a UUID-generation failure. On 23A341,
+`-[ISBundleIdentifierIcon makeResourceProvider]` invokes the
+fallback-enabled provider builder; because the AirDrop pseudo-bundle has no
+application or extension record, that path constructs an application-bundle
+`UTTypeRecord`. `-[ISRecordResourceProvider initWithRecord:options:]` then
+sets a one-element `sourceRecordIdentifiers` array from that record's native
+LaunchServices persistent identifier. `ISMutableIconCache` normally persists
+those identifiers through
+`registerRecordIdentifiers:asSourceForUnit:`, whose backing primitive is
+`-[ISStoreMapTable addData:forUUID:]` (`v32@0:8@16@24`).
+
+Production now repairs only `com.apple.Sharing.AirDrop`: after stock generation
+and exact persistent-index settlement, it resolves that native provider source,
+reads the validated map through its native XOR/modulo bucket and bounded node
+chain, deduplicates against those UUID entries, appends only missing data,
+flushes the shared map synchronously, releases the mapped table, reopens the
+file, and requires a fresh byte-level readback before removing or rewriting the
+store unit. The direct reader avoids using block-based `dataForUUID:` as a
+physical synthetic-call boundary. An empty chain is the legitimate state that
+requires repair; fresh readback still rejects a missing value. The repair runs
+only for themed AirDrop publication, so stock recovery cannot deadlock on the
+same optional association. Ordinary applications remain on IconServices'
+native registration path. The applied-state audit also resolves AirDrop through
+the resource provider instead of incorrectly requiring an
+`LSApplicationRecord`. A physical Apply/Restore run remains required to confirm
+that the repaired source association is consumed on-device.
+
+All ordinary application requests in the earlier SpringBoard/Spotlight capture
+used variant options 0 and factory options 0. SharingUI's bordered 28-point
+Apps-list request is the measured exception (`variantOptions=0x4`). Appearance
+was not uniformly zero:
 
 - the lock-screen notification path requested both appearance 0 and 1;
 - SpringBoard also made some 68-point appearance-1 requests;
@@ -288,8 +398,8 @@ The production core includes `64a0` for every application because the live
 Spotlight vertical Apps section uses SearchUI variant 4 at 64 points. Only the
 SnippetUI tiny badge remains conditional: `20a0` is still a Safari-only
 profile extra. The ordinary iPhone/iOS 26 matrix is therefore
-`13a0, 27a0, 27a1, 28a0, 38a0, 38a1, 48a0, 64a0, 68a0,
-68a0/v0x20000, 68a1`.
+`13a0, 27a0, 27a1, 28a0/v0, 28a0/v0x4, 38a0, 38a1, 48a0,
+64a0, 68a0, 68a0/v0x20000, 68a1`.
 
 ## SpringBoard refresh boundary
 
@@ -342,6 +452,17 @@ cache's full observer set rather than only the target application's consumers,
 while the target image remains lazily materialized. Repeating it for a batch
 would create an O(apps × visible consumers) update storm and risks a
 SpringBoard watchdog termination.
+
+Calendar is a deliberately narrow exception, not a return to that batch
+fallback. A later 23A341 proof isolated one already-materialized
+`SBHCalendarApplicationIcon`: its provider returned the exact verified themed
+68-point response and advanced generation, yet its four attached layer views
+could retain procedural stock pixels. One `updateImageForIcon:` call for that
+exact Calendar model synchronously switched stock→theme and theme→stock in
+three consecutive same-PID cycles. Production therefore invokes the method
+only for Calendar's deduplicated canonical/live-leaf model set (cap eight),
+after the provider/source verification succeeds. It never iterates the
+installed-app set or uses this selector in the general SpringBoard refresh.
 
 If an individual Home icon remains stock while Spotlight or the app switcher
 is themed and a SpringBoard restart fixes it, the persistent record is present.

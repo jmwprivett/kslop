@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 
+#import <CommonCrypto/CommonDigest.h>
 #import <dlfcn.h>
 #import <fcntl.h>
 #import <objc/message.h>
@@ -286,6 +287,11 @@ static const char *CNDISIconKind(id object)
     if (CNDContainsPointer(gCNDCalendarImageCaches,
                            &gCNDCalendarImageCacheCount,
                            object)) return "calendar-cache";
+    id bundleIdentifier = CNDSafeObjectGetter(object, "bundleIdentifier");
+    if ([bundleIdentifier isKindOfClass:NSString.class] &&
+        [bundleIdentifier isEqualToString:@"com.apple.mobilecal"]) {
+        return "calendar-bundle";
+    }
     return NULL;
 }
 
@@ -325,17 +331,20 @@ static void CNDLogSourceIdentity(const char *kind, id object)
 {
     if (!object) return;
     id type = CNDSafeObjectGetter(object, "type");
+    id bundleIdentifier = CNDSafeObjectGetter(object, "bundleIdentifier");
     id digest = CNDSafeObjectGetter(object, "digest");
     id identity = CNDSafeObjectGetter(object, "_identity");
     id date = CNDSafeObjectGetter(object, "date");
     id calendar = CNDSafeObjectGetter(object, "calendar");
     id format = CNDSafeObjectGetter(object, "format");
     id cache = CNDObjectIvar(object, "_imageCache");
-    CNDLog("[CND_DYNAMIC] SOURCE root=%llu kind=%s object=%p/%s type=%s "
+    CNDLog("[CND_DYNAMIC] SOURCE root=%llu kind=%s object=%p/%s "
+           "bundle=%s type=%s "
            "digest=%s identity=%p/%s date=%s calendar=%s format=%s "
            "image-cache=%p/%s description=%s\n",
            (unsigned long long)CNDActiveRoot(),
            kind, object, CNDClassName(object),
+           CNDShortValue(bundleIdentifier).UTF8String,
            CNDShortValue(type).UTF8String,
            CNDShortValue(digest).UTF8String,
            identity, CNDClassName(identity), CNDShortValue(date).UTF8String,
@@ -434,20 +443,68 @@ static CGImageRef CNDExistingCGImage(id object)
     }
 }
 
+static NSData *CNDCanonicalRGBA(CGImageRef image)
+{
+    size_t width = image ? CGImageGetWidth(image) : 0U;
+    size_t height = image ? CGImageGetHeight(image) : 0U;
+    if (!width || !height || width > 1024U || height > 1024U ||
+        width > SIZE_MAX / 4U || height > SIZE_MAX / (width * 4U)) {
+        return nil;
+    }
+    NSMutableData *pixels = [NSMutableData dataWithLength:
+        width * height * 4U];
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = colorSpace
+        ? CGBitmapContextCreate(
+            pixels.mutableBytes, width, height, 8U, width * 4U,
+            colorSpace, kCGImageAlphaPremultipliedLast |
+                kCGBitmapByteOrder32Big)
+        : NULL;
+    if (colorSpace) CGColorSpaceRelease(colorSpace);
+    if (!context) return nil;
+    CGContextClearRect(context, CGRectMake(0.0, 0.0, width, height));
+    CGContextSetBlendMode(context, kCGBlendModeCopy);
+    CGContextDrawImage(context, CGRectMake(0.0, 0.0, width, height), image);
+    CGContextRelease(context);
+    return pixels;
+}
+
+static void CNDSHA256Hex(NSData *data, char output[65])
+{
+    memset(output, 0, 65U);
+    if (![data isKindOfClass:NSData.class]) {
+        (void)strlcpy(output, "-", 65U);
+        return;
+    }
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH] = {0};
+    CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
+    for (size_t index = 0; index < sizeof(digest); index++) {
+        (void)snprintf(output + index * 2U, 65U - index * 2U,
+                       "%02x", digest[index]);
+    }
+}
+
 static void CNDLogPixelMetadata(id image, CGImageRef pixels)
 {
     id data = CNDSafeObjectGetter(image, "data");
+    NSData *encoded = [data isKindOfClass:NSData.class] ? data : nil;
+    NSData *rgba = CNDCanonicalRGBA(pixels);
+    char dataHash[65] = {0};
+    char pixelHash[65] = {0};
+    CNDSHA256Hex(encoded, dataHash);
+    CNDSHA256Hex(rgba, pixelHash);
     CNDLog(" bytes=%lu cgimage=%p pixel-size=%zux%zu "
-           "alpha=%u bitmap=0x%x bpc=%zu bpp=%zu rowbytes=%zu",
-           (unsigned long)([data isKindOfClass:NSData.class]
-               ? [data length] : 0U), pixels,
+           "alpha=%u bitmap=0x%x bpc=%zu bpp=%zu rowbytes=%zu "
+           "data-sha256=%s pixel-sha256=%s",
+           (unsigned long)encoded.length, pixels,
            pixels ? CGImageGetWidth(pixels) : 0U,
            pixels ? CGImageGetHeight(pixels) : 0U,
            pixels ? (unsigned)CGImageGetAlphaInfo(pixels) : 0U,
            pixels ? (unsigned)CGImageGetBitmapInfo(pixels) : 0U,
            pixels ? CGImageGetBitsPerComponent(pixels) : 0U,
            pixels ? CGImageGetBitsPerPixel(pixels) : 0U,
-           pixels ? CGImageGetBytesPerRow(pixels) : 0U);
+           pixels ? CGImageGetBytesPerRow(pixels) : 0U,
+           dataHash, pixelHash);
 }
 
 static CGImageRef CNDLayerContentsCGImage(CALayer *layer)
@@ -711,6 +768,10 @@ static void CNDSnapshot(const char *phase, CNDHook *hook, id receiver)
         CNDLogCalendarProvider(receiver);
     }
     id icon = CNDReceiverIcon(receiver);
+    long long imageGeneration = 0;
+    bool hasImageGeneration = CNDGetScalar(
+        icon, "imageGeneration", &imageGeneration);
+    id imageProvider = CNDSafeObjectGetter(icon, "imageProvider");
     id displayed = CNDSafeObjectGetter(receiver, "displayedImage");
     id background = CNDSafeObjectGetter(receiver, "clockBackgroundImage");
     if (!background) background = CNDObjectIvar(receiver, "_clockBackgroundImage");
@@ -718,6 +779,7 @@ static void CNDSnapshot(const char *phase, CNDHook *hook, id receiver)
     CGRect bounds = view ? view.bounds : CGRectZero;
     CNDLog("[CND_DYNAMIC] EVENT seq=%llu us=%llu main=%d phase=%s "
            "class=%s receiver=%p selector=%s icon=%p/%s id=%s "
+           "image-generation=%d/%lld image-provider=%p/%s "
            "window=%p superview=%p bounds=%.1f,%.1f,%.1f,%.1f",
            (unsigned long long)sequence,
            (unsigned long long)CNDNowUS(), pthread_main_np() ? 1 : 0,
@@ -725,6 +787,8 @@ static void CNDSnapshot(const char *phase, CNDHook *hook, id receiver)
            receiver, hook->selectorName ?: "-", icon,
            icon ? class_getName([icon class]) : "-",
            CNDIconIdentifier(icon).UTF8String ?: "-",
+           hasImageGeneration ? 1 : 0, imageGeneration,
+           imageProvider, CNDClassName(imageProvider),
            view.window, view.superview,
            bounds.origin.x, bounds.origin.y,
            bounds.size.width, bounds.size.height);
@@ -735,14 +799,37 @@ static void CNDSnapshot(const char *phase, CNDHook *hook, id receiver)
     CNDLog("\n");
 }
 
+static void CNDLogIconManagerCacheBoundary(const char *phase, id manager)
+{
+    if (!manager || !CNDClassIsOrInherits(
+            object_getClass(manager), objc_getClass("SBHIconManager"))) {
+        return;
+    }
+    id primary = CNDSafeObjectGetter(manager, "iconImageCache");
+    id folder = CNDSafeObjectGetter(manager, "folderIconImageCache");
+    CNDLog("[CND_DYNAMIC] CACHE_BOUNDARY us=%llu phase=%s "
+           "manager=%p/%s icon-cache=%p/%s folder-cache=%p/%s\n",
+           (unsigned long long)CNDNowUS(), phase ?: "-", manager,
+           CNDClassName(manager), primary, CNDClassName(primary),
+           folder, CNDClassName(folder));
+}
+
 static void CNDTraceVoid0(id self, SEL selector)
 {
     CNDHook *hook = CNDLookupHook(self, selector);
     if (!hook || !hook->original) return;
     bool outer = gCNDHookDepth++ == 0U;
+    bool cacheReset = !strcmp(hook->selectorName,
+                              "resetAllIconImageCaches");
+    if (outer && cacheReset) {
+        CNDLogIconManagerCacheBoundary("reset-enter", self);
+    }
     if (outer) CNDSnapshot("enter", hook, self);
     ((void (*)(id, SEL))hook->original)(self, selector);
     if (outer) CNDSnapshot("return", hook, self);
+    if (outer && cacheReset) {
+        CNDLogIconManagerCacheBoundary("reset-return", self);
+    }
     gCNDHookDepth--;
 }
 
@@ -1477,6 +1564,10 @@ static void CNDStart(void)
                 "SBHClockBackgroundIconDataSource",
                 "SBHCalendarApplicationIcon",
                 "SBCalendarIconImageProvider",
+                "SBHIconManager",
+                "SBIconController",
+                "SBLibraryViewController",
+                "SBHIconLibraryTableViewController",
             };
             for (size_t index = 0;
                  index < sizeof(classes) / sizeof(classes[0]); index++) {
@@ -1513,6 +1604,27 @@ static void CNDStart(void)
                 installed += CNDInstallHook(
                     "ISImageCache", "setImage:forDescriptor:") ? 1U : 0U;
                 installed += CNDInstallCalendarInitializers();
+                static const struct {
+                    const char *className;
+                    const char *selectorName;
+                } cacheHooks[] = {
+                    {"SBHIconManager", "resetAllIconImageCaches"},
+                    {"SBHIconManager", "iconImageCache"},
+                    {"SBHIconManager", "folderIconImageCache"},
+                    {"SBHIconManager", "relayout"},
+                    {"SBIconController", "notificationIconImageCache"},
+                    {"SBIconController", "tableUIIconImageCache"},
+                    {"SBIconController", "appSwitcherHeaderIconImageCache"},
+                    {"SBLibraryViewController", "iconImageCache"},
+                    {"SBHIconLibraryTableViewController", "iconImageCache"},
+                };
+                for (size_t index = 0;
+                     index < sizeof(cacheHooks) / sizeof(cacheHooks[0]);
+                     index++) {
+                    installed += CNDInstallHook(
+                        cacheHooks[index].className,
+                        cacheHooks[index].selectorName) ? 1U : 0U;
+                }
             }
             CNDLog("[CND_DYNAMIC] TRACE_READY pid=%d classes=%zu hooks=%u "
                    "inventory-only=%d no-window-walk=1\n",

@@ -1,0 +1,991 @@
+{
+  "catalogPayloadManifest": "CatalogFileBacking.json",
+  "excludedKinds": [
+    "focusReduceInterruptions",
+    "focusCustom",
+    "hearing"
+  ],
+  "packageRoutes": [
+    {
+      "artworkColorContract": "native-white-template-preserve-authored-opacity",
+      "artworkGeometry": {
+        "kind": "display",
+        "nativeContentBounds": [
+          11.049999999999999,
+          11.049999999999997,
+          25.9,
+          25.900000000000006
+        ],
+        "nativeDocumentBounds": [
+          0,
+          0,
+          48,
+          48
+        ],
+        "nativeMainSHA256": "dfef3cddcf0ddfc23cb48266569774c918b447f1541498b7de70b44f4b810aa8",
+        "nativeStateMeasured": "mid",
+        "packagePath": "/System/Library/ControlCenter/Bundles/DisplayModule.bundle/Brightness.ca",
+        "sourceContentBounds": [
+          -3.4776612651596737,
+          -25.760000000000005,
+          30.59766126515968,
+          30.738835281802544
+        ],
+        "sourceImageSHA256": {},
+        "sourceMainSHA256": "4df4622d23ccd72cd03d7ece5cdec9626a41bf38dc10d66809fbe9bd93c6f19a",
+        "sourceStatesMeasured": [
+          "base"
+        ]
+      },
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {},
+      "kind": "display",
+      "packagePath": "/System/Library/ControlCenter/Bundles/DisplayModule.bundle/Brightness.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "4df4622d23ccd72cd03d7ece5cdec9626a41bf38dc10d66809fbe9bd93c6f19a",
+      "sourcePackage": "Brightness.ca",
+      "staticStateContract": "explicit-visible-Pulsar-artwork-at-every-native-level",
+      "stockIndexSHA256": "8cc45be3ee9539f0f30b017ef0c8b81f1b04d5e2e1577af7879bd0f5d71c28f8",
+      "stockMainLength": 9666,
+      "stockMainSHA256": "dfef3cddcf0ddfc23cb48266569774c918b447f1541498b7de70b44f4b810aa8",
+      "stockStates": [
+        "full",
+        "mid",
+        "min",
+        "max"
+      ]
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "dark1.png": {
+          "length": 20723,
+          "sha256": "9d9f2a0eb90c8999968b15599124a336b4981327573eec534eef90ca80f7613f"
+        },
+        "dark2.png": {
+          "length": 22487,
+          "sha256": "ec4705f289e0523d2f829830a10030e958a29c72632334564ac6d90eccfc91ab"
+        },
+        "light.png": {
+          "length": 17026,
+          "sha256": "188a5c6c2f247b8e1dbfff60c83140ef4cc5431da20e7541ea68ea8a473991da"
+        }
+      },
+      "kind": "appearance",
+      "packagePath": "/System/Library/ControlCenter/Bundles/DisplayModule.bundle/StyleMode.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "4e8f7edd55fed8269891b25968e2b3d65b4d89c39f8fd5bae42dfa98320e8cf2",
+      "sourcePackage": "Appearance.ca",
+      "stockIndexSHA256": "2192ed2be1312cbc31bf08b2012e569d3153b5fb25e7c09bde172199c654c026",
+      "stockMainLength": 15210,
+      "stockMainSHA256": "b6244ad053a907c0303b5ea2e061af4599f9fb8ffab7807833cac103290505a3",
+      "stockStates": [
+        "light",
+        "dark"
+      ]
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {},
+      "kind": "mediaPlayPause",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/PlayPauseStop.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "f405af60f16a073b6a692d37e10b95bb539de31b3dd5d188ff66b34cc5f274ba",
+      "sourcePackage": "PlayPauseStop.ca",
+      "stockIndexSHA256": "95747bd116f2b5eff92aa5d616eb8cd7b9f057d5480566a9e70169a0e9c42346",
+      "stockMainLength": 13526,
+      "stockMainSHA256": "5d019a59f6ea0b3a5526432277386a891d6d70ec307de5f723314934c9ea397c",
+      "stockStates": [
+        "play",
+        "pause",
+        "stop"
+      ]
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {},
+      "kind": "mediaNext",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/ForwardBackward.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "b2a80deab35fef1d4072b2b8e92edf70dbf406ddbed006d3f53617f08077f698",
+      "sourcePackage": "ForwardBackward.ca",
+      "stockIndexSHA256": "0431cce63bd0edc1cb1cf2fe3fc9d7374eaecab560359652dd1448aec6497134",
+      "stockMainLength": 27135,
+      "stockMainSHA256": "b076758385f5d9b290d765a4ae1b814aca0de9db8dc4ceb77bc9957e0ea1c88e",
+      "stockStates": [
+        "State 1",
+        "State 2",
+        "State 3",
+        "State 4"
+      ]
+    },
+    {
+      "artworkColorContract": "native-white-template-preserve-authored-opacity",
+      "artworkGeometry": {
+        "kind": "sound",
+        "nativeContentBounds": [
+          7.908431054480708,
+          11.40249929048295,
+          32.66205606195829,
+          24.79499994668863
+        ],
+        "nativeDocumentBounds": [
+          0,
+          0,
+          48,
+          48
+        ],
+        "nativeMainSHA256": "4834cc9b2fb8b3aff33f09d1f414ad9698ced2b2840c3e11144cd518c0982737",
+        "nativeStateMeasured": "full",
+        "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/Volume.ca",
+        "sourceContentBounds": [
+          -3.823063458353201,
+          -10.340000762939004,
+          27.390064221292203,
+          27.132000000000005
+        ],
+        "sourceImageSHA256": {},
+        "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+        "sourceStatesMeasured": [
+          "base"
+        ]
+      },
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {},
+      "kind": "sound",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/Volume.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourcePackage": "Volume.ca",
+      "staticStateContract": "explicit-visible-Pulsar-artwork-at-every-native-level",
+      "stockIndexSHA256": "536c0f497ddf1af8adfbbf62237e1db70e997a049f10072955df71966e55a5e5",
+      "stockMainLength": 22621,
+      "stockMainSHA256": "4834cc9b2fb8b3aff33f09d1f414ad9698ced2b2840c3e11144cd518c0982737",
+      "stockStates": [
+        "full",
+        "half",
+        "min",
+        "off",
+        "mute",
+        "max"
+      ]
+    },
+    {
+      "artworkColorContract": "native-white-template-preserve-authored-opacity",
+      "artworkGeometry": {
+        "kind": "sound",
+        "nativeContentBounds": [
+          7.329514409439003,
+          11.40249929048295,
+          32.66205606195829,
+          24.79499994668863
+        ],
+        "nativeDocumentBounds": [
+          0,
+          0,
+          48,
+          48
+        ],
+        "nativeMainSHA256": "73b775e492c86cd6abd535825088a9ea0c7d8515e185ba54bc9b2c426cffa070",
+        "nativeStateMeasured": "full",
+        "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeRTL.ca",
+        "sourceContentBounds": [
+          -3.823063458353201,
+          -10.340000762939004,
+          27.390064221292203,
+          27.132000000000005
+        ],
+        "sourceImageSHA256": {},
+        "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+        "sourceStatesMeasured": [
+          "base"
+        ]
+      },
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {},
+      "kind": "sound",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeRTL.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourcePackage": "Volume.ca",
+      "staticStateContract": "explicit-visible-Pulsar-artwork-at-every-native-level",
+      "stockIndexSHA256": "536c0f497ddf1af8adfbbf62237e1db70e997a049f10072955df71966e55a5e5",
+      "stockMainLength": 22587,
+      "stockMainSHA256": "73b775e492c86cd6abd535825088a9ea0c7d8515e185ba54bc9b2c426cffa070",
+      "stockStates": [
+        "full",
+        "half",
+        "min",
+        "off",
+        "mute",
+        "max"
+      ]
+    },
+    {
+      "artworkColorContract": "native-white-template-preserve-authored-opacity",
+      "artworkGeometry": {
+        "kind": "sound",
+        "nativeContentBounds": [
+          6.240879540000002,
+          11.269462453095876,
+          35.38818356,
+          25.05447728305573
+        ],
+        "nativeDocumentBounds": [
+          0,
+          0,
+          48,
+          48
+        ],
+        "nativeMainSHA256": "324ad2ea3cb399796b8b81cbf75eb1d474a0a938b96ff404bf0a09da705f0204",
+        "nativeStateMeasured": "full",
+        "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeSemibold.ca",
+        "sourceContentBounds": [
+          -3.823063458353201,
+          -10.340000762939004,
+          27.390064221292203,
+          27.132000000000005
+        ],
+        "sourceImageSHA256": {},
+        "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+        "sourceStatesMeasured": [
+          "base"
+        ]
+      },
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {},
+      "kind": "sound",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeSemibold.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourcePackage": "Volume.ca",
+      "staticStateContract": "explicit-visible-Pulsar-artwork-at-every-native-level",
+      "stockIndexSHA256": "a5af4f38a5340151cd8c8f0d54e569056e2d074390c7fb638c8e09e9d757b61c",
+      "stockMainLength": 18910,
+      "stockMainSHA256": "324ad2ea3cb399796b8b81cbf75eb1d474a0a938b96ff404bf0a09da705f0204",
+      "stockStates": [
+        "full",
+        "half",
+        "min",
+        "off",
+        "mute",
+        "max"
+      ]
+    },
+    {
+      "artworkColorContract": "native-white-template-preserve-authored-opacity",
+      "artworkGeometry": {
+        "kind": "sound",
+        "nativeContentBounds": [
+          6.3709369,
+          11.269462453095876,
+          35.38818356,
+          25.05447728305573
+        ],
+        "nativeDocumentBounds": [
+          0,
+          0,
+          48,
+          48
+        ],
+        "nativeMainSHA256": "2f8b3f1228df8b003609f2c3e8609bb219eeaa7e4d08514f9ff260266b34dc24",
+        "nativeStateMeasured": "full",
+        "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeSemiboldRTL.ca",
+        "sourceContentBounds": [
+          -3.823063458353201,
+          -10.340000762939004,
+          27.390064221292203,
+          27.132000000000005
+        ],
+        "sourceImageSHA256": {},
+        "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+        "sourceStatesMeasured": [
+          "base"
+        ]
+      },
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {},
+      "kind": "sound",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeSemiboldRTL.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourcePackage": "Volume.ca",
+      "staticStateContract": "explicit-visible-Pulsar-artwork-at-every-native-level",
+      "stockIndexSHA256": "a5af4f38a5340151cd8c8f0d54e569056e2d074390c7fb638c8e09e9d757b61c",
+      "stockMainLength": 19261,
+      "stockMainSHA256": "2f8b3f1228df8b003609f2c3e8609bb219eeaa7e4d08514f9ff260266b34dc24",
+      "stockStates": [
+        "full",
+        "half",
+        "min",
+        "off",
+        "mute",
+        "max"
+      ]
+    },
+    {
+      "artworkColorContract": "native-white-template-preserve-authored-opacity",
+      "artworkGeometry": {
+        "kind": "sound",
+        "nativeContentBounds": [
+          7.788115371846494,
+          13.622820232703653,
+          32.945260631746464,
+          20.74524495089199
+        ],
+        "nativeDocumentBounds": [
+          0,
+          0,
+          48,
+          48
+        ],
+        "nativeMainSHA256": "eb0dabbecac098e3ad3c403fc46bdc71daf92628a873aa2ab953ba966f39247b",
+        "nativeStateMeasured": "full",
+        "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeBold.ca",
+        "sourceContentBounds": [
+          -3.823063458353201,
+          -10.340000762939004,
+          27.390064221292203,
+          27.132000000000005
+        ],
+        "sourceImageSHA256": {},
+        "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+        "sourceStatesMeasured": [
+          "base"
+        ]
+      },
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {},
+      "kind": "sound",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeBold.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourcePackage": "Volume.ca",
+      "staticStateContract": "explicit-visible-Pulsar-artwork-at-every-native-level",
+      "stockIndexSHA256": "8cc45be3ee9539f0f30b017ef0c8b81f1b04d5e2e1577af7879bd0f5d71c28f8",
+      "stockMainLength": 41419,
+      "stockMainSHA256": "eb0dabbecac098e3ad3c403fc46bdc71daf92628a873aa2ab953ba966f39247b",
+      "stockStates": [
+        "full",
+        "half",
+        "min",
+        "off",
+        "mute",
+        "max"
+      ]
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "mirror_off1.png": {
+          "length": 12842,
+          "sha256": "c5899da4938f0fde19f328500d80de229898c1dc708e5031a30eaa2fe81e9dfc"
+        },
+        "mirror_off2.png": {
+          "length": 11585,
+          "sha256": "0d3e7e2aa6792ef5b22aff522a97c4d4bf8f0d7154f19d7dea2d99b4ea5aab3a"
+        },
+        "mirror_on.png": {
+          "length": 14744,
+          "sha256": "bd07c3c7a33c67bb22ffac75abdc576171722742e66b3fb6c5db640a8987c1ad"
+        }
+      },
+      "kind": "screenMirroring",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/Mirroring.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "d594e385605964889e66e08795788d515aade535cf041d05043d56cf190203a0",
+      "sourcePackage": "ScreenMirroring.ca",
+      "stockIndexSHA256": "4e0890ea754d7919b5282eb44bab43a9c5ed591254700b9ddd508a3c96c58ce0",
+      "stockMainLength": 14585,
+      "stockMainSHA256": "e66c350a5b46cd921bc31f1d2f696f43e6fb83856ddab03865397d493fbb1854",
+      "stockStates": [
+        "off",
+        "on"
+      ]
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "mirror_off1.png": {
+          "length": 12842,
+          "sha256": "c5899da4938f0fde19f328500d80de229898c1dc708e5031a30eaa2fe81e9dfc"
+        },
+        "mirror_off2.png": {
+          "length": 11585,
+          "sha256": "0d3e7e2aa6792ef5b22aff522a97c4d4bf8f0d7154f19d7dea2d99b4ea5aab3a"
+        },
+        "mirror_on.png": {
+          "length": 14744,
+          "sha256": "bd07c3c7a33c67bb22ffac75abdc576171722742e66b3fb6c5db640a8987c1ad"
+        }
+      },
+      "kind": "screenMirroring",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/Mirroring_IC.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "d594e385605964889e66e08795788d515aade535cf041d05043d56cf190203a0",
+      "sourcePackage": "ScreenMirroring.ca",
+      "stockIndexSHA256": "b11163c80bcd6a319cc2ec6bcaf2d224ea2cba79ba3ed1d9bc9bcb083d827eff",
+      "stockMainLength": 15313,
+      "stockMainSHA256": "61b2e32be5009f62c722ac411d91f91714b5fe5401c93de03953abe2989abf40",
+      "stockStates": [
+        "off",
+        "on"
+      ]
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "mirror_off1.png": {
+          "length": 12842,
+          "sha256": "c5899da4938f0fde19f328500d80de229898c1dc708e5031a30eaa2fe81e9dfc"
+        },
+        "mirror_off2.png": {
+          "length": 11585,
+          "sha256": "0d3e7e2aa6792ef5b22aff522a97c4d4bf8f0d7154f19d7dea2d99b4ea5aab3a"
+        },
+        "mirror_on.png": {
+          "length": 14744,
+          "sha256": "bd07c3c7a33c67bb22ffac75abdc576171722742e66b3fb6c5db640a8987c1ad"
+        }
+      },
+      "kind": "screenMirroring",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/MirroringLeading.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "d594e385605964889e66e08795788d515aade535cf041d05043d56cf190203a0",
+      "sourcePackage": "ScreenMirroring.ca",
+      "stockIndexSHA256": "541b0bf72847134434fc9ade65cd3cd84856082b22c581463b2ba318a1b55034",
+      "stockMainLength": 5713,
+      "stockMainSHA256": "98881cd899a91b20efedd110fb62122ada18ceb1c1c86815202581fd4f22f055",
+      "stockStates": [
+        "breathe",
+        "zoom"
+      ]
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "selected.png": {
+          "length": 3286,
+          "sha256": "813068849fc996694a00e04c536eeda305412304cebda188d56c2fd087db9b00"
+        },
+        "standard.png": {
+          "length": 3286,
+          "sha256": "813068849fc996694a00e04c536eeda305412304cebda188d56c2fd087db9b00"
+        }
+      },
+      "kind": "timer",
+      "packagePath": "/System/Library/ControlCenter/Bundles/TimerModule.bundle/Timer.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "996bf9d04bad1e6b671bf8f5e7d87bac8f8c7056d1f2c48035f9ac74752d21bc",
+      "sourcePackage": "StaticTimer.ca",
+      "stockIndexSHA256": "630e1ddef95be077842a389d18b0622998253cca1c7a6a95a794bdf6880ed39b",
+      "stockMainLength": 13201,
+      "stockMainSHA256": "951f56f95c4787c3834cae4990447db5f7a91e68a5f7caecd0580c017594fd9d",
+      "stockStates": [
+        "timing"
+      ]
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "selected.png": {
+          "length": 3286,
+          "sha256": "813068849fc996694a00e04c536eeda305412304cebda188d56c2fd087db9b00"
+        },
+        "standard.png": {
+          "length": 3286,
+          "sha256": "813068849fc996694a00e04c536eeda305412304cebda188d56c2fd087db9b00"
+        }
+      },
+      "kind": "timer",
+      "packagePath": "/System/Library/ControlCenter/Bundles/TimerModule.bundle/Timer_IC.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "996bf9d04bad1e6b671bf8f5e7d87bac8f8c7056d1f2c48035f9ac74752d21bc",
+      "sourcePackage": "StaticTimer.ca",
+      "stockIndexSHA256": "630e1ddef95be077842a389d18b0622998253cca1c7a6a95a794bdf6880ed39b",
+      "stockMainLength": 13212,
+      "stockMainSHA256": "a030edd5f9d05190cd285de1a20272d2d3f195611083173d9920085ad23b5f11",
+      "stockStates": [
+        "timing"
+      ]
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "pin_off.png": {
+          "length": 14906,
+          "sha256": "27bca725217b032c7fd7b4b6872b18b65f7c3e5050d625b518b34668f9a5ec78"
+        },
+        "pin_on1.png": {
+          "length": 21433,
+          "sha256": "644aff318381a97820d0a391578bf2099e31cbc238e5fb48efa408e1f2bc53b2"
+        },
+        "pin_on2.png": {
+          "length": 22448,
+          "sha256": "b0587a158898f2b0b2183e17034436f68c2a98e253f59eed84e4802775c7d833"
+        }
+      },
+      "kind": "lowPower",
+      "packagePath": "/System/Library/ControlCenter/Bundles/LowPowerModule.bundle/LowPower.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "e3ea4d7ec0c535be2f4da1c41507a2b5597a54dd1a0d46ba7ad275360f8b22f1",
+      "sourcePackage": "LowPower.ca"
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "pin_off.png": {
+          "length": 14906,
+          "sha256": "27bca725217b032c7fd7b4b6872b18b65f7c3e5050d625b518b34668f9a5ec78"
+        },
+        "pin_on1.png": {
+          "length": 21433,
+          "sha256": "644aff318381a97820d0a391578bf2099e31cbc238e5fb48efa408e1f2bc53b2"
+        },
+        "pin_on2.png": {
+          "length": 22448,
+          "sha256": "b0587a158898f2b0b2183e17034436f68c2a98e253f59eed84e4802775c7d833"
+        }
+      },
+      "kind": "lowPower",
+      "packagePath": "/System/Library/ControlCenter/Bundles/LowPowerModule.bundle/LowPower_IC.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "e3ea4d7ec0c535be2f4da1c41507a2b5597a54dd1a0d46ba7ad275360f8b22f1",
+      "sourcePackage": "LowPower.ca"
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "ringer_off.png": {
+          "length": 15914,
+          "sha256": "aaf3fc40db9b69ca261b09236b381335679a31f505e3f838fb957f7cd2b5f531"
+        },
+        "ringer_on1.png": {
+          "length": 24722,
+          "sha256": "4ea100092736e82d2ad4841a04673d3c9591235ffd78599bb95652b04c71a798"
+        },
+        "ringer_on2.png": {
+          "length": 22282,
+          "sha256": "b74c65b0ff07fa98d9ec05515963b71139287fcf2ac0d8ba1811ecc323285002"
+        }
+      },
+      "kind": "mute",
+      "packagePath": "/System/Library/ControlCenter/Bundles/MuteModule.bundle/Mute.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "7e2c526149de178246bb982b461f4dd8c2d35cccc623fac30a662986d806689c",
+      "sourcePackage": "Mute.ca"
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "ringer_off.png": {
+          "length": 15914,
+          "sha256": "aaf3fc40db9b69ca261b09236b381335679a31f505e3f838fb957f7cd2b5f531"
+        },
+        "ringer_on1.png": {
+          "length": 24722,
+          "sha256": "4ea100092736e82d2ad4841a04673d3c9591235ffd78599bb95652b04c71a798"
+        },
+        "ringer_on2.png": {
+          "length": 22282,
+          "sha256": "b74c65b0ff07fa98d9ec05515963b71139287fcf2ac0d8ba1811ecc323285002"
+        }
+      },
+      "kind": "mute",
+      "packagePath": "/System/Library/ControlCenter/Bundles/MuteModule.bundle/Mute_IC.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "7e2c526149de178246bb982b461f4dd8c2d35cccc623fac30a662986d806689c",
+      "sourcePackage": "Mute.ca"
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "rotation_off.png": {
+          "length": 10673,
+          "sha256": "d3b2ce2dc5d5ab7c200c3acc98a9d25d35823ba6770c8ea23ae496d5e8a7a9ad"
+        },
+        "rotation_on1.png": {
+          "length": 13256,
+          "sha256": "e0c3632beb51f56060ec288db797032725106b71b5377920f6102703657d41c7"
+        },
+        "rotation_on2.png": {
+          "length": 15062,
+          "sha256": "47098940d7674025517a4735105c02b8b977683425890b31a143a735ab06b29d"
+        }
+      },
+      "kind": "orientationLock",
+      "packagePath": "/System/Library/ControlCenter/Bundles/OrientationLockModule.bundle/OrientationLock.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "cf5449742716db9700d2ce92c490378b3f8352abb85d1f1f4e86b7819b2cee5b",
+      "sourcePackage": "OrientationLock.ca"
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "rotation_off.png": {
+          "length": 10673,
+          "sha256": "d3b2ce2dc5d5ab7c200c3acc98a9d25d35823ba6770c8ea23ae496d5e8a7a9ad"
+        },
+        "rotation_on1.png": {
+          "length": 13256,
+          "sha256": "e0c3632beb51f56060ec288db797032725106b71b5377920f6102703657d41c7"
+        },
+        "rotation_on2.png": {
+          "length": 15062,
+          "sha256": "47098940d7674025517a4735105c02b8b977683425890b31a143a735ab06b29d"
+        }
+      },
+      "kind": "orientationLock",
+      "packagePath": "/System/Library/ControlCenter/Bundles/OrientationLockModule.bundle/OrientationLock_IC.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "cf5449742716db9700d2ce92c490378b3f8352abb85d1f1f4e86b7819b2cee5b",
+      "sourcePackage": "OrientationLock.ca"
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "1.png": {
+          "length": 14591,
+          "sha256": "0be8a36c61dbaf5bbe30cd45e42c790facffa8f4bfa77b1693a3ffc54646a051"
+        },
+        "2.png": {
+          "length": 15824,
+          "sha256": "33d9aa36b485da0ce47152ed4a2d4b31681827a65648883998f63240aa79327b"
+        },
+        "3.png": {
+          "length": 16841,
+          "sha256": "466010d8813ac370fa600f1f201ef002959808830b45542f94309aa5e30c248b"
+        },
+        "record_off.png": {
+          "length": 16925,
+          "sha256": "bc59d85706c763bca858e76de6657df132151c4ff7d2760078c943b5e7bc12dd"
+        },
+        "record_on.png": {
+          "length": 16411,
+          "sha256": "5f2c143b0507b544ef8d146f53f3b958b7181ba61c9d8793d92587e2d74fb6c9"
+        }
+      },
+      "kind": "screenRecording",
+      "packagePath": "/System/Library/ControlCenter/Bundles/ReplayKitModule.bundle/replaykit.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "e32bd91b65d4969b32b4d813562b44b1cd7d3dd4ed3a25d50c354f06fb5e0c47",
+      "sourcePackage": "ScreenRecording.ca"
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "1.png": {
+          "length": 14591,
+          "sha256": "0be8a36c61dbaf5bbe30cd45e42c790facffa8f4bfa77b1693a3ffc54646a051"
+        },
+        "2.png": {
+          "length": 15824,
+          "sha256": "33d9aa36b485da0ce47152ed4a2d4b31681827a65648883998f63240aa79327b"
+        },
+        "3.png": {
+          "length": 16841,
+          "sha256": "466010d8813ac370fa600f1f201ef002959808830b45542f94309aa5e30c248b"
+        },
+        "record_off.png": {
+          "length": 16925,
+          "sha256": "bc59d85706c763bca858e76de6657df132151c4ff7d2760078c943b5e7bc12dd"
+        },
+        "record_on.png": {
+          "length": 16411,
+          "sha256": "5f2c143b0507b544ef8d146f53f3b958b7181ba61c9d8793d92587e2d74fb6c9"
+        }
+      },
+      "kind": "screenRecording",
+      "packagePath": "/System/Library/ControlCenter/Bundles/ReplayKitModule.bundle/replaykit_IC.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "e32bd91b65d4969b32b4d813562b44b1cd7d3dd4ed3a25d50c354f06fb5e0c47",
+      "sourcePackage": "ScreenRecording.ca"
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "1.png": {
+          "length": 14591,
+          "sha256": "0be8a36c61dbaf5bbe30cd45e42c790facffa8f4bfa77b1693a3ffc54646a051"
+        },
+        "2.png": {
+          "length": 15824,
+          "sha256": "33d9aa36b485da0ce47152ed4a2d4b31681827a65648883998f63240aa79327b"
+        },
+        "3.png": {
+          "length": 16841,
+          "sha256": "466010d8813ac370fa600f1f201ef002959808830b45542f94309aa5e30c248b"
+        },
+        "record_off.png": {
+          "length": 16925,
+          "sha256": "bc59d85706c763bca858e76de6657df132151c4ff7d2760078c943b5e7bc12dd"
+        },
+        "record_on.png": {
+          "length": 16411,
+          "sha256": "5f2c143b0507b544ef8d146f53f3b958b7181ba61c9d8793d92587e2d74fb6c9"
+        }
+      },
+      "kind": "screenRecording",
+      "packagePath": "/System/Library/ControlCenter/Bundles/ReplayKitModule.bundle/replaykit-v2.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "e32bd91b65d4969b32b4d813562b44b1cd7d3dd4ed3a25d50c354f06fb5e0c47",
+      "sourcePackage": "ScreenRecording.ca"
+    },
+    {
+      "baseline": "device-package-preflight-required",
+      "images": {
+        "1.png": {
+          "length": 14591,
+          "sha256": "0be8a36c61dbaf5bbe30cd45e42c790facffa8f4bfa77b1693a3ffc54646a051"
+        },
+        "2.png": {
+          "length": 15824,
+          "sha256": "33d9aa36b485da0ce47152ed4a2d4b31681827a65648883998f63240aa79327b"
+        },
+        "3.png": {
+          "length": 16841,
+          "sha256": "466010d8813ac370fa600f1f201ef002959808830b45542f94309aa5e30c248b"
+        },
+        "record_off.png": {
+          "length": 16925,
+          "sha256": "bc59d85706c763bca858e76de6657df132151c4ff7d2760078c943b5e7bc12dd"
+        },
+        "record_on.png": {
+          "length": 16411,
+          "sha256": "5f2c143b0507b544ef8d146f53f3b958b7181ba61c9d8793d92587e2d74fb6c9"
+        }
+      },
+      "kind": "screenRecording",
+      "packagePath": "/System/Library/ControlCenter/Bundles/ReplayKitModule.bundle/replaykit-v2_IC.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "e32bd91b65d4969b32b4d813562b44b1cd7d3dd4ed3a25d50c354f06fb5e0c47",
+      "sourcePackage": "ScreenRecording.ca"
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "focus_off.png": {
+          "length": 11376,
+          "sha256": "8a409e2c513db31d1ab5748e1c1fa25429ce4d2b5f2a58686e626f7978d6e7ad"
+        },
+        "focus_on.png": {
+          "length": 15946,
+          "sha256": "7f605199c84fde48e435c529574dc434b0b29dd887b0a2146a0c9b60b907a40f"
+        }
+      },
+      "kind": "focus",
+      "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/dnd_cg_02.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "271acd06e98427ab4db8e17baf0cae35a8b8a72d715ae2252b69670a6130cc1a",
+      "sourcePackage": "Focus.ca",
+      "stockIndexSHA256": "34ed92ad0ef71afe5166a902f6d1333f9c02f15658615940fc804be57d6fc684",
+      "stockMainLength": 6618,
+      "stockMainSHA256": "27882c949d41194711418a747d514335dcb6ae4693584deb1dcff5797fa18032",
+      "stockStates": [
+        "OFF",
+        "ON"
+      ]
+    },
+    {
+      "artworkGeometry": {
+        "kind": "focusSleep",
+        "nativeContentBounds": [
+          11.37949224,
+          15.59794926,
+          25.24101552,
+          19.199999999999996
+        ],
+        "nativeDocumentBounds": [
+          0,
+          0,
+          48,
+          48
+        ],
+        "nativeMainSHA256": "39216f2ea5b472603be57c37bf98b709a49fd7dff3894a35a2d4995486c9623b",
+        "nativeStateMeasured": "OFF",
+        "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/sleep_cg_02.ca",
+        "sourceContentBounds": [
+          -36.90909090909091,
+          -34.54545454545455,
+          36.18181818181818,
+          29.090909090909093
+        ],
+        "sourceImageSHA256": {
+          "selected.png": "da33efb19fce11708b8ffa48646a07aa991846a3e457e0e716f931e423b322f7",
+          "standard.png": "f6aae19e40abe6363fe2cc6cf1eb7853939974ab70bb9ab12b3d9ce718e9130b"
+        },
+        "sourceMainSHA256": "304eebb992e1cf5e266e2bd3997881fb0b9e0fc5cc08e1eb0db101af8d8c08fd",
+        "sourceStatesMeasured": [
+          "OFF",
+          "ON"
+        ]
+      },
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "selected.png": {
+          "length": 12936,
+          "sha256": "da33efb19fce11708b8ffa48646a07aa991846a3e457e0e716f931e423b322f7"
+        },
+        "standard.png": {
+          "length": 3276,
+          "sha256": "f6aae19e40abe6363fe2cc6cf1eb7853939974ab70bb9ab12b3d9ce718e9130b"
+        }
+      },
+      "kind": "focusSleep",
+      "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/sleep_cg_02.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "304eebb992e1cf5e266e2bd3997881fb0b9e0fc5cc08e1eb0db101af8d8c08fd",
+      "sourcePackage": "StaticFocusSleep.ca",
+      "stockIndexSHA256": "f0a44486f416aba0f53af5c80ec418c51de0f1e2c2e06863fd0e04499c5df248",
+      "stockMainLength": 16045,
+      "stockMainSHA256": "39216f2ea5b472603be57c37bf98b709a49fd7dff3894a35a2d4995486c9623b",
+      "stockStates": [
+        "OFF",
+        "ON"
+      ]
+    },
+    {
+      "artworkGeometry": {
+        "kind": "focusPersonal",
+        "nativeContentBounds": [
+          15.757573267999998,
+          15.708596675999999,
+          16.484853464,
+          17.545989231999997
+        ],
+        "nativeDocumentBounds": [
+          0,
+          0,
+          48,
+          48
+        ],
+        "nativeMainSHA256": "5e92005b0126d2342c01c4675ffec7f1547f680d04c159d7f06f9c21d4ec6692",
+        "nativeStateMeasured": "OFF",
+        "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/personal_cg_02.ca",
+        "sourceContentBounds": [
+          -33.63636363636364,
+          -36.90909090909091,
+          28.909090909090914,
+          36.18181818181818
+        ],
+        "sourceImageSHA256": {
+          "selected.png": "f1d2ef5d88c9967721d3a111c21e76e99cf3c0a531fbb37d5f50ab1152937cc7",
+          "standard.png": "a96436e50d4e2e08f8effeb6ec0a8694b9d5abba873efcb4da02fc714a9b63c9"
+        },
+        "sourceMainSHA256": "304eebb992e1cf5e266e2bd3997881fb0b9e0fc5cc08e1eb0db101af8d8c08fd",
+        "sourceStatesMeasured": [
+          "OFF",
+          "ON"
+        ]
+      },
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "selected.png": {
+          "length": 24218,
+          "sha256": "f1d2ef5d88c9967721d3a111c21e76e99cf3c0a531fbb37d5f50ab1152937cc7"
+        },
+        "standard.png": {
+          "length": 5400,
+          "sha256": "a96436e50d4e2e08f8effeb6ec0a8694b9d5abba873efcb4da02fc714a9b63c9"
+        }
+      },
+      "kind": "focusPersonal",
+      "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/personal_cg_02.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "304eebb992e1cf5e266e2bd3997881fb0b9e0fc5cc08e1eb0db101af8d8c08fd",
+      "sourcePackage": "StaticFocusPersonal.ca",
+      "stockIndexSHA256": "34ed92ad0ef71afe5166a902f6d1333f9c02f15658615940fc804be57d6fc684",
+      "stockMainLength": 6795,
+      "stockMainSHA256": "5e92005b0126d2342c01c4675ffec7f1547f680d04c159d7f06f9c21d4ec6692",
+      "stockStates": [
+        "OFF",
+        "ON"
+      ]
+    },
+    {
+      "artworkGeometry": {
+        "kind": "focusWork",
+        "nativeContentBounds": [
+          16.0326,
+          12.993500000000418,
+          15.934800000000001,
+          21.987000000000002
+        ],
+        "nativeDocumentBounds": [
+          0,
+          0,
+          48,
+          48
+        ],
+        "nativeMainSHA256": "3c2816bbe38f4e0c5f9d455903e34582f5ea4dff7dcc1945c9bcb012d826e1d4",
+        "nativeStateMeasured": "OFF",
+        "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/work_cg_02.ca",
+        "sourceContentBounds": [
+          -36.72727272727273,
+          -35.09090909090909,
+          36.0,
+          33.45454545454545
+        ],
+        "sourceImageSHA256": {
+          "selected.png": "9f5384a6a5740a4c1c97306164a1c4044d93bacfd618114ff8c9e740159073df",
+          "standard.png": "1ff426b54876c7ec7ad0d9ead3e7d0daf74579002a13e54293ce3a11ec0446af"
+        },
+        "sourceMainSHA256": "304eebb992e1cf5e266e2bd3997881fb0b9e0fc5cc08e1eb0db101af8d8c08fd",
+        "sourceStatesMeasured": [
+          "OFF",
+          "ON"
+        ]
+      },
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "selected.png": {
+          "length": 3219,
+          "sha256": "9f5384a6a5740a4c1c97306164a1c4044d93bacfd618114ff8c9e740159073df"
+        },
+        "standard.png": {
+          "length": 2598,
+          "sha256": "1ff426b54876c7ec7ad0d9ead3e7d0daf74579002a13e54293ce3a11ec0446af"
+        }
+      },
+      "kind": "focusWork",
+      "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/work_cg_02.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "304eebb992e1cf5e266e2bd3997881fb0b9e0fc5cc08e1eb0db101af8d8c08fd",
+      "sourcePackage": "StaticFocusWork.ca",
+      "stockIndexSHA256": "f0a44486f416aba0f53af5c80ec418c51de0f1e2c2e06863fd0e04499c5df248",
+      "stockMainLength": 5688,
+      "stockMainSHA256": "3c2816bbe38f4e0c5f9d455903e34582f5ea4dff7dcc1945c9bcb012d826e1d4",
+      "stockStates": [
+        "OFF",
+        "ON"
+      ]
+    },
+    {
+      "baseline": "IPSW-23A341-iPhone17,2",
+      "images": {
+        "shazam_off.png": {
+          "length": 16373,
+          "sha256": "1119b65823b8b2e2f1c5dff087da76d04320e9774f05916d0e9105c74fe3f3f3"
+        },
+        "shazam_on.png": {
+          "length": 20002,
+          "sha256": "91cc5d3043d7491324b4f50f12ab84bc716e986a0a22ebf1a16bcb83b8e2510d"
+        }
+      },
+      "kind": "musicRecognition",
+      "packagePath": "/System/Library/ControlCenter/Bundles/ShazamModule.bundle/Shazam.ca",
+      "sourceIndexSHA256": "d6c54e704e5c887b3111f32b45db9de076b6fd4c5f76b7d8f043379aa41a3408",
+      "sourceMainSHA256": "9edb7a2cb1a5791f35d2637e34b688db38fef6f96bf7bfaecf3a3fec6df790dc",
+      "sourcePackage": "MusicRecognition.ca",
+      "stockIndexSHA256": "3ed84e496a0ee6ef08d84baa79b4eed009b26fe4e917decc148af2a0cec68d40",
+      "stockMainLength": 17381,
+      "stockMainSHA256": "f32862191b9b20ef680121664fde6bf489fb74a115323e2742a05ba56aaff825",
+      "stockStates": [
+        "Off",
+        "On"
+      ]
+    }
+  ],
+  "productBuildVersion": "23A341",
+  "schemaVersion": 1
+}

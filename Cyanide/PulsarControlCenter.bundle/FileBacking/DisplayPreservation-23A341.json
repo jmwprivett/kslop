@@ -1,0 +1,203 @@
+{
+  "allStockRenditionTypesScalesAndGeometryVerified": true,
+  "artworkLayout": "source-canvas-aspect-fit-centered-in-native-PDF-canvas",
+  "artworkMaskAlphaLevels": 1,
+  "artworkMaskMaximumDimension": 80,
+  "assetutilValidated": true,
+  "nativePointSizes": {
+    "NightShift": [
+      30,
+      40
+    ],
+    "TrueTone": [
+      30,
+      40
+    ]
+  },
+  "packedAtlasTypesScalesAndGeometryVerified": true,
+  "payloadLength": 32296,
+  "payloadRenditionContract": [
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "NightShift",
+      "NameIdentifier": 56531,
+      "PixelHeight": 120,
+      "PixelWidth": 90,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "NightShift",
+      "NameIdentifier": 56531,
+      "PixelHeight": 40,
+      "PixelWidth": 30,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "TrueTone",
+      "NameIdentifier": 643,
+      "PixelHeight": 120,
+      "PixelWidth": 90,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "TrueTone",
+      "NameIdentifier": 643,
+      "PixelHeight": 40,
+      "PixelWidth": 30,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "PackedImage",
+      "Idiom": "universal",
+      "Name": "ZZZZPackedAsset-1.0.1-gamut0",
+      "PixelHeight": 44,
+      "PixelWidth": 66,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "PackedImage",
+      "Idiom": "universal",
+      "Name": "ZZZZPackedAsset-3.0.1-gamut0",
+      "PixelHeight": 124,
+      "PixelWidth": 186,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "NightShift",
+      "NameIdentifier": 56531,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 30
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "TrueTone",
+      "NameIdentifier": 643,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 30
+    }
+  ],
+  "payloadSHA256": "cee075d4fa8a08b5e5f053f10c93c14beb0879a260de043bb375eb76d3cf42b5",
+  "productBuildVersion": "23A341",
+  "schemaVersion": 1,
+  "sourceArtworkSHA256": {
+    "NightShift": "82586a2153906092d1c09b71308540404e2edbc19a4dd670530ada8b2a419108",
+    "TrueTone": "dadeb78bcb10003a4c1bbbd8079769cc354bcdd376814c27507217cdaffa760f"
+  },
+  "stockCoreUISubtype": 2688,
+  "stockLength": 32296,
+  "stockRenditionContract": [
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "NightShift",
+      "NameIdentifier": 56531,
+      "PixelHeight": 120,
+      "PixelWidth": 90,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "NightShift",
+      "NameIdentifier": 56531,
+      "PixelHeight": 40,
+      "PixelWidth": 30,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "TrueTone",
+      "NameIdentifier": 643,
+      "PixelHeight": 120,
+      "PixelWidth": 90,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "TrueTone",
+      "NameIdentifier": 643,
+      "PixelHeight": 40,
+      "PixelWidth": 30,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "PackedImage",
+      "Idiom": "universal",
+      "Name": "ZZZZPackedAsset-1.0.1-gamut0",
+      "PixelHeight": 44,
+      "PixelWidth": 66,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "PackedImage",
+      "Idiom": "universal",
+      "Name": "ZZZZPackedAsset-3.0.1-gamut0",
+      "PixelHeight": 124,
+      "PixelWidth": 186,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "NightShift",
+      "NameIdentifier": 56531,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 30
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "TrueTone",
+      "NameIdentifier": 643,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 30
+    }
+  ],
+  "stockSHA256": "f3572be5c4a84fb0703eccfd206d7e91e1fa5278183a8770ffaacb7510d0ad93",
+  "themedRenditionNames": [
+    "NightShift",
+    "TrueTone"
+  ],
+  "unrelatedNamedRenditions": [],
+  "unrelatedNamedRenditionsPreserved": true
+}

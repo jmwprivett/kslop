@@ -11,6 +11,10 @@
 NS_ASSUME_NONNULL_BEGIN
 
 @interface InstallProgressViewController : UIViewController
+/// Queue review sets this before presentation so only PackageQueue's terminal
+/// result can finish the activity UI. Direct Settings actions retain their
+/// existing generic completion channel.
+@property (nonatomic, assign) BOOL expectsPackageQueueCompletion;
 @property (nonatomic, assign) BOOL promptsForHideHomeBarRespring;
 @property (nonatomic, assign) BOOL promptsForSystemEditRespring;
 @property (nonatomic, copy, nullable) NSString *systemEditRespringTitle;

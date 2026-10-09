@@ -831,8 +831,8 @@ static void settings_sbl_log_remix_progress(NSString *phase,
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         currentItemPhases = [NSSet setWithArray:@[
-            @"preflighting", @"processing", @"applying", @"publishing",
-            @"restoring",
+            @"preflighting", @"rendering", @"processing", @"applying",
+            @"publishing", @"restoring",
         ]];
     });
     NSUInteger displayed = completed;

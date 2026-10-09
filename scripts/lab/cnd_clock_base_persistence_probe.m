@@ -205,7 +205,9 @@ static id CNDClockBaseOuterRequest(id icon, id descriptor)
     if (!icon || !descriptor) return nil;
     SEL prepare = sel_registerName("prepareImageForDescriptor:");
     if ([icon respondsToSelector:prepare]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(icon, prepare, descriptor);
+        id prepared = ((id (*)(id, SEL, id))objc_msgSend)(
+            icon, prepare, descriptor);
+        if (prepared) return prepared;
     }
     SEL imageSelector = sel_registerName("imageForDescriptor:");
     if (![icon respondsToSelector:imageSelector]) return nil;

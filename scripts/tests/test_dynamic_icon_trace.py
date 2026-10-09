@@ -71,6 +71,9 @@ class DynamicIconTraceTests(unittest.TestCase):
         self.assertIn('"initWithDate:calendar:format:"', self.source)
         self.assertIn("CALENDAR_INIT object=", self.source)
         self.assertIn("CALENDAR_PROVIDER root=%llu provider=", self.source)
+        self.assertIn('@"com.apple.mobilecal"', self.source)
+        self.assertIn('return "calendar-bundle";', self.source)
+        self.assertIn('"bundle=%s type=%s "', self.source)
 
     def test_source_trace_records_descriptor_and_cache_store_returns(self) -> None:
         for selector in (
@@ -103,6 +106,28 @@ class DynamicIconTraceTests(unittest.TestCase):
             self.source,
         )
         self.assertIn("CNDLogPixelMetadata(image", self.source)
+        self.assertIn("CNDCanonicalRGBA", self.source)
+        self.assertIn("data-sha256=%s pixel-sha256=%s", self.source)
+
+    def test_calendar_order_trace_captures_generation_and_cache_boundaries(self) -> None:
+        self.assertIn('"imageGeneration"', self.source)
+        self.assertIn("image-generation=%d/%lld", self.source)
+        self.assertIn("image-provider=%p/%s", self.source)
+        for class_name, selector in (
+            ("SBHIconManager", "resetAllIconImageCaches"),
+            ("SBHIconManager", "iconImageCache"),
+            ("SBHIconManager", "folderIconImageCache"),
+            ("SBHIconManager", "relayout"),
+            ("SBIconController", "notificationIconImageCache"),
+            ("SBIconController", "tableUIIconImageCache"),
+            ("SBIconController", "appSwitcherHeaderIconImageCache"),
+            ("SBLibraryViewController", "iconImageCache"),
+            ("SBHIconLibraryTableViewController", "iconImageCache"),
+        ):
+            self.assertIn(f'{{"{class_name}", "{selector}"}}', self.source)
+        self.assertIn("CACHE_BOUNDARY us=%llu phase=%s", self.source)
+        self.assertIn('CNDLogIconManagerCacheBoundary("reset-enter"', self.source)
+        self.assertIn('CNDLogIconManagerCacheBoundary("reset-return"', self.source)
 
     def test_normal_updates_correlate_stock_source_and_view_results(self) -> None:
         self.assertIn("gCNDRootSequence = sequence", self.source)

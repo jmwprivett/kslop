@@ -123,10 +123,16 @@ static bool themer_spotlight_bundle_for_patch(uint64_t view,
                                               size_t sourceLen);
 static bool themer_spotlight_images_match(uint64_t expected,
                                           uint64_t actual);
-static uint64_t themer_iconservices_lab_make_remote_nsdata(NSData *data);
+static uint64_t themer_make_remote_nsdata(NSData *data);
 static bool themer_add_method(uint64_t cls, const char *selName,
                               uint64_t imp, const char *types);
 static uint64_t themer_remote_symbol_addr(const char *name);
+static uint64_t themer_lookup_model_icon_for_bundle_with_roots(
+    const char *bundle, const uint64_t *roots, int rootCount);
+static int themer_collect_model_lookup_roots(uint64_t *roots, int cap);
+static bool themer_springboard_method_encoding_is(uint64_t object,
+                                                  const char *selector,
+                                                  const char *expected);
 
 static bool themer_spotlight_current_graph(uint64_t *ownerOut,
                                             uint64_t *dataSourceOut,
@@ -15553,6 +15559,439 @@ static bool themer_calendar_bundle_source_is_valid(uint64_t source)
         remote_call_current_success();
 }
 
+typedef struct {
+    uint64_t caches[8];
+    bool responseVerified[8][2];
+    uint64_t entriesAfterResponseByCache[8];
+    int cacheCount;
+    NSUInteger purgeCount;
+    NSUInteger responseRequestCount;
+    NSUInteger responsePrepareCount;
+    NSUInteger responsePrepareSuccessCount;
+    NSUInteger responseVerifiedCount;
+    NSUInteger responseCandidateCount;
+    NSUInteger responseExactMatchCount;
+    NSUInteger refillPollPasses;
+    uint64_t refillWaitUS;
+    uint64_t entriesBefore;
+    uint64_t entriesAfter;
+    uint64_t entriesAfterResponse;
+    uint64_t expectedStructuredData[2];
+    NSUInteger expectedStructuredDataLength[2];
+    bool responseInspectionFailed;
+    bool responseInspectionTruncated;
+} ThemerCalendarSourceCacheRefresh;
+
+typedef struct {
+    bool required;
+    uint64_t manager;
+    uint64_t cache;
+    NSUInteger requestedModelCount;
+    NSUInteger updatedModelCount;
+} ThemerCalendarConsumerCacheRefresh;
+
+/* ISBundleIdentifierIcon owns a process-local ISImageCache independently in
+ * SpringBoard and Spotlight.  A successful persistent-store replacement does
+ * not invalidate that cache: the retained Calendar source can continue
+ * returning the prior UUID/pixels even after its provider is reloaded.  The
+ * 23A341 VM A->B proof showed that replacing imageBagsByDescriptor (rather
+ * than merely advancing the provider generation) is the exact bounded
+ * invalidation required in both processes. */
+static bool themer_calendar_refresh_source_cache_once(
+    uint64_t source,
+    ThemerCalendarSourceCacheRefresh *refresh,
+    bool *purgedOut,
+    int *cacheIndexOut)
+{
+    enum { CACHE_CAP = 8 };
+    if (purgedOut) *purgedOut = false;
+    if (cacheIndexOut) *cacheIndexOut = -1;
+    if (!refresh || !themer_calendar_bundle_source_is_valid(source) ||
+        !themer_springboard_method_encoding_is(
+            source, "imageCache", "@16@0:8")) {
+        return false;
+    }
+
+    uint64_t cache = r_msg2_main(
+        source, "imageCache", 0, 0, 0, 0);
+    uint64_t cacheClass = themer_lookup_class("ISImageCache");
+    bool cacheReady = r_is_objc_ptr(cache) &&
+        r_is_objc_ptr(cacheClass) &&
+        r_responds_main(cache, "isKindOfClass:") &&
+        r_msg2_main(cache, "isKindOfClass:",
+                    cacheClass, 0, 0, 0) != 0 &&
+        themer_springboard_method_encoding_is(
+            cache, "imageBagsByDescriptor", "@16@0:8") &&
+        themer_springboard_method_encoding_is(
+            cache, "setImageBagsByDescriptor:", "v24@0:8@16") &&
+        remote_call_current_success();
+    if (!cacheReady) return false;
+
+    for (int index = 0; index < refresh->cacheCount; index++) {
+        if (refresh->caches[index] == cache) {
+            if (cacheIndexOut) *cacheIndexOut = index;
+            return true;
+        }
+    }
+    if (refresh->cacheCount >= CACHE_CAP) return false;
+
+    uint64_t beforeBags = r_msg2_main(
+        cache, "imageBagsByDescriptor", 0, 0, 0, 0);
+    uint64_t beforeCount = themer_remote_count(beforeBags);
+    uint64_t dictionaryClass = themer_lookup_class("NSMutableDictionary");
+    uint64_t allocation = r_is_objc_ptr(dictionaryClass)
+        ? r_msg2(dictionaryClass, "alloc", 0, 0, 0, 0) : 0;
+    uint64_t emptyBags = r_is_objc_ptr(allocation)
+        ? r_msg2_main(allocation, "init", 0, 0, 0, 0) : 0;
+    if (!r_is_objc_ptr(emptyBags) || !remote_call_current_success()) {
+        return false;
+    }
+    r_msg2_main(cache, "setImageBagsByDescriptor:",
+                emptyBags, 0, 0, 0);
+    if (remote_call_current_success()) {
+        r_msg2(emptyBags, "release", 0, 0, 0, 0);
+    }
+    uint64_t afterBags = remote_call_current_success()
+        ? r_msg2_main(cache, "imageBagsByDescriptor", 0, 0, 0, 0)
+        : 0;
+    uint64_t afterCount = themer_remote_count(afterBags);
+    bool purged = r_is_objc_ptr(afterBags) && afterCount == 0 &&
+        remote_call_current_success();
+    if (!purged) return false;
+
+    int cacheIndex = refresh->cacheCount;
+    refresh->caches[refresh->cacheCount++] = cache;
+    refresh->purgeCount++;
+    refresh->entriesBefore += beforeCount;
+    refresh->entriesAfter += afterCount;
+    if (purgedOut) *purgedOut = true;
+    if (cacheIndexOut) *cacheIndexOut = cacheIndex;
+    return true;
+}
+
+typedef enum {
+    ThemerCalendarExpectedResponseInspectionFailed = -1,
+    ThemerCalendarExpectedResponseNotFound = 0,
+    ThemerCalendarExpectedResponseFound = 1,
+} ThemerCalendarExpectedResponseInspection;
+
+/* A populated ISImageCache is not proof that it contains the themed record.
+ * During the asynchronous provider refill, IconServices can publish the
+ * descriptor bag before its final IFImage has arrived, and a stock response
+ * is also a valid nonempty bag. Inspect only the bounded, documented
+ * ISImageCache -> ISImageBag -> IFImage.data graph and require byte equality
+ * with the exact journal-verified 68-point response uploaded by Cyanide. */
+static ThemerCalendarExpectedResponseInspection
+themer_calendar_source_cache_expected_response(
+    uint64_t cache,
+    uint64_t expectedStructuredData,
+    NSUInteger expectedStructuredDataLength,
+    uint64_t *entryCountOut,
+    NSUInteger *candidateCountOut,
+    bool *truncatedOut)
+{
+    enum {
+        BAG_CAP = 16,
+        IMAGE_CAP_PER_BAG = 16,
+        IMAGE_CAP_TOTAL = 32,
+    };
+    if (entryCountOut) *entryCountOut = 0;
+    if (candidateCountOut) *candidateCountOut = 0;
+    if (truncatedOut) *truncatedOut = false;
+    if (!r_is_objc_ptr(cache) ||
+        !r_is_objc_ptr(expectedStructuredData) ||
+        expectedStructuredDataLength == 0 ||
+        !themer_springboard_method_encoding_is(
+            cache, "imageBagsByDescriptor", "@16@0:8")) {
+        return ThemerCalendarExpectedResponseInspectionFailed;
+    }
+
+    ThemerCalendarExpectedResponseInspection inspection =
+        ThemerCalendarExpectedResponseInspectionFailed;
+    uint64_t bags = 0;
+    uint64_t bagValues = 0;
+    uint64_t images = 0;
+    uint64_t data = 0;
+    NSUInteger candidates = 0;
+
+    /* Every collection/value used across more than one RemoteCall must be
+     * retained in the target.  Getter results can otherwise leave their
+     * autorelease scope between calls on physical arm64e, turning a harmless
+     * verifier into a dangling-pointer crash inside SpringBoard. */
+    bags = r_msg2_main_retained_object(
+        cache, "imageBagsByDescriptor", 0, 0, 0, 0);
+    uint64_t entryCount = r_is_objc_ptr(bags)
+        ? themer_remote_count(bags) : 0;
+    if (entryCountOut) *entryCountOut = entryCount;
+    if (!r_is_objc_ptr(bags) || !remote_call_current_success()) {
+        goto cleanup;
+    }
+    if (entryCount == 0) {
+        inspection = ThemerCalendarExpectedResponseNotFound;
+        goto cleanup;
+    }
+    if (entryCount > BAG_CAP ||
+        !themer_springboard_method_encoding_is(
+            bags, "allValues", "@16@0:8")) {
+        if (truncatedOut) *truncatedOut = entryCount > BAG_CAP;
+        goto cleanup;
+    }
+
+    bagValues = r_msg2_main_retained_object(
+        bags, "allValues", 0, 0, 0, 0);
+    uint64_t bagCount = r_is_objc_ptr(bagValues)
+        ? themer_remote_count(bagValues) : 0;
+    if (!r_is_objc_ptr(bagValues) || bagCount != entryCount ||
+        !themer_springboard_method_encoding_is(
+            bagValues, "objectAtIndex:", "@24@0:8Q16")) {
+        goto cleanup;
+    }
+
+    inspection = ThemerCalendarExpectedResponseNotFound;
+    for (uint64_t bagIndex = 0;
+         bagIndex < bagCount && remote_call_current_success(); bagIndex++) {
+        uint64_t bag = r_msg2_main(
+            bagValues, "objectAtIndex:", bagIndex, 0, 0, 0);
+        if (!r_is_objc_ptr(bag) ||
+            !themer_springboard_method_encoding_is(
+                bag, "images", "@16@0:8")) {
+            inspection = ThemerCalendarExpectedResponseInspectionFailed;
+            goto cleanup;
+        }
+        images = r_msg2_main_retained_object(
+            bag, "images", 0, 0, 0, 0);
+        uint64_t imageCount = r_is_objc_ptr(images)
+            ? themer_remote_count(images) : 0;
+        if (!r_is_objc_ptr(images) || imageCount > IMAGE_CAP_PER_BAG ||
+            candidates + imageCount > IMAGE_CAP_TOTAL ||
+            !themer_springboard_method_encoding_is(
+                images, "objectAtIndex:", "@24@0:8Q16")) {
+            if (truncatedOut) {
+                *truncatedOut = imageCount > IMAGE_CAP_PER_BAG ||
+                    candidates + imageCount > IMAGE_CAP_TOTAL;
+            }
+            inspection = ThemerCalendarExpectedResponseInspectionFailed;
+            goto cleanup;
+        }
+
+        for (uint64_t imageIndex = 0;
+             imageIndex < imageCount && remote_call_current_success();
+             imageIndex++) {
+            uint64_t image = r_msg2_main(
+                images, "objectAtIndex:", imageIndex, 0, 0, 0);
+            candidates++;
+            if (!r_is_objc_ptr(image) ||
+                !themer_springboard_method_encoding_is(
+                    image, "data", "@16@0:8")) {
+                continue;
+            }
+            data = r_msg2_main_retained_object(
+                image, "data", 0, 0, 0, 0);
+            if (!r_is_objc_ptr(data) ||
+                !themer_springboard_method_encoding_is(
+                    data, "length", "Q16@0:8") ||
+                !themer_springboard_method_encoding_is(
+                    data, "isEqualToData:", "B24@0:8@16")) {
+                if (r_is_objc_ptr(data) &&
+                    remote_call_current_success()) {
+                    r_msg2(data, "release", 0, 0, 0, 0);
+                }
+                data = 0;
+                continue;
+            }
+            uint64_t length = r_msg2_main(
+                data, "length", 0, 0, 0, 0);
+            bool equal = length == expectedStructuredDataLength &&
+                (r_msg2_main(
+                    data, "isEqualToData:", expectedStructuredData,
+                    0, 0, 0) & 0xff) != 0;
+            if (remote_call_current_success()) {
+                r_msg2(data, "release", 0, 0, 0, 0);
+            }
+            data = 0;
+            if (equal && remote_call_current_success()) {
+                inspection = ThemerCalendarExpectedResponseFound;
+                goto cleanup;
+            }
+        }
+        if (r_is_objc_ptr(images) &&
+            remote_call_current_success()) {
+            r_msg2(images, "release", 0, 0, 0, 0);
+        }
+        images = 0;
+    }
+
+cleanup:
+    if (candidateCountOut) *candidateCountOut = candidates;
+    if (r_is_objc_ptr(data) && remote_call_current_success()) {
+        r_msg2(data, "release", 0, 0, 0, 0);
+    }
+    if (r_is_objc_ptr(images) && remote_call_current_success()) {
+        r_msg2(images, "release", 0, 0, 0, 0);
+    }
+    if (r_is_objc_ptr(bagValues) && remote_call_current_success()) {
+        r_msg2(bagValues, "release", 0, 0, 0, 0);
+    }
+    if (r_is_objc_ptr(bags) && remote_call_current_success()) {
+        r_msg2(bags, "release", 0, 0, 0, 0);
+    }
+    return remote_call_current_success()
+        ? inspection
+        : ThemerCalendarExpectedResponseInspectionFailed;
+}
+
+/* Make the persistent-store read explicit before invalidating the provider.
+ * reloadIconImage advances the model generation, but it is not itself a
+ * request for pixels when Calendar is offscreen. On 23A341, ISIcon's exact
+ * object-returning prepareImageForDescriptor: implementation synchronously
+ * calls imageForDescriptor:. After the bounded cache purge that path reaches
+ * _imageFromStoreForDescriptor:, inserts the returned IFImage into this
+ * source's ISImageCache, and returns it. Retain the result inside the target
+ * main-thread invocation so physical arm64e never carries an autoreleased
+ * object across RemoteCall boundaries. */
+static bool themer_calendar_prepare_source_cache_once(
+    uint64_t source,
+    ThemerCalendarSourceCacheRefresh *refresh,
+    int cacheIndex,
+    int appearance)
+{
+    if (!refresh || cacheIndex < 0 ||
+        cacheIndex >= refresh->cacheCount || cacheIndex >= 8 ||
+        appearance < 0 || appearance > 1 ||
+        !themer_calendar_bundle_source_is_valid(source) ||
+        !r_is_objc_ptr(refresh->expectedStructuredData[appearance]) ||
+        refresh->expectedStructuredDataLength[appearance] == 0) {
+        return false;
+    }
+    if (refresh->responseVerified[cacheIndex][appearance]) return true;
+    if (!themer_springboard_method_encoding_is(
+            source, "prepareImageForDescriptor:", "@24@0:8@16")) {
+        return false;
+    }
+
+    uint64_t descriptor = themer_make_is_descriptor(
+        68.0, 3.0, appearance, 0, false);
+    if (!r_is_objc_ptr(descriptor) || !remote_call_current_success()) {
+        return false;
+    }
+    refresh->responsePrepareCount++;
+    uint64_t image = r_msg2_main_retained_object(
+        source, "prepareImageForDescriptor:", descriptor, 0, 0, 0);
+    bool imageReady = r_is_objc_ptr(image) &&
+        themer_springboard_method_encoding_is(
+            image, "placeholder", "B16@0:8") &&
+        (r_msg2_main(image, "placeholder", 0, 0, 0, 0) & 0xff) == 0 &&
+        remote_call_current_success();
+
+    uint64_t entries = 0;
+    NSUInteger candidates = 0;
+    bool truncated = false;
+    if (imageReady) refresh->responseRequestCount++;
+    ThemerCalendarExpectedResponseInspection inspection = imageReady
+        ? themer_calendar_source_cache_expected_response(
+            refresh->caches[cacheIndex],
+            refresh->expectedStructuredData[appearance],
+            refresh->expectedStructuredDataLength[appearance],
+            &entries, &candidates, &truncated)
+        : ThemerCalendarExpectedResponseInspectionFailed;
+    refresh->responseCandidateCount += candidates;
+    refresh->responseInspectionTruncated |= truncated;
+    if (inspection == ThemerCalendarExpectedResponseInspectionFailed) {
+        refresh->responseInspectionFailed = true;
+    } else if (inspection == ThemerCalendarExpectedResponseFound) {
+        refresh->responseVerified[cacheIndex][appearance] = true;
+        refresh->responsePrepareSuccessCount++;
+        refresh->responseVerifiedCount++;
+        refresh->responseExactMatchCount++;
+        uint64_t priorEntries =
+            refresh->entriesAfterResponseByCache[cacheIndex];
+        if (entries > priorEntries) {
+            refresh->entriesAfterResponse += entries - priorEntries;
+            refresh->entriesAfterResponseByCache[cacheIndex] = entries;
+        }
+    }
+
+    if (r_is_objc_ptr(image) && remote_call_current_success()) {
+        r_msg2(image, "release", 0, 0, 0, 0);
+    }
+    if (r_is_objc_ptr(descriptor) && remote_call_current_success()) {
+        r_msg2(descriptor, "release", 0, 0, 0, 0);
+    }
+    return inspection == ThemerCalendarExpectedResponseFound &&
+        remote_call_current_success();
+}
+
+/* Retain a bounded fallback verifier for already-requested source caches. The
+ * deterministic path prepares every distinct source synchronously before its
+ * provider reload, so a successful run returns on the first pass without a
+ * settling delay or any requirement that Calendar be visible. */
+static bool themer_calendar_wait_for_source_cache_refills(
+    ThemerCalendarSourceCacheRefresh *refresh)
+{
+    enum {
+        REFILL_POLL_INTERVAL_US = 5000,
+        REFILL_POLL_LIMIT = 51,
+    };
+    if (!refresh || refresh->cacheCount <= 0 ||
+        refresh->cacheCount > 8 ||
+        !r_is_objc_ptr(refresh->expectedStructuredData[0]) ||
+        !r_is_objc_ptr(refresh->expectedStructuredData[1]) ||
+        refresh->expectedStructuredDataLength[0] == 0 ||
+        refresh->expectedStructuredDataLength[1] == 0) return false;
+
+    for (NSUInteger pass = 0;
+         pass < REFILL_POLL_LIMIT && remote_call_current_success(); pass++) {
+        refresh->refillPollPasses++;
+        for (int index = 0;
+             index < refresh->cacheCount && remote_call_current_success();
+             index++) {
+            for (int appearance = 0;
+                 appearance < 2 && remote_call_current_success();
+                 appearance++) {
+                if (refresh->responseVerified[index][appearance]) continue;
+                refresh->responseRequestCount++;
+                uint64_t entries = 0;
+                NSUInteger candidates = 0;
+                bool truncated = false;
+                ThemerCalendarExpectedResponseInspection inspection =
+                    themer_calendar_source_cache_expected_response(
+                        refresh->caches[index],
+                        refresh->expectedStructuredData[appearance],
+                        refresh->expectedStructuredDataLength[appearance],
+                        &entries, &candidates, &truncated);
+                refresh->responseCandidateCount += candidates;
+                refresh->responseInspectionTruncated |= truncated;
+                if (inspection ==
+                        ThemerCalendarExpectedResponseInspectionFailed) {
+                    refresh->responseInspectionFailed = true;
+                    return false;
+                }
+                if (inspection == ThemerCalendarExpectedResponseFound) {
+                    refresh->responseVerified[index][appearance] = true;
+                    refresh->responseVerifiedCount++;
+                    refresh->responseExactMatchCount++;
+                    uint64_t priorEntries =
+                        refresh->entriesAfterResponseByCache[index];
+                    if (entries > priorEntries) {
+                        refresh->entriesAfterResponse +=
+                            entries - priorEntries;
+                        refresh->entriesAfterResponseByCache[index] = entries;
+                    }
+                }
+            }
+        }
+        if (refresh->responseVerifiedCount ==
+            (NSUInteger)refresh->cacheCount * 2U) {
+            return true;
+        }
+        if (pass + 1U < REFILL_POLL_LIMIT) {
+            usleep(REFILL_POLL_INTERVAL_US);
+            refresh->refillWaitUS += REFILL_POLL_INTERVAL_US;
+        }
+    }
+    return false;
+}
+
 /* Returns a +1 canonical IconServices source. The Calendar provider already
  * knows how to turn any ISIcon's prepared descriptor result into the exact
  * UIImage/ICRIconLayer requested by its consumer; only its transient CUIKIcon
@@ -15666,196 +16105,316 @@ static uint64_t themer_calendar_provider_subclass(uint64_t currentClass)
         ? subclass : 0;
 }
 
-static NSDictionary<NSString *, id> *
-themer_configure_calendar_provider_source(bool install)
+static bool themer_calendar_add_unique_model(uint64_t *models,
+                                             int *modelCount,
+                                             int modelCap,
+                                             uint64_t model,
+                                             bool *truncatedOut)
 {
-    enum { STATE_CAP = 8 };
-    uint64_t registry = themer_calendar_provider_registry(install);
-    uint64_t stateCount = r_is_objc_ptr(registry)
-        ? themer_remote_count(registry) : 0;
-    if (stateCount > STATE_CAP) {
-        return @{
-            @"ok": @NO,
-            @"stage": @"calendar-provider-registry-invalid",
-            @"message": @"The retained Calendar provider registry exceeded its bounded capacity.",
-        };
+    if (!models || !modelCount || modelCap <= 0 ||
+        !r_is_objc_ptr(model)) return false;
+    for (int index = 0; index < *modelCount; index++) {
+        if (models[index] == model) return true;
+    }
+    if (*modelCount >= modelCap) {
+        if (truncatedOut) *truncatedOut = true;
+        return false;
+    }
+    models[(*modelCount)++] = model;
+    return true;
+}
+
+/* Every SBHCalendarApplicationIcon owns its own image provider.  On
+ * SpringBoard the canonical model object and the mounted live leaf can be
+ * distinct, so a bridge installed on only one provider does not cover the
+ * other.  Collect exactly the canonical object plus Calendar entries from the
+ * authoritative live-leaf map.  Spotlight has its own private model and uses
+ * the exact materialized object resolved above, so it deliberately skips the
+ * SpringBoard singleton graph. */
+static int themer_calendar_collect_active_models(uint64_t canonicalModel,
+                                                 bool spotlightGraphKnown,
+                                                 uint64_t *models,
+                                                 int modelCap,
+                                                 int *liveLeafMatchesOut,
+                                                 bool *truncatedOut)
+{
+    if (liveLeafMatchesOut) *liveLeafMatchesOut = 0;
+    if (truncatedOut) *truncatedOut = false;
+    int modelCount = 0;
+    bool truncated = false;
+    (void)themer_calendar_add_unique_model(
+        models, &modelCount, modelCap, canonicalModel, &truncated);
+    if (spotlightGraphKnown || !remote_call_current_success()) {
+        if (truncatedOut) *truncatedOut = truncated;
+        return modelCount;
     }
 
-    if (!install) {
-        bool restored = true;
-        NSUInteger restoredStates = 0;
-        NSUInteger reloadPasses = 0;
+    enum { ROOT_CAP = 24, LEAF_SCAN_CAP = 2048 };
+    uint64_t roots[ROOT_CAP] = {0};
+    int rootCount = themer_collect_model_lookup_roots(roots, ROOT_CAP);
+    int liveLeafMatches = 0;
+    for (int rootIndex = 0;
+         rootIndex < rootCount && remote_call_current_success(); rootIndex++) {
+        uint64_t root = roots[rootIndex];
+        if (!r_responds_main(
+                root, "leafIconsUniquedByApplicationBundleIdentifier") ||
+            !themer_springboard_method_encoding_is(
+                root, "leafIconsUniquedByApplicationBundleIdentifier",
+                "@16@0:8")) {
+            continue;
+        }
+        uint64_t collection = r_msg2_main(
+            root, "leafIconsUniquedByApplicationBundleIdentifier",
+            0, 0, 0, 0);
+        uint64_t leafObjects = 0;
+        if (r_is_objc_ptr(collection) &&
+            r_responds_main(collection, "allValues")) {
+            leafObjects = r_msg2_main(
+                collection, "allValues", 0, 0, 0, 0);
+        } else if (r_is_objc_ptr(collection) &&
+                   r_responds_main(collection, "allObjects")) {
+            leafObjects = r_msg2_main(
+                collection, "allObjects", 0, 0, 0, 0);
+        }
+        uint64_t leafCount = themer_remote_count(leafObjects);
+        if (leafCount > LEAF_SCAN_CAP) truncated = true;
+        uint64_t boundedLeafCount = MIN(
+            leafCount, (uint64_t)LEAF_SCAN_CAP);
         for (uint64_t index = 0;
-             index < stateCount && remote_call_current_success(); index++) {
-            uint64_t state = r_msg2_main(
-                registry, "objectAtIndex:", index, 0, 0, 0);
-            uint64_t provider = themer_spotlight_dictionary_object(
-                state, "provider");
-            uint64_t replacement = themer_spotlight_dictionary_object(
-                state, "replacementSource");
-            uint64_t classNumber = themer_spotlight_dictionary_object(
-                state, "originalClass");
-            uint64_t originalClass = r_is_objc_ptr(classNumber) &&
-                r_responds_main(classNumber, "unsignedLongLongValue")
-                ? r_msg2_main(classNumber, "unsignedLongLongValue",
-                              0, 0, 0, 0)
-                : 0;
-            bool oneRestored = r_is_objc_ptr(provider) &&
-                r_is_objc_ptr(replacement) &&
-                r_is_objc_ptr(originalClass);
-            uint64_t currentClass = oneRestored ? r_dlsym_call(
-                R_TIMEOUT, "object_getClass", provider,
-                0, 0, 0, 0, 0, 0, 0) : 0;
-            if (oneRestored && currentClass != originalClass) {
-                uint64_t previous = r_dlsym_call(
-                    R_TIMEOUT, "object_setClass", provider, originalClass,
-                    0, 0, 0, 0, 0, 0);
-                oneRestored = previous == currentClass &&
-                    remote_call_current_success();
+             index < boundedLeafCount && remote_call_current_success();
+             index++) {
+            uint64_t candidate = r_msg2_main(
+                leafObjects, "objectAtIndex:", index, 0, 0, 0);
+            char bundle[192] = {0};
+            if (!themer_read_bundle_for_icon(
+                    candidate, 0, bundle, sizeof(bundle)) ||
+                strcmp(bundle, kThemerCalendarBundleIdentifier) != 0) {
+                continue;
             }
-            if (oneRestored) {
-                oneRestored = themer_set_remote_associated_object(
-                    provider, "preparedISIcon", 0);
-            }
-            uint64_t stockBeforeReload = oneRestored &&
-                r_responds_main(provider, "preparedISIcon")
-                ? r_msg2_main(provider, "preparedISIcon", 0, 0, 0, 0)
-                : 0;
-            oneRestored = oneRestored &&
-                stockBeforeReload != replacement &&
-                themer_calendar_stock_source_is_valid(stockBeforeReload);
-            if (oneRestored &&
-                r_responds_main(provider, "reloadIconImage")) {
-                r_msg2_main(provider, "reloadIconImage", 0, 0, 0, 0);
-                reloadPasses++;
-            } else {
-                oneRestored = false;
-            }
-            uint64_t stockAfterReload = oneRestored
-                ? r_msg2_main(provider, "preparedISIcon", 0, 0, 0, 0)
-                : 0;
-            oneRestored = oneRestored &&
-                stockAfterReload != replacement &&
-                themer_calendar_stock_source_is_valid(stockAfterReload);
-            if (oneRestored) restoredStates++;
-            restored = restored && oneRestored;
+            int beforeCount = modelCount;
+            bool covered = themer_calendar_add_unique_model(
+                models, &modelCount, modelCap, candidate, &truncated);
+            if (covered && modelCount > beforeCount) liveLeafMatches++;
         }
-        if (restored && r_is_objc_ptr(registry)) {
-            restored = themer_spotlight_commit_process_object(
-                kThemerCalendarProviderRegistryKey, 0);
-        }
-        bool ok = restored && remote_call_current_success();
-        printf("[SBR_CALENDAR_SOURCE] ok=%d stage=%s states=%llu "
-               "restored=%lu reload-passes=%lu source=CUIKIcon\n",
-               ok, ok ? "calendar-provider-restored" :
-                        "calendar-provider-restore",
-               (unsigned long long)stateCount,
-               (unsigned long)restoredStates,
-               (unsigned long)reloadPasses);
-        return @{
-            @"ok": @(ok),
-            @"stage": ok ? @"calendar-provider-restored" :
-                @"calendar-provider-restore",
-            @"message": ok
-                ? @"The Calendar provider again creates a fresh date-specific CUIKIcon and its delegate was reloaded."
-                : @"The Calendar provider source restore did not fully verify; its registry was retained.",
-            @"stateCount": @(stateCount),
-            @"restoredStateCount": @(restoredStates),
-            @"reloadPasses": @(reloadPasses),
-            @"stockSource": @"CUIKIcon/CUIKDefaultIconGenerator",
-            @"viewScanUsed": @NO,
-            @"viewPaintUsed": @NO,
-        };
     }
+    if (liveLeafMatchesOut) *liveLeafMatchesOut = liveLeafMatches;
+    if (truncatedOut) *truncatedOut = truncated;
+    return modelCount;
+}
 
-    /* Production fast path: the provider and canonical replacement are
-     * process-owned and strongly retained by the registry.  Do not repeat the
-     * broad SpringBoard model search or regenerate Calendar merely to prove
-     * the same association again.  One exact getter readback is sufficient. */
-    if (stateCount > 0) {
-        uint64_t state = stateCount == 1
-            ? r_msg2_main(registry, "objectAtIndex:", 0, 0, 0, 0)
-            : 0;
+static bool themer_calendar_provider_in_inventory(
+    uint64_t provider,
+    const uint64_t *activeProviders,
+    int activeProviderCount)
+{
+    if (!r_is_objc_ptr(provider) || !activeProviders ||
+        activeProviderCount < 0 || activeProviderCount > 8) return false;
+    for (int index = 0; index < activeProviderCount; index++) {
+        if (activeProviders[index] == provider) return true;
+    }
+    return false;
+}
+
+/* The registry retains recovery information, not authority over which
+ * Calendar consumers are current.  A SpringBoard model rebuild can retire a
+ * provider while the process remains alive. Restore and remove those stale
+ * bridges before admitting the freshly discovered provider inventory so the
+ * bounded registry cannot fill with dead consumers. */
+static bool themer_calendar_prune_stale_provider_states(
+    uint64_t registry,
+    const uint64_t *activeProviders,
+    int activeProviderCount,
+    NSUInteger *prunedOut)
+{
+    if (prunedOut) *prunedOut = 0;
+    uint64_t stateCount = themer_remote_count(registry);
+    if (!r_is_objc_ptr(registry) || stateCount > 8 ||
+        !themer_springboard_method_encoding_is(
+            registry, "removeObjectAtIndex:", "v24@0:8Q16")) {
+        return false;
+    }
+    NSUInteger pruned = 0;
+    for (uint64_t cursor = stateCount;
+         cursor > 0 && remote_call_current_success(); cursor--) {
+        uint64_t index = cursor - 1;
+        uint64_t state = r_msg2_main(
+            registry, "objectAtIndex:", index, 0, 0, 0);
         uint64_t provider = themer_spotlight_dictionary_object(
             state, "provider");
-        uint64_t source = themer_spotlight_dictionary_object(
+        if (themer_calendar_provider_in_inventory(
+                provider, activeProviders, activeProviderCount)) {
+            continue;
+        }
+
+        uint64_t replacement = themer_spotlight_dictionary_object(
             state, "replacementSource");
-        bool ready = stateCount == 1 && r_is_objc_ptr(provider) &&
-            r_is_objc_ptr(source) &&
-            r_msg2_main(provider, "preparedISIcon", 0, 0, 0, 0) == source &&
-            remote_call_current_success();
-        printf("[SBR_CALENDAR_SOURCE] ok=%d stage=%s states=%llu "
-               "new=0 reload-passes=0 fast-path=1\n",
-               ready, ready ? "calendar-provider-source-ready" :
-                              "calendar-provider-source-verify",
-               (unsigned long long)stateCount);
-        return @{
-            @"ok": @(ready),
-            @"stage": ready ? @"calendar-provider-source-ready" :
-                @"calendar-provider-source-verify",
-            @"message": ready
-                ? @"Calendar's retained preparedISIcon source remains installed; no rediscovery or regeneration was performed."
-                : @"Calendar's retained provider state did not pass its exact source readback.",
-            @"stockSource": @"CUIKIcon/CUIKDefaultIconGenerator",
-            @"replacementSource": @"ISBundleIdentifierIcon/com.apple.mobilecal",
-            @"providerClass": @"SBCalendarIconImageProvider",
-            @"providerSelector": @"preparedISIcon",
-            @"providerSelectorABI": @"@16@0:8",
-            @"stateCount": @(stateCount),
-            @"newStateCount": @0,
-            @"reloadPasses": @0,
-            @"fastPath": @YES,
-            @"requiresVisibleView": @NO,
-            @"viewScanUsed": @NO,
-            @"viewPaintUsed": @NO,
-            @"persistentDescriptorMatrixPreserved": @YES,
-            @"transitionDescriptorsPreserved": @YES,
-        };
+        uint64_t classNumber = themer_spotlight_dictionary_object(
+            state, "originalClass");
+        uint64_t originalClass = r_is_objc_ptr(classNumber) &&
+            r_responds_main(classNumber, "unsignedLongLongValue")
+            ? r_msg2_main(classNumber, "unsignedLongLongValue",
+                          0, 0, 0, 0)
+            : 0;
+        uint64_t currentClass = r_is_objc_ptr(provider) &&
+            r_is_objc_ptr(originalClass)
+            ? r_dlsym_call(R_TIMEOUT, "object_getClass", provider,
+                           0, 0, 0, 0, 0, 0, 0)
+            : 0;
+        bool restored = r_is_objc_ptr(provider) &&
+            r_is_objc_ptr(replacement) &&
+            r_is_objc_ptr(originalClass) && r_is_objc_ptr(currentClass);
+        if (restored && currentClass != originalClass) {
+            uint64_t previous = r_dlsym_call(
+                R_TIMEOUT, "object_setClass", provider, originalClass,
+                0, 0, 0, 0, 0, 0);
+            restored = previous == currentClass &&
+                remote_call_current_success();
+        }
+        if (restored) {
+            restored = themer_set_remote_associated_object(
+                provider, "preparedISIcon", 0);
+        }
+        uint64_t stockSource = restored
+            ? r_msg2_main(provider, "preparedISIcon", 0, 0, 0, 0)
+            : 0;
+        restored = restored && stockSource != replacement &&
+            themer_calendar_stock_source_is_valid(stockSource);
+        if (!restored) return false;
+
+        uint64_t countBefore = themer_remote_count(registry);
+        r_msg2_main(registry, "removeObjectAtIndex:",
+                    index, 0, 0, 0);
+        uint64_t countAfter = themer_remote_count(registry);
+        if (countBefore != countAfter + 1 ||
+            !remote_call_current_success()) return false;
+        pruned++;
+    }
+    if (prunedOut) *prunedOut = pruned;
+    return themer_remote_count(registry) == stateCount - pruned &&
+        remote_call_current_success();
+}
+
+/* Provider reload advances SBHCalendarApplicationIcon's generation, but the
+ * VM proved that an already-mounted Home consumer can keep its procedural
+ * Calendar pixels until SBHIconImageCache receives its ordinary per-icon
+ * update. This is deliberately not the old batch fallback: Calendar has at
+ * most the eight canonical/live-leaf models admitted above, and each exact
+ * model is updated once through SpringBoard's primary cache. Spotlight does
+ * not contain SBIconController, so its provider/source path is unchanged. */
+static bool themer_calendar_refresh_springboard_consumer_cache(
+    const uint64_t *models,
+    int modelCount,
+    bool required,
+    ThemerCalendarConsumerCacheRefresh *refresh)
+{
+    enum { MODEL_CAP = 8 };
+    if (refresh) memset(refresh, 0, sizeof(*refresh));
+    if (!models || modelCount <= 0 || modelCount > MODEL_CAP ||
+        !refresh || !remote_call_current_success()) {
+        return false;
     }
 
-    uint64_t model =
-        themer_lookup_model_icon_for_bundle(kThemerCalendarBundleIdentifier);
-    uint64_t provider = r_is_objc_ptr(model) &&
-        r_responds_main(model, "imageProvider")
-        ? r_msg2_main(model, "imageProvider", 0, 0, 0, 0)
+    refresh->required = required;
+    if (!required) return remote_call_current_success();
+
+    uint64_t controllerClass = r_class("SBIconController");
+    bool abiReady = themer_springboard_method_encoding_is(
+        controllerClass, "sharedInstance", "@16@0:8");
+    uint64_t controller = abiReady
+        ? r_msg2_main(controllerClass, "sharedInstance", 0, 0, 0, 0)
         : 0;
-    if (!r_is_objc_ptr(model) || !r_is_objc_ptr(provider) ||
-        !r_responds_main(provider, "preparedISIcon") ||
-        !r_responds_main(provider, "reloadIconImage") ||
-        !r_is_objc_ptr(registry)) {
-        if (stateCount == 0 && r_is_objc_ptr(registry) &&
-            remote_call_current_success()) {
-            (void)themer_spotlight_commit_process_object(
-                kThemerCalendarProviderRegistryKey, 0);
+    abiReady = abiReady && r_is_objc_ptr(controller) &&
+        themer_springboard_method_encoding_is(
+            controller, "iconManager", "@16@0:8");
+    uint64_t manager = abiReady
+        ? r_msg2_main(controller, "iconManager", 0, 0, 0, 0)
+        : 0;
+    refresh->manager = manager;
+    abiReady = abiReady && r_is_objc_ptr(manager) &&
+        themer_springboard_method_encoding_is(
+            manager, "iconImageCache", "@16@0:8");
+    uint64_t cache = abiReady
+        ? r_msg2_main(manager, "iconImageCache", 0, 0, 0, 0)
+        : 0;
+    refresh->cache = cache;
+    abiReady = abiReady && r_is_objc_ptr(cache) &&
+        themer_springboard_method_encoding_is(
+            cache, "updateImageForIcon:", "v24@0:8@16");
+    if (!abiReady || !remote_call_current_success()) return false;
+
+    for (int index = 0;
+         index < modelCount && remote_call_current_success(); index++) {
+        uint64_t model = models[index];
+        if (!r_is_objc_ptr(model)) return false;
+        refresh->requestedModelCount++;
+        r_msg2_main(cache, "updateImageForIcon:", model, 0, 0, 0);
+        if (remote_call_current_success()) {
+            refresh->updatedModelCount++;
         }
-        return @{
-            @"ok": @NO,
-            @"stage": @"calendar-provider-not-materialized",
-            @"message": @"The canonical Calendar model or its image provider is unavailable in this process; no Calendar source was changed.",
-            @"requiresVisibleView": @NO,
-        };
+    }
+    return refresh->requestedModelCount == (NSUInteger)modelCount &&
+        refresh->updatedModelCount == refresh->requestedModelCount &&
+        remote_call_current_success();
+}
+
+static bool themer_calendar_configure_active_provider(
+    uint64_t registry,
+    uint64_t model,
+    ThemerCalendarSourceCacheRefresh *sourceCacheRefresh,
+    bool *newStateOut,
+    bool *reloadIssuedOut,
+    bool *generationAdvancedOut,
+    uint64_t *providerOut)
+{
+    enum { STATE_CAP = 8 };
+    if (newStateOut) *newStateOut = false;
+    if (reloadIssuedOut) *reloadIssuedOut = false;
+    if (generationAdvancedOut) *generationAdvancedOut = false;
+    if (providerOut) *providerOut = 0;
+
+    bool modelABIReady =
+        themer_springboard_method_encoding_is(
+            model, "imageProvider", "@16@0:8") &&
+        themer_springboard_method_encoding_is(
+            model, "imageGeneration", "Q16@0:8");
+    uint64_t provider = modelABIReady
+        ? r_msg2_main(model, "imageProvider", 0, 0, 0, 0) : 0;
+    if (providerOut) *providerOut = provider;
+    bool providerABIReady = r_is_objc_ptr(provider) &&
+        themer_springboard_method_encoding_is(
+            provider, "preparedISIcon", "@16@0:8") &&
+        themer_springboard_method_encoding_is(
+            provider, "reloadIconImage", "v16@0:8") &&
+        themer_springboard_method_encoding_is(
+            provider, "delegate", "@16@0:8");
+    if (!modelABIReady || !providerABIReady ||
+        !r_is_objc_ptr(registry) || !remote_call_current_success()) {
+        return false;
     }
 
     uint64_t state =
         themer_calendar_state_for_provider(registry, provider);
     bool newState = !r_is_objc_ptr(state);
-    uint64_t source = r_is_objc_ptr(state)
-        ? themer_spotlight_dictionary_object(
-              state, "replacementSource")
-        : themer_calendar_registered_bundle_source();
+    if (newStateOut) *newStateOut = newState;
+    uint64_t source = newState
+        ? themer_calendar_registered_bundle_source()
+        : themer_spotlight_dictionary_object(
+              state, "replacementSource");
     bool configured = themer_calendar_bundle_source_is_valid(source);
     uint64_t originalClass = 0;
     uint64_t subclass = 0;
     uint64_t originalStockSource = 0;
 
     if (configured && newState) {
-        originalClass = r_dlsym_call(
+        configured = themer_remote_count(registry) < STATE_CAP;
+        originalClass = configured ? r_dlsym_call(
             R_TIMEOUT, "object_getClass", provider,
-            0, 0, 0, 0, 0, 0, 0);
-        subclass = themer_calendar_provider_subclass(originalClass);
-        originalStockSource = r_msg2_main(
-            provider, "preparedISIcon", 0, 0, 0, 0);
-        configured = r_is_objc_ptr(originalClass) &&
+            0, 0, 0, 0, 0, 0, 0) : 0;
+        subclass = configured
+            ? themer_calendar_provider_subclass(originalClass) : 0;
+        originalStockSource = configured
+            ? r_msg2_main(provider, "preparedISIcon", 0, 0, 0, 0) : 0;
+        configured = configured && r_is_objc_ptr(originalClass) &&
             r_is_objc_ptr(subclass) &&
             themer_calendar_stock_source_is_valid(originalStockSource);
     }
@@ -15906,8 +16465,7 @@ themer_configure_calendar_provider_source(bool install)
             r_msg2_main(registry, "addObject:", state, 0, 0, 0);
             uint64_t afterCount = themer_remote_count(registry);
             committed = afterCount == beforeCount + 1 &&
-                r_msg2_main(registry, "lastObject", 0, 0, 0, 0) ==
-                    state &&
+                r_msg2_main(registry, "lastObject", 0, 0, 0, 0) == state &&
                 remote_call_current_success();
         }
         if (!committed && remote_call_current_success()) {
@@ -15927,22 +16485,524 @@ themer_configure_calendar_provider_source(bool install)
             r_msg2(state, "release", 0, 0, 0, 0);
         }
     } else if (configured) {
-        configured =
-            r_msg2_main(provider, "preparedISIcon",
-                        0, 0, 0, 0) == source;
+        uint64_t stateModel = themer_spotlight_dictionary_object(
+            state, "model");
+        uint64_t classNumber = themer_spotlight_dictionary_object(
+            state, "originalClass");
+        originalClass = r_is_objc_ptr(classNumber) &&
+            r_responds_main(classNumber, "unsignedLongLongValue")
+            ? r_msg2_main(classNumber, "unsignedLongLongValue",
+                          0, 0, 0, 0)
+            : 0;
+        subclass = themer_calendar_provider_subclass(originalClass);
+        uint64_t currentClass = r_is_objc_ptr(subclass)
+            ? r_dlsym_call(R_TIMEOUT, "object_getClass", provider,
+                           0, 0, 0, 0, 0, 0, 0)
+            : 0;
+        bool stateModelReady = stateModel == model;
+        if (!stateModelReady &&
+            r_msg2_main(provider, "delegate", 0, 0, 0, 0) == model) {
+            stateModelReady = themer_spotlight_dictionary_set_object(
+                state, "model", model);
+        }
+        configured = stateModelReady &&
+            r_is_objc_ptr(originalClass) && r_is_objc_ptr(subclass) &&
+            (currentClass == originalClass || currentClass == subclass) &&
+            themer_set_remote_associated_object(
+                provider, "preparedISIcon", source);
+        if (configured && currentClass == originalClass) {
+            uint64_t previousClass = r_dlsym_call(
+                R_TIMEOUT, "object_setClass", provider, subclass,
+                0, 0, 0, 0, 0, 0);
+            configured = previousClass == originalClass;
+        }
+        configured = configured &&
+            r_msg2_main(provider, "preparedISIcon", 0, 0, 0, 0) == source;
     }
+
+    int sourceCacheIndex = -1;
+    configured = configured &&
+        themer_calendar_refresh_source_cache_once(
+            source, sourceCacheRefresh, NULL, &sourceCacheIndex);
+    for (int appearance = 0;
+         appearance < 2 && configured && remote_call_current_success();
+         appearance++) {
+        configured = themer_calendar_prepare_source_cache_once(
+            source, sourceCacheRefresh, sourceCacheIndex, appearance);
+    }
+    uint64_t delegate = configured
+        ? r_msg2_main(provider, "delegate", 0, 0, 0, 0) : 0;
+    uint64_t generationBefore = configured && delegate == model
+        ? r_msg2_main(model, "imageGeneration", 0, 0, 0, 0) : 0;
+    bool reloadIssued = configured && delegate == model &&
+        r_msg2_main(model, "imageProvider", 0, 0, 0, 0) == provider &&
+        remote_call_current_success();
+    if (reloadIssued) {
+        r_msg2_main(provider, "reloadIconImage", 0, 0, 0, 0);
+        reloadIssued = remote_call_current_success();
+    }
+    if (reloadIssuedOut) *reloadIssuedOut = reloadIssued;
+    uint64_t generationAfter = reloadIssued
+        ? r_msg2_main(model, "imageGeneration", 0, 0, 0, 0) : 0;
+    bool generationAdvanced = reloadIssued &&
+        generationAfter == generationBefore + 1ULL;
+    if (generationAdvancedOut) {
+        *generationAdvancedOut = generationAdvanced;
+    }
+    /* The source has already synchronously read and verified the persistent
+     * 68-point response. reloadIconImage is the remaining consumer boundary:
+     * it invalidates the SBHCalendarApplicationIcon and advances its model
+     * generation. Future/offscreen renders now hit the verified source cache. */
+    configured = configured && reloadIssued && generationAdvanced &&
+        sourceCacheIndex >= 0 &&
+        r_msg2_main(provider, "preparedISIcon", 0, 0, 0, 0) == source &&
+        r_msg2_main(provider, "delegate", 0, 0, 0, 0) == model &&
+        remote_call_current_success();
 
     if (newState && r_is_objc_ptr(source) &&
         remote_call_current_success()) {
         r_msg2(source, "release", 0, 0, 0, 0);
     }
+    return configured;
+}
 
+static NSDictionary<NSString *, id> *
+themer_configure_calendar_provider_source(bool install,
+                                          NSData *expectedStructuredDataA0,
+                                          NSData *expectedStructuredDataA1,
+                                          bool refreshSpringBoardConsumer)
+{
+    enum { STATE_CAP = 8 };
+    uint64_t registry = themer_calendar_provider_registry(install);
+    uint64_t stateCount = r_is_objc_ptr(registry)
+        ? themer_remote_count(registry) : 0;
+    if (stateCount > STATE_CAP) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"calendar-provider-registry-invalid",
+            @"message": @"The retained Calendar provider registry exceeded its bounded capacity.",
+        };
+    }
+
+    if (!install) {
+        bool restored = true;
+        NSUInteger restoredStates = 0;
+        NSUInteger reloadPasses = 0;
+        uint64_t restoredModels[STATE_CAP] = {0};
+        int restoredModelCount = 0;
+        bool restoredModelsTruncated = false;
+        for (uint64_t index = 0;
+             index < stateCount && remote_call_current_success(); index++) {
+            uint64_t state = r_msg2_main(
+                registry, "objectAtIndex:", index, 0, 0, 0);
+            uint64_t model = themer_spotlight_dictionary_object(
+                state, "model");
+            uint64_t provider = themer_spotlight_dictionary_object(
+                state, "provider");
+            uint64_t replacement = themer_spotlight_dictionary_object(
+                state, "replacementSource");
+            uint64_t classNumber = themer_spotlight_dictionary_object(
+                state, "originalClass");
+            uint64_t originalClass = r_is_objc_ptr(classNumber) &&
+                r_responds_main(classNumber, "unsignedLongLongValue")
+                ? r_msg2_main(classNumber, "unsignedLongLongValue",
+                              0, 0, 0, 0)
+                : 0;
+            bool oneRestored = r_is_objc_ptr(provider) &&
+                r_is_objc_ptr(replacement) &&
+                r_is_objc_ptr(originalClass);
+            uint64_t currentClass = oneRestored ? r_dlsym_call(
+                R_TIMEOUT, "object_getClass", provider,
+                0, 0, 0, 0, 0, 0, 0) : 0;
+            if (oneRestored && currentClass != originalClass) {
+                uint64_t previous = r_dlsym_call(
+                    R_TIMEOUT, "object_setClass", provider, originalClass,
+                    0, 0, 0, 0, 0, 0);
+                oneRestored = previous == currentClass &&
+                    remote_call_current_success();
+            }
+            if (oneRestored) {
+                oneRestored = themer_set_remote_associated_object(
+                    provider, "preparedISIcon", 0);
+            }
+            uint64_t stockBeforeReload = oneRestored &&
+                r_responds_main(provider, "preparedISIcon")
+                ? r_msg2_main(provider, "preparedISIcon", 0, 0, 0, 0)
+                : 0;
+            oneRestored = oneRestored &&
+                stockBeforeReload != replacement &&
+                themer_calendar_stock_source_is_valid(stockBeforeReload);
+            if (oneRestored &&
+                r_responds_main(provider, "reloadIconImage")) {
+                r_msg2_main(provider, "reloadIconImage", 0, 0, 0, 0);
+                reloadPasses++;
+            } else {
+                oneRestored = false;
+            }
+            uint64_t stockAfterReload = oneRestored
+                ? r_msg2_main(provider, "preparedISIcon", 0, 0, 0, 0)
+                : 0;
+            oneRestored = oneRestored &&
+                stockAfterReload != replacement &&
+                themer_calendar_stock_source_is_valid(stockAfterReload);
+            if (oneRestored) {
+                restoredStates++;
+                oneRestored = themer_calendar_add_unique_model(
+                    restoredModels, &restoredModelCount, STATE_CAP,
+                    model, &restoredModelsTruncated);
+            }
+            restored = restored && oneRestored;
+        }
+        ThemerCalendarConsumerCacheRefresh consumerRefresh = {0};
+        bool consumerRefreshOK = restored && !restoredModelsTruncated &&
+            (restoredModelCount == 0 ||
+             themer_calendar_refresh_springboard_consumer_cache(
+                 restoredModels, restoredModelCount,
+                 refreshSpringBoardConsumer, &consumerRefresh));
+        restored = restored && consumerRefreshOK;
+        if (restored && r_is_objc_ptr(registry)) {
+            restored = themer_spotlight_commit_process_object(
+                kThemerCalendarProviderRegistryKey, 0);
+        }
+        bool ok = restored && remote_call_current_success();
+        printf("[SBR_CALENDAR_SOURCE] ok=%d stage=%s states=%llu "
+               "restored=%lu reload-passes=%lu consumer-cache=%d/%lu/%lu "
+               "cache=%#llx source=CUIKIcon\n",
+               ok, ok ? "calendar-provider-restored" :
+                        "calendar-provider-restore",
+               (unsigned long long)stateCount,
+               (unsigned long)restoredStates,
+               (unsigned long)reloadPasses,
+               consumerRefresh.required,
+               (unsigned long)consumerRefresh.updatedModelCount,
+               (unsigned long)consumerRefresh.requestedModelCount,
+               (unsigned long long)consumerRefresh.cache);
+        return @{
+            @"ok": @(ok),
+            @"stage": ok ? @"calendar-provider-restored" :
+                @"calendar-provider-restore",
+            @"message": ok
+                ? @"The Calendar provider again creates a fresh date-specific CUIKIcon and its delegate was reloaded."
+                : @"The Calendar provider source restore did not fully verify; its registry was retained.",
+            @"stateCount": @(stateCount),
+            @"restoredStateCount": @(restoredStates),
+            @"reloadPasses": @(reloadPasses),
+            @"consumerCacheRefreshRequired": @(consumerRefresh.required),
+            @"consumerCacheRefreshCount":
+                @(consumerRefresh.updatedModelCount),
+            @"consumerCacheRefreshRequestedCount":
+                @(consumerRefresh.requestedModelCount),
+            @"stockSource": @"CUIKIcon/CUIKDefaultIconGenerator",
+            @"viewScanUsed": @NO,
+            @"viewPaintUsed": @NO,
+        };
+    }
+
+    if (![expectedStructuredDataA0 isKindOfClass:NSData.class] ||
+        ![expectedStructuredDataA1 isKindOfClass:NSData.class] ||
+        expectedStructuredDataA0.length == 0 ||
+        expectedStructuredDataA1.length == 0 ||
+        expectedStructuredDataA0.length > (1U << 20) ||
+        expectedStructuredDataA1.length > (1U << 20)) {
+        printf("[SBR_CALENDAR_SOURCE] ok=0 "
+               "stage=calendar-expected-68-response-missing "
+               "bytes=%lu/%lu states=%llu\n",
+               (unsigned long)expectedStructuredDataA0.length,
+               (unsigned long)expectedStructuredDataA1.length,
+               (unsigned long long)stateCount);
+        return @{
+            @"ok": @NO,
+            @"stage": @"calendar-expected-68-response-missing",
+            @"message": @"The active Calendar journal did not provide both exact verified 68-point appearance responses, so no process-local provider state was accepted.",
+            @"expectedStructuredResponsePresent": @NO,
+            @"expectedStructuredAppearanceCount": @2,
+            @"stateCount": @(stateCount),
+        };
+    }
+
+    /* Spotlight owns a private SBHIconModel and does not expose it through
+     * SpringBoard's SBIconController/SBHIconManager singletons. Once the
+     * user has opened Spotlight, ask that exact model to materialize the
+     * canonical Calendar icon just as SpringBoard does; a visible Calendar
+     * result row is not required.
+     *
+     * SearchUIHomeScreenModel is also present inside SpringBoard. It is not
+     * Home's canonical model: selecting it there can bridge a valid but
+     * unmounted SBHCalendarApplicationIcon while the mounted Home model keeps
+     * its procedural CUIKIcon. refreshSpringBoardConsumer is the already
+     * verified target boundary supplied by the caller, so SearchUI discovery
+     * must be completely disabled for that host. */
+    uint64_t model = 0;
+    uint64_t spotlightOwner = 0;
+    uint64_t spotlightDataSource = 0;
+    uint64_t spotlightIconModel = 0;
+    uint64_t spotlightRepository = 0;
+    bool allowSpotlightGraph = !refreshSpringBoardConsumer;
+    bool spotlightGraphKnown = allowSpotlightGraph &&
+        themer_spotlight_current_graph(
+            &spotlightOwner, &spotlightDataSource,
+            &spotlightIconModel, &spotlightRepository);
+    bool spotlightMaterializerAvailable = false;
+    bool spotlightMaterializerABIVerified = false;
+    bool spotlightMaterializerInvoked = false;
+    /* The private SBHIconModel is authoritative, just as SpringBoard's
+     * SBHIconManager.iconModel is authoritative for Home.  Resolve through
+     * that model before consulting SearchUIHomeScreenModel's convenience
+     * materializer, which can return a valid but different icon object. */
+    if (allowSpotlightGraph && spotlightGraphKnown) {
+        uint64_t spotlightRoots[3] = {
+            spotlightIconModel, spotlightRepository,
+            spotlightDataSource,
+        };
+        model = themer_lookup_model_icon_for_bundle_with_roots(
+            kThemerCalendarBundleIdentifier,
+            spotlightRoots,
+            (int)(sizeof(spotlightRoots) / sizeof(spotlightRoots[0])));
+    }
+    /* current_graph intentionally reports false until the data source and
+     * private SBHIconModel are both initialized, but sharedInstance can
+     * already expose SearchUIHomeScreenModel's exact materializer during that
+     * window. Use that call only as a bootstrap, then discard its returned
+     * identity and reacquire Calendar from the private model. */
+    if (allowSpotlightGraph && !r_is_objc_ptr(model) &&
+        r_is_objc_ptr(spotlightOwner) &&
+        r_responds_main(spotlightOwner,
+                        "appIconForApplicationBundleIdentifier:")) {
+        spotlightMaterializerAvailable = true;
+        uint64_t ownerClass = r_dlsym_call(
+            R_TIMEOUT, "object_getClass", spotlightOwner,
+            0, 0, 0, 0, 0, 0, 0);
+        uint64_t materializerMethod = r_is_objc_ptr(ownerClass)
+            ? r_dlsym_call(
+                R_TIMEOUT, "class_getInstanceMethod", ownerClass,
+                r_sel("appIconForApplicationBundleIdentifier:"),
+                0, 0, 0, 0, 0, 0)
+            : 0;
+        spotlightMaterializerABIVerified = materializerMethod &&
+            themer_remote_method_has_types(
+                materializerMethod, "@24@0:8@16");
+        if (spotlightMaterializerABIVerified) {
+            uint64_t bundleIdentifier =
+                r_nsstr_retained(kThemerCalendarBundleIdentifier);
+            uint64_t candidate = r_is_objc_ptr(bundleIdentifier)
+                ? r_msg2_main(
+                    spotlightOwner,
+                    "appIconForApplicationBundleIdentifier:",
+                    bundleIdentifier, 0, 0, 0)
+                : 0;
+            if (r_is_objc_ptr(bundleIdentifier) &&
+                remote_call_current_success()) {
+                r_msg2(bundleIdentifier, "release", 0, 0, 0, 0);
+            }
+            char candidateBundle[192] = {0};
+            if (r_is_objc_ptr(candidate) &&
+                themer_read_bundle_for_icon(
+                    candidate, 0, candidateBundle,
+                    sizeof(candidateBundle)) &&
+                strcmp(candidateBundle,
+                       kThemerCalendarBundleIdentifier) == 0) {
+                spotlightMaterializerInvoked = true;
+                themer_cache_icon_bundle(
+                    candidate, kThemerCalendarBundleIdentifier);
+            }
+        }
+    }
+    if (allowSpotlightGraph && !r_is_objc_ptr(model) &&
+        spotlightMaterializerInvoked && remote_call_current_success()) {
+        spotlightGraphKnown = themer_spotlight_current_graph(
+            &spotlightOwner, &spotlightDataSource,
+            &spotlightIconModel, &spotlightRepository);
+        uint64_t spotlightRoots[3] = {
+            spotlightIconModel, spotlightRepository,
+            spotlightDataSource,
+        };
+        if (spotlightGraphKnown) {
+            model = themer_lookup_model_icon_for_bundle_with_roots(
+                kThemerCalendarBundleIdentifier,
+                spotlightRoots,
+                (int)(sizeof(spotlightRoots) /
+                      sizeof(spotlightRoots[0])));
+        }
+    }
+    if (!allowSpotlightGraph && !r_is_objc_ptr(model)) {
+        model = themer_lookup_model_icon_for_bundle(
+            kThemerCalendarBundleIdentifier);
+    }
+    uint64_t activeModels[STATE_CAP] = {0};
+    int liveLeafModelCount = 0;
+    bool activeModelsTruncated = false;
+    int activeModelCount = themer_calendar_collect_active_models(
+        model, spotlightGraphKnown, activeModels, STATE_CAP,
+        &liveLeafModelCount, &activeModelsTruncated);
+    if (activeModelCount <= 0 || activeModelsTruncated ||
+        !r_is_objc_ptr(registry)) {
+        printf("[SBR_CALENDAR_SOURCE] ok=0 "
+               "stage=calendar-provider-not-materialized "
+               "graph=%d owner=0x%llx canonical=0x%llx models=%d "
+               "leaf=%d truncated=%d materializer=%d abi=%d\n",
+               spotlightGraphKnown,
+               (unsigned long long)spotlightOwner,
+               (unsigned long long)model,
+               activeModelCount, liveLeafModelCount,
+               activeModelsTruncated,
+               spotlightMaterializerAvailable,
+               spotlightMaterializerABIVerified);
+        if (stateCount == 0 && r_is_objc_ptr(registry) &&
+            remote_call_current_success()) {
+            (void)themer_spotlight_commit_process_object(
+                kThemerCalendarProviderRegistryKey, 0);
+        }
+        return @{
+            @"ok": @NO,
+            @"stage": @"calendar-provider-not-materialized",
+            @"message": @"The bounded Calendar model inventory did not produce a complete canonical/live-leaf provider set; no partial provider update was accepted.",
+            @"requiresVisibleView": @NO,
+            @"spotlightGraphKnown": @(spotlightGraphKnown),
+            @"spotlightMaterializerAvailable":
+                @(spotlightMaterializerAvailable),
+            @"spotlightMaterializerABIVerified":
+                @(spotlightMaterializerABIVerified),
+            @"spotlightMaterializerInvoked":
+                @(spotlightMaterializerInvoked),
+            @"spotlightPrivateModelRequired":
+                @(allowSpotlightGraph),
+            @"modelMaterialized": @(r_is_objc_ptr(model)),
+            @"activeModelCount": @(activeModelCount),
+            @"liveLeafModelCount": @(liveLeafModelCount),
+            @"activeModelsTruncated": @(activeModelsTruncated),
+        };
+    }
+
+    uint64_t activeProviders[STATE_CAP] = {0};
+    int activeProviderCount = 0;
+    bool providerAliasingDetected = false;
+    bool providerInventoryReady = true;
+    for (int index = 0;
+         index < activeModelCount && remote_call_current_success(); index++) {
+        uint64_t activeModel = activeModels[index];
+        bool modelABIReady = themer_springboard_method_encoding_is(
+            activeModel, "imageProvider", "@16@0:8");
+        uint64_t provider = modelABIReady
+            ? r_msg2_main(activeModel, "imageProvider", 0, 0, 0, 0)
+            : 0;
+        bool duplicate = themer_calendar_provider_in_inventory(
+            provider, activeProviders, activeProviderCount);
+        if (duplicate) {
+            providerAliasingDetected = true;
+        } else if (r_is_objc_ptr(provider) &&
+                   activeProviderCount < STATE_CAP) {
+            activeProviders[activeProviderCount++] = provider;
+        } else {
+            providerInventoryReady = false;
+        }
+    }
+    NSUInteger staleStateCount = 0;
+    bool staleStatesPruned = providerInventoryReady &&
+        !providerAliasingDetected &&
+        activeProviderCount == activeModelCount &&
+        themer_calendar_prune_stale_provider_states(
+            registry, activeProviders, activeProviderCount,
+            &staleStateCount);
+    if (!staleStatesPruned) {
+        printf("[SBR_CALENDAR_SOURCE] ok=0 "
+               "stage=calendar-provider-inventory-reconcile "
+               "models=%d providers=%d alias=%d states=%llu\n",
+               activeModelCount, activeProviderCount,
+               providerAliasingDetected,
+               (unsigned long long)stateCount);
+        return @{
+            @"ok": @NO,
+            @"stage": @"calendar-provider-inventory-reconcile",
+            @"message": @"The current bounded Calendar provider inventory could not be reconciled with retained recovery state.",
+            @"activeModelCount": @(activeModelCount),
+            @"activeProviderCount": @(activeProviderCount),
+            @"providerAliasingDetected": @(providerAliasingDetected),
+            @"stateCount": @(stateCount),
+        };
+    }
+
+    bool configured = true;
+    NSUInteger configuredProviders = 0;
+    NSUInteger newStateCount = 0;
     NSUInteger reloadPasses = 0;
-    if (configured && remote_call_current_success()) {
-        r_msg2_main(provider, "reloadIconImage", 0, 0, 0, 0);
-        configured = r_msg2_main(
-            provider, "preparedISIcon", 0, 0, 0, 0) == source;
-        if (configured) reloadPasses++;
+    NSUInteger generationAdvances = 0;
+    ThemerCalendarSourceCacheRefresh sourceCacheRefresh = {0};
+    NSData *expectedStructuredDataByAppearance[2] = {
+        expectedStructuredDataA0,
+        expectedStructuredDataA1,
+    };
+    bool expectedResponsesUploaded = true;
+    for (int appearance = 0;
+         appearance < 2 && remote_call_current_success(); appearance++) {
+        NSData *expected = expectedStructuredDataByAppearance[appearance];
+        sourceCacheRefresh.expectedStructuredData[appearance] =
+            themer_make_remote_nsdata(expected);
+        sourceCacheRefresh.expectedStructuredDataLength[appearance] =
+            expected.length;
+        expectedResponsesUploaded = expectedResponsesUploaded &&
+            r_is_objc_ptr(
+                sourceCacheRefresh.expectedStructuredData[appearance]);
+    }
+    if (!expectedResponsesUploaded || !remote_call_current_success()) {
+        printf("[SBR_CALENDAR_SOURCE] ok=0 "
+               "stage=calendar-expected-68-response-upload "
+               "bytes=%lu/%lu\n",
+               (unsigned long)expectedStructuredDataA0.length,
+               (unsigned long)expectedStructuredDataA1.length);
+        for (int appearance = 0;
+             appearance < 2 && remote_call_current_success(); appearance++) {
+            uint64_t uploaded =
+                sourceCacheRefresh.expectedStructuredData[appearance];
+            if (r_is_objc_ptr(uploaded)) {
+                r_msg2(uploaded, "release", 0, 0, 0, 0);
+                sourceCacheRefresh.expectedStructuredData[appearance] = 0;
+            }
+        }
+        return @{
+            @"ok": @NO,
+            @"stage": @"calendar-expected-68-response-upload",
+            @"message": @"Both exact verified Calendar appearance responses could not be copied into the consumer process for bounded source-cache verification.",
+            @"expectedStructuredResponsePresent": @YES,
+            @"expectedStructuredResponseMatched": @NO,
+            @"expectedStructuredAppearanceCount": @2,
+        };
+    }
+    for (int index = 0;
+         index < activeModelCount && remote_call_current_success(); index++) {
+        bool newState = false;
+        bool reloadIssued = false;
+        bool generationAdvanced = false;
+        uint64_t provider = 0;
+        bool providerConfigured =
+            themer_calendar_configure_active_provider(
+                registry, activeModels[index], &sourceCacheRefresh,
+                &newState, &reloadIssued,
+                &generationAdvanced, &provider) &&
+            provider == activeProviders[index];
+        if (providerConfigured) configuredProviders++;
+        if (providerConfigured && newState) newStateCount++;
+        if (providerConfigured && reloadIssued) reloadPasses++;
+        if (providerConfigured && generationAdvanced) generationAdvances++;
+        configured = configured && providerConfigured;
+    }
+    bool sourceCachesRefilled = configured &&
+        themer_calendar_wait_for_source_cache_refills(
+            &sourceCacheRefresh);
+    configured = configured && sourceCachesRefilled;
+    ThemerCalendarConsumerCacheRefresh consumerRefresh = {0};
+    bool consumerRefreshOK = configured &&
+        themer_calendar_refresh_springboard_consumer_cache(
+            activeModels, activeModelCount,
+            refreshSpringBoardConsumer, &consumerRefresh);
+    configured = configured && consumerRefreshOK;
+    for (int appearance = 0;
+         appearance < 2 && remote_call_current_success(); appearance++) {
+        uint64_t uploaded =
+            sourceCacheRefresh.expectedStructuredData[appearance];
+        if (r_is_objc_ptr(uploaded)) {
+            r_msg2(uploaded, "release", 0, 0, 0, 0);
+        }
+        sourceCacheRefresh.expectedStructuredData[appearance] = 0;
     }
     stateCount = themer_remote_count(registry);
     if (stateCount == 0 && r_is_objc_ptr(registry) &&
@@ -15950,39 +17010,705 @@ themer_configure_calendar_provider_source(bool install)
         (void)themer_spotlight_commit_process_object(
             kThemerCalendarProviderRegistryKey, 0);
     }
-    bool ok = configured && stateCount == 1 && reloadPasses == 1 &&
+    bool ok = configured && !activeModelsTruncated &&
+        !providerAliasingDetected && activeModelCount > 0 &&
+        activeProviderCount == activeModelCount &&
+        configuredProviders == (NSUInteger)activeModelCount &&
+        reloadPasses == configuredProviders &&
+        generationAdvances == configuredProviders &&
+        sourceCacheRefresh.cacheCount > 0 &&
+        sourceCacheRefresh.purgeCount ==
+            (NSUInteger)sourceCacheRefresh.cacheCount &&
+        sourceCacheRefresh.responseVerifiedCount ==
+            (NSUInteger)sourceCacheRefresh.cacheCount * 2U &&
+        sourceCacheRefresh.responseExactMatchCount ==
+            (NSUInteger)sourceCacheRefresh.cacheCount * 2U &&
+        !sourceCacheRefresh.responseInspectionFailed &&
+        !sourceCacheRefresh.responseInspectionTruncated &&
+        stateCount == configuredProviders && stateCount <= STATE_CAP &&
         remote_call_current_success();
-    printf("[SBR_CALENDAR_SOURCE] ok=%d stage=%s model=%#llx "
-           "provider=%#llx states=%llu new=%d reload-passes=%lu "
-           "source=ISBundleIdentifierIcon/%s view-scan=0\n",
+    printf("[SBR_CALENDAR_SOURCE] ok=%d stage=%s canonical=%#llx "
+           "models=%d leaf=%d providers=%d configured=%lu states=%llu "
+           "new=%lu stale=%lu reload-passes=%lu generations=%lu alias=%d "
+           "source-caches=%d/%lu appearances=2 entries=%llu/%llu/%llu "
+           "prepares=%lu/%lu exact-responses=%lu/%lu candidates=%lu scan=%s/%s "
+           "reload-observations=%lu/%lu polls=%lu wait-us=%llu "
+           "consumer-cache=%d/%lu/%lu cache=%#llx "
+           "source=ISBundleIdentifierIcon/%s view-scan=0 view-paint=0\n",
            ok, ok ? "calendar-provider-source-ready" :
                     "calendar-provider-source-verify",
            (unsigned long long)model,
-           (unsigned long long)provider,
-           (unsigned long long)stateCount, newState,
+           activeModelCount, liveLeafModelCount, activeProviderCount,
+           (unsigned long)configuredProviders,
+           (unsigned long long)stateCount,
+           (unsigned long)newStateCount,
+           (unsigned long)staleStateCount,
            (unsigned long)reloadPasses,
+           (unsigned long)generationAdvances,
+           providerAliasingDetected,
+           sourceCacheRefresh.cacheCount,
+           (unsigned long)sourceCacheRefresh.purgeCount,
+           (unsigned long long)sourceCacheRefresh.entriesBefore,
+           (unsigned long long)sourceCacheRefresh.entriesAfter,
+           (unsigned long long)sourceCacheRefresh.entriesAfterResponse,
+           (unsigned long)sourceCacheRefresh.responsePrepareSuccessCount,
+           (unsigned long)sourceCacheRefresh.responsePrepareCount,
+           (unsigned long)sourceCacheRefresh.responseExactMatchCount,
+           (unsigned long)sourceCacheRefresh.cacheCount * 2UL,
+           (unsigned long)sourceCacheRefresh.responseCandidateCount,
+           sourceCacheRefresh.responseInspectionFailed ? "failed" : "ok",
+           sourceCacheRefresh.responseInspectionTruncated
+               ? "truncated" : "bounded",
+           (unsigned long)sourceCacheRefresh.responseVerifiedCount,
+           (unsigned long)sourceCacheRefresh.responseRequestCount,
+           (unsigned long)sourceCacheRefresh.refillPollPasses,
+           (unsigned long long)sourceCacheRefresh.refillWaitUS,
+           consumerRefresh.required,
+           (unsigned long)consumerRefresh.updatedModelCount,
+           (unsigned long)consumerRefresh.requestedModelCount,
+           (unsigned long long)consumerRefresh.cache,
            kThemerCalendarBundleIdentifier);
     return @{
         @"ok": @(ok),
         @"stage": ok ? @"calendar-provider-source-ready" :
             @"calendar-provider-source-verify",
         @"message": ok
-            ? @"Calendar's exact preparedISIcon boundary now returns the retained canonical bundle source after one required provider reload."
-            : @"The Calendar provider bridge did not survive its required source readback and reload; retained recovery state remains available.",
+            ? @"Calendar's current canonical/live-leaf providers return the registered bundle source; every distinct source cache refilled with both exact journal-verified themed 68-point appearance responses, and SpringBoard's bounded per-Calendar cache update synchronously refreshed mounted consumers."
+            : @"The bounded current Calendar provider set, both exact themed appearance refills, or native consumer invalidation did not fully verify; retained recovery state remains available.",
         @"stockSource": @"CUIKIcon/CUIKDefaultIconGenerator",
         @"replacementSource": @"ISBundleIdentifierIcon/com.apple.mobilecal",
         @"providerClass": @"SBCalendarIconImageProvider",
         @"providerSelector": @"preparedISIcon",
         @"providerSelectorABI": @"@16@0:8",
+        @"spotlightGraphKnown": @(spotlightGraphKnown),
+        @"spotlightMaterializerAvailable":
+            @(spotlightMaterializerAvailable),
+        @"spotlightMaterializerABIVerified":
+            @(spotlightMaterializerABIVerified),
+        @"spotlightMaterializerInvoked":
+            @(spotlightMaterializerInvoked),
+        @"spotlightPrivateModelRequired":
+            @(allowSpotlightGraph),
+        @"spotlightPrivateModelResolved":
+            @(allowSpotlightGraph && spotlightGraphKnown &&
+              r_is_objc_ptr(model)),
+        @"modelMaterialized": @(r_is_objc_ptr(model)),
+        @"activeModelCount": @(activeModelCount),
+        @"liveLeafModelCount": @(liveLeafModelCount),
+        @"activeProviderCount": @(activeProviderCount),
+        @"configuredProviderCount": @(configuredProviders),
+        @"activeModelsTruncated": @(activeModelsTruncated),
+        @"providerAliasingDetected": @(providerAliasingDetected),
         @"stateCount": @(stateCount),
-        @"newStateCount": @(newState ? 1 : 0),
+        @"newStateCount": @(newStateCount),
+        @"staleStateCount": @(staleStateCount),
         @"reloadPasses": @(reloadPasses),
+        @"generationAdvanceCount": @(generationAdvances),
+        @"consumerCacheRefreshRequired": @(consumerRefresh.required),
+        @"consumerCacheRefreshCount":
+            @(consumerRefresh.updatedModelCount),
+        @"consumerCacheRefreshRequestedCount":
+            @(consumerRefresh.requestedModelCount),
+        @"sourceCacheCount": @(sourceCacheRefresh.cacheCount),
+        @"purgedSourceCacheCount": @(sourceCacheRefresh.purgeCount),
+        @"sourceCacheEntriesBefore": @(sourceCacheRefresh.entriesBefore),
+        @"sourceCacheEntriesAfter": @(sourceCacheRefresh.entriesAfter),
+        @"sourceCacheEntriesObservedAfterReload":
+            @(sourceCacheRefresh.entriesAfterResponse),
+        @"sourceCacheReloadObservationCount":
+            @(sourceCacheRefresh.responseRequestCount),
+        @"sourceCachePrepareCount":
+            @(sourceCacheRefresh.responsePrepareCount),
+        @"sourceCachePrepareSuccessCount":
+            @(sourceCacheRefresh.responsePrepareSuccessCount),
+        @"sourceCacheReloadObservedCount":
+            @(sourceCacheRefresh.responseVerifiedCount),
+        @"sourceCacheResponseCandidateCount":
+            @(sourceCacheRefresh.responseCandidateCount),
+        @"sourceCacheExactResponseMatchCount":
+            @(sourceCacheRefresh.responseExactMatchCount),
+        @"sourceCacheResponseInspectionFailed":
+            @(sourceCacheRefresh.responseInspectionFailed),
+        @"sourceCacheResponseInspectionTruncated":
+            @(sourceCacheRefresh.responseInspectionTruncated),
+        @"sourceCacheRefillPollPasses":
+            @(sourceCacheRefresh.refillPollPasses),
+        @"sourceCacheRefillWaitUS":
+            @(sourceCacheRefresh.refillWaitUS),
+        @"expectedStructuredResponsePresent": @YES,
+        @"expectedStructuredAppearanceCount": @2,
+        @"expectedStructuredResponseMatched": @(
+            sourceCacheRefresh.responseExactMatchCount ==
+                (NSUInteger)sourceCacheRefresh.cacheCount * 2U &&
+            sourceCacheRefresh.cacheCount > 0),
         @"fastPath": @NO,
         @"requiresVisibleView": @NO,
         @"viewScanUsed": @NO,
         @"viewPaintUsed": @NO,
         @"persistentDescriptorMatrixPreserved": @YES,
         @"transitionDescriptorsPreserved": @YES,
+    };
+}
+
+static const char *const kThemerSpotlightFilesThumbnailRegistryKey =
+    "cnd_sbr_spotlight_files_thumbnail_states_v1";
+static const char *const kThemerSpotlightFilesBundleIdentifier =
+    "com.apple.DocumentsApp";
+static const char *const kThemerSpotlightFilesProviderIdentifier =
+    "com.apple.FileProvider.LocalStorage";
+static const char *const kThemerSpotlightFilesCoreSpotlightIdentifier =
+    "__fpdefault/NSFileProviderRootContainerItemIdentifier";
+
+typedef struct {
+    uint64_t cell;
+    uint64_t model;
+    uint64_t leadingImage;
+    uint64_t fallbackImage;
+} ThemerSpotlightFilesRow;
+
+static bool themer_spotlight_add_unique_controller(
+    uint64_t *controllers, int *count, int cap, uint64_t controller)
+{
+    if (!controllers || !count || *count >= cap ||
+        !r_is_objc_ptr(controller)) return false;
+    for (int index = 0; index < *count; index++) {
+        if (controllers[index] == controller) return false;
+    }
+    controllers[(*count)++] = controller;
+    return true;
+}
+
+static void themer_spotlight_add_window_roots(
+    uint64_t windows, uint64_t *controllers, int *count, int cap)
+{
+    uint64_t array = themer_spotlight_collection_array(windows);
+    uint64_t windowCount = themer_collection_count_capped(array, 32);
+    for (uint64_t index = 0; index < windowCount && *count < cap; index++) {
+        uint64_t window = r_msg2_main(
+            array, "objectAtIndex:", index, 0, 0, 0);
+        uint64_t root = r_is_objc_ptr(window) &&
+                        r_responds_main(window, "rootViewController")
+            ? r_msg2_main(window, "rootViewController", 0, 0, 0, 0)
+            : 0;
+        (void)themer_spotlight_add_unique_controller(
+            controllers, count, cap, root);
+    }
+}
+
+static bool themer_spotlight_files_row_is_exact(uint64_t model,
+                                                 uint64_t fallback)
+{
+    uint64_t fallbackClass = r_class("SearchUIAppIconImage");
+    return r_is_objc_ptr(model) && r_is_objc_ptr(fallback) &&
+        r_is_objc_ptr(fallbackClass) &&
+        r_msg2_main(fallback, "isKindOfClass:",
+                    fallbackClass, 0, 0, 0) != 0 &&
+        themer_clock_remote_string_equals(
+            model, "applicationBundleIdentifier",
+            kThemerSpotlightFilesBundleIdentifier) &&
+        themer_clock_remote_string_equals(
+            model, "fileProviderIdentifier",
+            kThemerSpotlightFilesProviderIdentifier) &&
+        themer_clock_remote_string_equals(
+            model, "coreSpotlightIdentifier",
+            kThemerSpotlightFilesCoreSpotlightIdentifier) &&
+        themer_clock_remote_string_equals(
+            fallback, "bundleIdentifier",
+            kThemerSpotlightFilesBundleIdentifier) &&
+        remote_call_current_success();
+}
+
+/* This is deliberately a controller/cell graph, not a recursive window or
+ * view walk. The iOS 26 VM trace resolves the active results through:
+ * SPUIResultsViewController.resultsTableViewController ->
+ * SearchUIResultsCollectionViewController.collectionView.visibleCells. */
+static int themer_collect_spotlight_files_rows(
+    ThemerSpotlightFilesRow *rows, int cap, int *controllerCountOut,
+    int *visibleCellCountOut)
+{
+    enum { CONTROLLER_CAP = 128 };
+    uint64_t controllers[CONTROLLER_CAP] = {0};
+    int controllerCount = 0;
+    int visibleCellCount = 0;
+    int rowCount = 0;
+    uint64_t applicationClass = r_class("UIApplication");
+    uint64_t application = r_is_objc_ptr(applicationClass) &&
+                           r_responds_main(
+                               applicationClass, "sharedApplication")
+        ? r_msg2_main(applicationClass, "sharedApplication", 0, 0, 0, 0)
+        : 0;
+    if (!r_is_objc_ptr(application)) return 0;
+
+    uint64_t appWindows = r_responds_main(application, "windows")
+        ? r_msg2_main(application, "windows", 0, 0, 0, 0) : 0;
+    themer_spotlight_add_window_roots(
+        appWindows, controllers, &controllerCount, CONTROLLER_CAP);
+    uint64_t scenes = r_responds_main(application, "connectedScenes")
+        ? r_msg2_main(application, "connectedScenes", 0, 0, 0, 0) : 0;
+    uint64_t sceneArray = themer_spotlight_collection_array(scenes);
+    uint64_t sceneCount = themer_collection_count_capped(sceneArray, 16);
+    for (uint64_t index = 0;
+         index < sceneCount && controllerCount < CONTROLLER_CAP; index++) {
+        uint64_t scene = r_msg2_main(
+            sceneArray, "objectAtIndex:", index, 0, 0, 0);
+        uint64_t windows = r_is_objc_ptr(scene) &&
+                           r_responds_main(scene, "windows")
+            ? r_msg2_main(scene, "windows", 0, 0, 0, 0) : 0;
+        themer_spotlight_add_window_roots(
+            windows, controllers, &controllerCount, CONTROLLER_CAP);
+    }
+
+    for (int cursor = 0;
+         cursor < controllerCount && cursor < CONTROLLER_CAP; cursor++) {
+        uint64_t controller = controllers[cursor];
+        uint64_t presented = r_responds_main(
+            controller, "presentedViewController")
+            ? r_msg2_main(controller, "presentedViewController",
+                          0, 0, 0, 0)
+            : 0;
+        (void)themer_spotlight_add_unique_controller(
+            controllers, &controllerCount, CONTROLLER_CAP, presented);
+        uint64_t children = r_responds_main(
+            controller, "childViewControllers")
+            ? r_msg2_main(controller, "childViewControllers", 0, 0, 0, 0)
+            : 0;
+        uint64_t childCount = themer_collection_count_capped(children, 32);
+        for (uint64_t index = 0;
+             index < childCount && controllerCount < CONTROLLER_CAP;
+             index++) {
+            uint64_t child = r_msg2_main(
+                children, "objectAtIndex:", index, 0, 0, 0);
+            (void)themer_spotlight_add_unique_controller(
+                controllers, &controllerCount, CONTROLLER_CAP, child);
+        }
+
+        uint64_t resultsController = r_responds_main(
+            controller, "resultsTableViewController")
+            ? r_msg2_main(controller, "resultsTableViewController",
+                          0, 0, 0, 0)
+            : 0;
+        uint64_t collectionView = r_is_objc_ptr(resultsController) &&
+                                  r_responds_main(
+                                      resultsController, "collectionView")
+            ? r_msg2_main(resultsController, "collectionView", 0, 0, 0, 0)
+            : 0;
+        uint64_t visibleCells = r_is_objc_ptr(collectionView) &&
+                                r_responds_main(collectionView, "visibleCells")
+            ? r_msg2_main(collectionView, "visibleCells", 0, 0, 0, 0)
+            : 0;
+        uint64_t cellCount = themer_collection_count_capped(
+            visibleCells, 128);
+        visibleCellCount += (int)cellCount;
+        for (uint64_t index = 0;
+             index < cellCount && rowCount < cap; index++) {
+            uint64_t cell = r_msg2_main(
+                visibleCells, "objectAtIndex:", index, 0, 0, 0);
+            uint64_t model = r_is_objc_ptr(cell) &&
+                             r_responds_main(cell, "rowModel")
+                ? r_msg2_main(cell, "rowModel", 0, 0, 0, 0)
+                : 0;
+            uint64_t leading = r_is_objc_ptr(model) &&
+                               r_responds_main(model, "leadingImage")
+                ? r_msg2_main(model, "leadingImage", 0, 0, 0, 0)
+                : 0;
+            uint64_t fallback = r_is_objc_ptr(model) &&
+                                r_responds_main(model, "fallbackImage")
+                ? r_msg2_main(model, "fallbackImage", 0, 0, 0, 0)
+                : 0;
+            if (!themer_spotlight_files_row_is_exact(model, fallback)) {
+                continue;
+            }
+            bool duplicate = false;
+            for (int prior = 0; prior < rowCount; prior++) {
+                if (rows[prior].model == model) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+            rows[rowCount++] = (ThemerSpotlightFilesRow){
+                .cell = cell,
+                .model = model,
+                .leadingImage = leading,
+                .fallbackImage = fallback,
+            };
+        }
+    }
+    if (controllerCountOut) *controllerCountOut = controllerCount;
+    if (visibleCellCountOut) *visibleCellCountOut = visibleCellCount;
+    return rowCount;
+}
+
+static uint64_t themer_spotlight_files_thumbnail_registry(bool create)
+{
+    uint64_t registry = themer_spotlight_associated_process_object(
+        kThemerSpotlightFilesThumbnailRegistryKey);
+    if (r_is_objc_ptr(registry) || !create) return registry;
+    uint64_t arrayClass = themer_lookup_class("NSMutableArray");
+    uint64_t allocation = r_is_objc_ptr(arrayClass)
+        ? r_msg2(arrayClass, "alloc", 0, 0, 0, 0) : 0;
+    registry = r_is_objc_ptr(allocation)
+        ? r_msg2_main(allocation, "initWithCapacity:", 2, 0, 0, 0)
+        : 0;
+    bool committed = r_is_objc_ptr(registry) &&
+        themer_spotlight_commit_process_object(
+            kThemerSpotlightFilesThumbnailRegistryKey, registry);
+    if (r_is_objc_ptr(registry) && remote_call_current_success()) {
+        r_msg2(registry, "release", 0, 0, 0, 0);
+    }
+    return committed
+        ? themer_spotlight_associated_process_object(
+              kThemerSpotlightFilesThumbnailRegistryKey)
+        : 0;
+}
+
+static uint64_t themer_spotlight_files_state_for_model(uint64_t registry,
+                                                        uint64_t model)
+{
+    uint64_t count = themer_session_collection_count(registry);
+    if (count > 8) return 0;
+    for (uint64_t index = 0; index < count; index++) {
+        uint64_t state = r_msg2_main(
+            registry, "objectAtIndex:", index, 0, 0, 0);
+        if (themer_spotlight_dictionary_object(state, "model") == model) {
+            return state;
+        }
+    }
+    return 0;
+}
+
+static bool themer_spotlight_files_thumbnail_api_ready(void)
+{
+    uint64_t converterClass = r_class("SearchUITLKImageConverter");
+    uint64_t cacheClass = r_class("SearchUIImageCache");
+    uint64_t modelClass = r_class("SearchUIDetailedRowModel");
+    uint64_t cellClass = r_class("SearchUICollectionViewCell");
+    uint64_t converterMethod = converterClass ? r_dlsym_call(
+        R_TIMEOUT, "class_getClassMethod", converterClass,
+        r_sel("imageForSFImage:"), 0, 0, 0, 0, 0, 0) : 0;
+    uint64_t cacheMethod = cacheClass ? r_dlsym_call(
+        R_TIMEOUT, "class_getClassMethod", cacheClass,
+        r_sel("cacheTLKImage:forSFImage:"), 0, 0, 0, 0, 0, 0) : 0;
+    uint64_t modelMethod = modelClass ? r_dlsym_call(
+        R_TIMEOUT, "class_getInstanceMethod", modelClass,
+        r_sel("setLeadingImage:"), 0, 0, 0, 0, 0, 0) : 0;
+    uint64_t cellMethod = cellClass ? r_dlsym_call(
+        R_TIMEOUT, "class_getInstanceMethod", cellClass,
+        r_sel("updateWithRowModel:"), 0, 0, 0, 0, 0, 0) : 0;
+    return converterMethod && cacheMethod && modelMethod && cellMethod &&
+        themer_remote_method_has_types(converterMethod, "@24@0:8@16") &&
+        themer_remote_method_has_types(cacheMethod, "v32@0:8@16@24") &&
+        themer_remote_method_has_types(modelMethod, "v24@0:8@16") &&
+        themer_remote_method_has_types(cellMethod, "v24@0:8@16") &&
+        remote_call_current_success();
+}
+
+static bool themer_spotlight_files_update_row(
+    const ThemerSpotlightFilesRow *row, uint64_t image)
+{
+    if (!row || !r_is_objc_ptr(row->cell) ||
+        !r_is_objc_ptr(row->model) || !r_is_objc_ptr(image) ||
+        !r_responds_main(row->model, "setLeadingImage:") ||
+        !r_responds_main(row->cell, "updateWithRowModel:")) {
+        return false;
+    }
+    r_msg2_main(row->model, "setLeadingImage:", image, 0, 0, 0);
+    r_msg2_main(row->cell, "updateWithRowModel:",
+                row->model, 0, 0, 0);
+    uint64_t observed = r_msg2_main(
+        row->model, "leadingImage", 0, 0, 0, 0);
+    return observed == image && remote_call_current_success();
+}
+
+static NSDictionary<NSString *, id> *
+themer_configure_spotlight_files_thumbnail(bool install)
+{
+    enum { ROW_CAP = 16, STATE_CAP = 8 };
+    uint64_t registry =
+        themer_spotlight_files_thumbnail_registry(install);
+    uint64_t initialStateCount = r_is_objc_ptr(registry)
+        ? themer_session_collection_count(registry) : 0;
+    if (initialStateCount > STATE_CAP) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"files-thumbnail-registry-invalid",
+            @"message": @"The retained Files thumbnail registry exceeded its bounded capacity.",
+        };
+    }
+
+    ThemerSpotlightFilesRow rows[ROW_CAP] = {{0}};
+    int controllerCount = 0;
+    int visibleCellCount = 0;
+    int rowCount = themer_collect_spotlight_files_rows(
+        rows, ROW_CAP, &controllerCount, &visibleCellCount);
+
+    if (!install) {
+        bool restored = true;
+        NSUInteger cacheRestores = 0;
+        NSUInteger modelRestores = 0;
+        uint64_t defaultOriginalLeading = 0;
+        for (uint64_t index = 0;
+             index < initialStateCount && remote_call_current_success();
+             index++) {
+            uint64_t state = r_msg2_main(
+                registry, "objectAtIndex:", index, 0, 0, 0);
+            uint64_t model = themer_spotlight_dictionary_object(
+                state, "model");
+            uint64_t originalLeading = themer_spotlight_dictionary_object(
+                state, "originalLeading");
+            uint64_t cache = themer_spotlight_dictionary_object(
+                state, "cache");
+            uint64_t cacheKey = themer_spotlight_dictionary_object(
+                state, "cacheKey");
+            uint64_t originalCached = themer_spotlight_dictionary_object(
+                state, "originalCached");
+            if (!defaultOriginalLeading && r_is_objc_ptr(originalLeading)) {
+                defaultOriginalLeading = originalLeading;
+            }
+            bool oneCache = r_is_objc_ptr(cache) &&
+                r_is_objc_ptr(cacheKey) &&
+                r_responds_main(cache, "removeObjectForKey:") &&
+                r_responds_main(cache, "objectForKey:");
+            if (oneCache) {
+                r_msg2_main(cache, "removeObjectForKey:",
+                            cacheKey, 0, 0, 0);
+                if (r_is_objc_ptr(originalCached) &&
+                    r_responds_main(cache, "setObject:forKey:")) {
+                    r_msg2_main(cache, "setObject:forKey:",
+                                originalCached, cacheKey, 0, 0);
+                }
+                uint64_t observed = r_msg2_main(
+                    cache, "objectForKey:", cacheKey, 0, 0, 0);
+                oneCache = r_is_objc_ptr(originalCached)
+                    ? observed == originalCached : !r_is_objc_ptr(observed);
+            }
+            bool oneModel = r_is_objc_ptr(model) &&
+                r_is_objc_ptr(originalLeading) &&
+                r_responds_main(model, "setLeadingImage:");
+            if (oneModel) {
+                r_msg2_main(model, "setLeadingImage:",
+                            originalLeading, 0, 0, 0);
+                oneModel = r_msg2_main(
+                    model, "leadingImage", 0, 0, 0, 0) ==
+                        originalLeading;
+            }
+            if (oneCache) cacheRestores++;
+            if (oneModel) modelRestores++;
+            restored = restored && oneCache && oneModel;
+        }
+
+        NSUInteger repaints = 0;
+        for (int index = 0;
+             index < rowCount && r_is_objc_ptr(defaultOriginalLeading);
+             index++) {
+            uint64_t state = themer_spotlight_files_state_for_model(
+                registry, rows[index].model);
+            uint64_t original = r_is_objc_ptr(state)
+                ? themer_spotlight_dictionary_object(
+                      state, "originalLeading")
+                : defaultOriginalLeading;
+            bool toggled = themer_spotlight_files_update_row(
+                &rows[index], rows[index].fallbackImage);
+            bool repainted = toggled &&
+                themer_spotlight_files_update_row(&rows[index], original);
+            if (repainted) repaints++;
+            restored = restored && repainted;
+        }
+        if (restored && r_is_objc_ptr(registry)) {
+            restored = themer_spotlight_commit_process_object(
+                kThemerSpotlightFilesThumbnailRegistryKey, 0);
+        }
+        bool ok = restored && remote_call_current_success();
+        printf("[SBR_FILES_THUMBNAIL] ok=%d install=0 states=%llu "
+               "rows=%d controllers=%d visible-cells=%d cache=%lu "
+               "models=%lu repaints=%lu graph=controller-visible-cells "
+               "recursive-view-walk=0\n",
+               ok, (unsigned long long)initialStateCount,
+               rowCount, controllerCount, visibleCellCount,
+               (unsigned long)cacheRestores,
+               (unsigned long)modelRestores,
+               (unsigned long)repaints);
+        return @{
+            @"ok": @(ok),
+            @"stage": ok ? @"files-thumbnail-restored" :
+                @"files-thumbnail-restore",
+            @"message": ok
+                ? @"Spotlight's Files root row again uses its stock Quick Look thumbnail source."
+                : @"Spotlight's retained Files root thumbnail state did not fully restore.",
+            @"stateCount": @(initialStateCount),
+            @"rowCount": @(rowCount),
+            @"cacheRestoreCount": @(cacheRestores),
+            @"modelRestoreCount": @(modelRestores),
+            @"repaintCount": @(repaints),
+            @"recursiveViewWalkUsed": @NO,
+        };
+    }
+
+    bool apiReady = themer_spotlight_files_thumbnail_api_ready();
+    uint64_t converterClass = apiReady
+        ? r_class("SearchUITLKImageConverter") : 0;
+    uint64_t cacheOwnerClass = apiReady
+        ? r_class("SearchUIImageCache") : 0;
+    uint64_t cacheOwner = r_is_objc_ptr(cacheOwnerClass)
+        ? r_msg2_main(cacheOwnerClass, "sharedCache", 0, 0, 0, 0) : 0;
+    uint64_t cache = r_is_objc_ptr(cacheOwner) &&
+                     r_responds_main(cacheOwner, "imageCache")
+        ? r_msg2_main(cacheOwner, "imageCache", 0, 0, 0, 0) : 0;
+    bool configured = apiReady && r_is_objc_ptr(registry) &&
+        r_is_objc_ptr(converterClass) && r_is_objc_ptr(cache);
+    NSUInteger cacheSeeds = 0;
+    NSUInteger modelUpdates = 0;
+    NSUInteger newStates = 0;
+    uint64_t quickLookClass = r_class("SFQuickLookThumbnailImage");
+
+    for (int index = 0;
+         configured && index < rowCount && remote_call_current_success();
+         index++) {
+        ThemerSpotlightFilesRow *row = &rows[index];
+        uint64_t state = themer_spotlight_files_state_for_model(
+            registry, row->model);
+        if (r_is_objc_ptr(state)) {
+            uint64_t cacheKey = themer_spotlight_dictionary_object(
+                state, "cacheKey");
+            uint64_t themedTLK = themer_spotlight_dictionary_object(
+                state, "themedTLK");
+            uint64_t replacement = themer_spotlight_dictionary_object(
+                state, "replacementLeading");
+            r_msg2_main(cache, "setObject:forKey:",
+                        themedTLK, cacheKey, 0, 0);
+            bool seeded = r_msg2_main(
+                cache, "objectForKey:", cacheKey, 0, 0, 0) == themedTLK;
+            bool updated = seeded &&
+                themer_spotlight_files_update_row(row, replacement);
+            if (seeded) cacheSeeds++;
+            if (updated) modelUpdates++;
+            configured = configured && seeded && updated;
+            continue;
+        }
+
+        bool stockQuickLook = r_is_objc_ptr(quickLookClass) &&
+            r_is_objc_ptr(row->leadingImage) &&
+            r_msg2_main(row->leadingImage, "isKindOfClass:",
+                        quickLookClass, 0, 0, 0) != 0;
+        uint64_t themedTLK = stockQuickLook
+            ? r_msg2_main(converterClass, "imageForSFImage:",
+                          row->fallbackImage, 0, 0, 0)
+            : 0;
+        uint64_t originalCached = r_is_objc_ptr(themedTLK)
+            ? r_msg2_main(cache, "objectForKey:",
+                          row->leadingImage, 0, 0, 0)
+            : 0;
+        uint64_t dictionaryClass = themer_lookup_class(
+            "NSMutableDictionary");
+        uint64_t allocation = r_is_objc_ptr(dictionaryClass)
+            ? r_msg2(dictionaryClass, "alloc", 0, 0, 0, 0) : 0;
+        state = r_is_objc_ptr(allocation)
+            ? r_msg2_main(allocation, "initWithCapacity:",
+                          7, 0, 0, 0)
+            : 0;
+        bool stateReady = r_is_objc_ptr(state) &&
+            r_is_objc_ptr(themedTLK) &&
+            themer_spotlight_dictionary_set_object(
+                state, "model", row->model) &&
+            themer_spotlight_dictionary_set_object(
+                state, "originalLeading", row->leadingImage) &&
+            themer_spotlight_dictionary_set_object(
+                state, "replacementLeading", row->fallbackImage) &&
+            themer_spotlight_dictionary_set_object(
+                state, "cache", cache) &&
+            themer_spotlight_dictionary_set_object(
+                state, "cacheKey", row->leadingImage) &&
+            themer_spotlight_dictionary_set_object(
+                state, "themedTLK", themedTLK);
+        if (stateReady && r_is_objc_ptr(originalCached)) {
+            stateReady = themer_spotlight_dictionary_set_object(
+                state, "originalCached", originalCached);
+        }
+        bool seeded = false;
+        bool updated = false;
+        bool committed = false;
+        if (stateReady) {
+            r_msg2_main(cache, "setObject:forKey:",
+                        themedTLK, row->leadingImage, 0, 0);
+            seeded = r_msg2_main(
+                cache, "objectForKey:", row->leadingImage,
+                0, 0, 0) == themedTLK;
+            updated = seeded &&
+                themer_spotlight_files_update_row(
+                    row, row->fallbackImage);
+        }
+        if (updated) {
+            uint64_t before = themer_session_collection_count(registry);
+            r_msg2_main(registry, "addObject:", state, 0, 0, 0);
+            uint64_t after = themer_session_collection_count(registry);
+            committed = after == before + 1 &&
+                themer_spotlight_files_state_for_model(
+                    registry, row->model) == state;
+        }
+        if (!committed && remote_call_current_success()) {
+            (void)themer_spotlight_files_update_row(
+                row, row->leadingImage);
+            r_msg2_main(cache, "removeObjectForKey:",
+                        row->leadingImage, 0, 0, 0);
+            if (r_is_objc_ptr(originalCached)) {
+                r_msg2_main(cache, "setObject:forKey:",
+                            originalCached, row->leadingImage, 0, 0);
+            }
+        }
+        if (r_is_objc_ptr(state) && remote_call_current_success()) {
+            r_msg2(state, "release", 0, 0, 0, 0);
+        }
+        if (seeded && committed) cacheSeeds++;
+        if (updated && committed) modelUpdates++;
+        if (committed) newStates++;
+        configured = configured && committed;
+    }
+
+    uint64_t finalStateCount = r_is_objc_ptr(registry)
+        ? themer_session_collection_count(registry) : 0;
+    bool materialized = finalStateCount > 0;
+    bool ok = configured && materialized &&
+        finalStateCount <= STATE_CAP && remote_call_current_success();
+    if (!materialized && r_is_objc_ptr(registry) &&
+        remote_call_current_success()) {
+        (void)themer_spotlight_commit_process_object(
+            kThemerSpotlightFilesThumbnailRegistryKey, 0);
+    }
+    printf("[SBR_FILES_THUMBNAIL] ok=%d install=1 api=%d "
+           "states=%llu/%llu rows=%d controllers=%d visible-cells=%d "
+           "new=%lu cache=%lu models=%lu "
+           "graph=controller-visible-cells recursive-view-walk=0\n",
+           ok, apiReady,
+           (unsigned long long)initialStateCount,
+           (unsigned long long)finalStateCount,
+           rowCount, controllerCount, visibleCellCount,
+           (unsigned long)newStates,
+           (unsigned long)cacheSeeds,
+           (unsigned long)modelUpdates);
+    return @{
+        @"ok": @(ok),
+        @"stage": ok ? @"files-thumbnail-ready" :
+            (materialized ? @"files-thumbnail-configuration" :
+                            @"files-thumbnail-not-materialized"),
+        @"message": ok
+            ? @"Spotlight's exact local File Provider root uses the persistent themed Files app image, and its process cache is seeded for equivalent future rows."
+            : (materialized
+                ? @"Spotlight's exact Files root thumbnail did not fully verify."
+                : @"The Files root result is not materialized. Search for “files” until “File Provider Storage” appears, then retry."),
+        @"stateCount": @(finalStateCount),
+        @"rowCount": @(rowCount),
+        @"newStateCount": @(newStates),
+        @"cacheSeedCount": @(cacheSeeds),
+        @"modelUpdateCount": @(modelUpdates),
+        @"providerIdentifier":
+            @"com.apple.FileProvider.LocalStorage",
+        @"coreSpotlightIdentifier":
+            @"__fpdefault/NSFileProviderRootContainerItemIdentifier",
+        @"replacementSource":
+            @"SearchUIDetailedRowModel.fallbackImage/com.apple.DocumentsApp",
+        @"controllerGraph":
+            @"SPUIResultsViewController.resultsTableViewController.collectionView.visibleCells",
+        @"recursiveViewWalkUsed": @NO,
     };
 }
 
@@ -15993,6 +17719,14 @@ themer_configure_clock_calendar_sources_in_session(
 {
     bool installClock = imageDataByBundle[@"com.apple.mobiletimer"].length > 0;
     bool installCalendar = imageDataByBundle[@"com.apple.mobilecal"].length > 0;
+    NSData *expectedCalendar68A0 =
+        [imageDataByBundle[@"__cnd_calendar_68_structured"]
+            isKindOfClass:NSData.class]
+        ? imageDataByBundle[@"__cnd_calendar_68_structured"] : nil;
+    NSData *expectedCalendar68A1 =
+        [imageDataByBundle[@"__cnd_calendar_68_structured_a1"]
+            isKindOfClass:NSData.class]
+        ? imageDataByBundle[@"__cnd_calendar_68_structured_a1"] : nil;
     NSData *clockBackground =
         [imageDataByBundle[@"__cnd_clock_background"]
             isKindOfClass:NSData.class]
@@ -16044,6 +17778,57 @@ themer_configure_clock_calendar_sources_in_session(
     bool staticClockViewClassChanged = false;
     bool legacyCalendarImageRedirectChanged = false;
     bool legacyCalendarLayerRedirectChanged = false;
+
+    /* Retire the two obsolete Calendar redirects before any source repair;
+     * either redirect can bypass the exact provider boundary. */
+    bool legacyCalendarImageRedirectRestored =
+        themer_configure_apple_signed_redirect(
+        dynamicRedirectRegistry,
+        "calendar-obsolete-generic-image",
+        "SBHCalendarApplicationIcon",
+        "makeIconImageWithInfo:traitCollection:context:options:",
+        "SBLeafIcon",
+        "makeIconImageWithInfo:traitCollection:context:options:",
+        "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64",
+        "cnd_sbr_calendar_image_original_imp", false,
+        &legacyCalendarImageRedirectChanged);
+    bool legacyCalendarLayerRedirectRestored =
+        themer_configure_apple_signed_redirect(
+        dynamicRedirectRegistry,
+        "calendar-obsolete-image-backed-layer",
+        "SBHCalendarApplicationIcon",
+        "makeIconLayerWithInfo:traitCollection:context:options:",
+        "SBIcon",
+        "makeIconLayerFromImageWithInfo:traitCollection:context:options:",
+        "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64",
+        "cnd_sbr_calendar_layer_original_imp", false,
+        &legacyCalendarLayerRedirectChanged);
+    NSDictionary<NSString *, id> *calendarSourceResult = nil;
+    if (!legacyCalendarImageRedirectRestored ||
+        !legacyCalendarLayerRedirectRestored) {
+        calendarSourceResult = @{
+            @"ok": @NO,
+            @"stage": @"calendar-obsolete-redirect-restore",
+            @"message": @"An obsolete class-wide Calendar redirect could not be restored, so the exact provider source was left unchanged.",
+        };
+    } else {
+        /* Materialize Calendar before the Clock/Spotlight presentation work.
+         * This preserves the previously working Spotlight initialization
+         * path. The failed physical-device trial proved that merely making
+         * Calendar the final callback does not repair an unobserved 0 -> 0
+         * source-cache fetch. */
+        printf("[SBR_DYNAMIC_STAGE] calendar-source-begin\n");
+        calendarSourceResult =
+            themer_configure_calendar_provider_source(
+                installCalendar, expectedCalendar68A0,
+                expectedCalendar68A1,
+                !useStaticClockPresentation);
+    }
+    bool calendarSourceOK = [calendarSourceResult[@"ok"] boolValue];
+    printf("[SBR_DYNAMIC_STAGE] calendar-source-end ok=%d stage=%s\n",
+           calendarSourceOK,
+           [calendarSourceResult[@"stage"] UTF8String] ?: "-");
+
     /* Retire the unsafe block-backed experiment before installing any safe
      * Apple-owned IMP.  Its block isa must be repaired even when its method
      * redirect has already been replaced. */
@@ -16084,31 +17869,6 @@ themer_configure_clock_calendar_sources_in_session(
         &staticClockViewClassChanged);
 
     NSDictionary<NSString *, id> *clockBackgroundResult = nil;
-    /* Both old class-wide Calendar redirects bypassed part of the measured
-     * provider pipeline and produced the grey plate. Restore them before
-     * installing the exact per-provider preparedISIcon source bridge below. */
-    bool legacyCalendarImageRedirectRestored =
-        themer_configure_apple_signed_redirect(
-        dynamicRedirectRegistry,
-        "calendar-obsolete-generic-image",
-        "SBHCalendarApplicationIcon",
-        "makeIconImageWithInfo:traitCollection:context:options:",
-        "SBLeafIcon",
-        "makeIconImageWithInfo:traitCollection:context:options:",
-        "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64",
-        "cnd_sbr_calendar_image_original_imp", false,
-        &legacyCalendarImageRedirectChanged);
-    bool legacyCalendarLayerRedirectRestored =
-        themer_configure_apple_signed_redirect(
-        dynamicRedirectRegistry,
-        "calendar-obsolete-image-backed-layer",
-        "SBHCalendarApplicationIcon",
-        "makeIconLayerWithInfo:traitCollection:context:options:",
-        "SBIcon",
-        "makeIconLayerFromImageWithInfo:traitCollection:context:options:",
-        "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64",
-        "cnd_sbr_calendar_layer_original_imp", false,
-        &legacyCalendarLayerRedirectChanged);
     printf("[SBR_DYNAMIC_STAGE] redirects clock=%d unsafe-retired=%d "
            "static-clock=%d "
            "calendar-image=%d calendar-layer=%d\n",
@@ -16319,28 +18079,7 @@ themer_configure_clock_calendar_sources_in_session(
     printf("[SBR_DYNAMIC_STAGE] clock-face-end ok=%d stage=%s\n",
            clockBackgroundOK,
            [clockBackgroundResult[@"stage"] UTF8String] ?: "-");
-    /* Calendar's provider owns both the UIImage and ICRIconLayer paths. The
-     * VM trace proved that -preparedISIcon is their stable common boundary,
-     * while each stock CUIKIcon and generated UUID is transient. Replace only
-     * that getter and perform one required initial reload; an already-retained
-     * provider takes the constant-time exact readback path. */
-    NSDictionary<NSString *, id> *calendarSourceResult = nil;
-    if (!legacyCalendarImageRedirectRestored ||
-        !legacyCalendarLayerRedirectRestored) {
-        calendarSourceResult = @{
-            @"ok": @NO,
-            @"stage": @"calendar-obsolete-redirect-restore",
-            @"message": @"An obsolete class-wide Calendar redirect could not be restored, so the exact provider source was left unchanged.",
-        };
-    } else {
-        printf("[SBR_DYNAMIC_STAGE] calendar-source-begin\n");
-        calendarSourceResult =
-            themer_configure_calendar_provider_source(installCalendar);
-    }
-    bool calendarSourceOK = [calendarSourceResult[@"ok"] boolValue];
-    printf("[SBR_DYNAMIC_STAGE] calendar-source-end ok=%d stage=%s\n",
-           calendarSourceOK,
-           [calendarSourceResult[@"stage"] UTF8String] ?: "-");
+
     NSUInteger targetedReloads =
         [calendarSourceResult[@"reloadPasses"] unsignedIntegerValue];
     bool ok = unsafeClockRouteRetired && legacyClockRedirectRestored &&
@@ -19016,6 +20755,1000 @@ themer_audit_springboard_iconservices_consumers_in_session(
         @"reloadIssued": @NO,
         @"cachePurgeIssued": @NO,
         @"updateHandlerIssued": @NO,
+    };
+}
+
+NSDictionary<NSString *, id> *
+themer_inspect_springboard_app_library_miniature_pipeline_in_session(void)
+{
+    typedef struct {
+        CGSize size;
+        double scale;
+        double continuousCornerRadius;
+    } CNDLibraryIconImageInfo;
+    _Static_assert(sizeof(CNDLibraryIconImageInfo) == 32,
+                   "SBIconImageInfo ABI changed");
+
+    if (!remote_call_current_success()) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"transport",
+            @"message": @"The SpringBoard RemoteCall transport was not healthy.",
+            @"readOnly": @YES,
+            @"processLifecycleMutationCount": @0,
+            @"sharedCacheWriteCount": @0,
+        };
+    }
+
+    uint32_t previousSettleUS = r_settle_us(0);
+    enum { ROOT_CAP = 24, SAMPLE_CAP = 8 };
+    uint64_t roots[ROOT_CAP] = {0};
+    int rootCount = themer_collect_model_lookup_roots(roots, ROOT_CAP);
+    uint64_t iconManager = 0;
+    uint64_t iconModel = 0;
+    for (int index = 0;
+         index < rootCount && remote_call_current_success(); index++) {
+        char className[96] = {0};
+        themer_read_class_name(roots[index], className, sizeof(className));
+        if (!iconManager && !strcmp(className, "SBHIconManager")) {
+            iconManager = roots[index];
+        }
+        if (!iconModel &&
+            (!strcmp(className, "SBHIconModel") ||
+             !strcmp(className, "SBIconModel")) &&
+            themer_springboard_method_encoding_is(
+                roots[index], "applicationIconForBundleIdentifier:",
+                "@24@0:8@16")) {
+            iconModel = roots[index];
+        }
+    }
+
+    uint64_t libraryController = 0;
+    const char *controllerRoute = NULL;
+    static const char *controllerSelectors[] = {
+        "trailingLibraryViewController",
+        "overlayLibraryViewController",
+    };
+    if (r_is_objc_ptr(iconManager)) {
+        for (size_t index = 0;
+             index < sizeof(controllerSelectors) /
+                         sizeof(controllerSelectors[0]); index++) {
+            const char *selector = controllerSelectors[index];
+            if (!themer_springboard_method_encoding_is(
+                    iconManager, selector, "@16@0:8")) continue;
+            uint64_t candidate = r_msg2_main(
+                iconManager, selector, 0, 0, 0, 0);
+            if (!r_is_objc_ptr(candidate)) continue;
+            libraryController = candidate;
+            controllerRoute = selector;
+            break;
+        }
+    }
+
+    uint64_t folderImageCache = 0;
+    uint64_t listLayout = 0;
+    uint64_t visualConfiguration = 0;
+    uint64_t appearance = 0;
+    uint64_t traitCollection = 0;
+    uint64_t folderCacheClass = themer_lookup_class(
+        "SBFolderIconImageCache");
+    uint64_t traitCollectionClass = themer_lookup_class(
+        "UITraitCollection");
+    CNDLibraryIconImageInfo iconImageInfo = {0};
+    CGSize gridCellSize = CGSizeZero;
+
+    BOOL preflightOK = r_is_objc_ptr(iconManager) &&
+        r_is_objc_ptr(iconModel) && r_is_objc_ptr(libraryController) &&
+        themer_springboard_method_encoding_is(
+            libraryController, "folderIconImageCache", "@16@0:8") &&
+        themer_springboard_method_encoding_is(
+            libraryController, "effectiveIconImageAppearance", "@16@0:8");
+    if (preflightOK) {
+        folderImageCache = r_msg2_main(
+            libraryController, "folderIconImageCache", 0, 0, 0, 0);
+        appearance = r_msg2_main(
+            libraryController, "effectiveIconImageAppearance", 0, 0, 0, 0);
+        char cacheClassName[96] = {0};
+        themer_read_class_name(folderImageCache, cacheClassName,
+                               sizeof(cacheClassName));
+        preflightOK = !strcmp(cacheClassName, "SBFolderIconImageCache") &&
+            r_is_objc_ptr(appearance) &&
+            themer_springboard_method_encoding_is(
+                folderImageCache, "listLayout", "@16@0:8");
+    }
+    if (preflightOK) {
+        listLayout = r_msg2_main(
+            folderImageCache, "listLayout", 0, 0, 0, 0);
+        preflightOK = r_is_objc_ptr(listLayout) &&
+            themer_springboard_method_encoding_is(
+                listLayout, "iconImageInfo",
+                "{SBIconImageInfo={CGSize=dd}dd}16@0:8") &&
+            themer_springboard_method_encoding_is(
+                listLayout, "folderIconVisualConfiguration", "@16@0:8");
+    }
+    if (preflightOK) {
+        preflightOK = r_msg2_main_struct_ret(
+            listLayout, "iconImageInfo", &iconImageInfo,
+            sizeof(iconImageInfo), NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+        visualConfiguration = preflightOK ? r_msg2_main(
+            listLayout, "folderIconVisualConfiguration", 0, 0, 0, 0) : 0;
+        preflightOK = preflightOK && r_is_objc_ptr(visualConfiguration) &&
+            themer_springboard_method_encoding_is(
+                visualConfiguration, "gridCellSize",
+                "{CGSize=dd}16@0:8") &&
+            r_msg2_main_struct_ret(
+                visualConfiguration, "gridCellSize", &gridCellSize,
+                sizeof(gridCellSize), NULL, 0, NULL, 0,
+                NULL, 0, NULL, 0);
+    }
+    if (preflightOK) {
+        preflightOK = iconImageInfo.size.width > 0.0 &&
+            iconImageInfo.size.height > 0.0 &&
+            iconImageInfo.scale >= 1.0 && iconImageInfo.scale <= 4.0 &&
+            gridCellSize.width > 0.0 && gridCellSize.height > 0.0 &&
+            r_is_objc_ptr(folderCacheClass) &&
+            r_is_objc_ptr(traitCollectionClass) &&
+            themer_springboard_method_encoding_is(
+                traitCollectionClass,
+                "sbh_traitCollectionWithIconImageAppearance:",
+                "@24@0:8@16") &&
+            themer_springboard_method_encoding_is(
+                folderCacheClass, "gridCellImageOfSize:forIconImage:",
+                "@40@0:8{CGSize=dd}16@32");
+    }
+    if (preflightOK) {
+        traitCollection = r_msg2_main(
+            traitCollectionClass,
+            "sbh_traitCollectionWithIconImageAppearance:",
+            appearance, 0, 0, 0);
+        preflightOK = r_is_objc_ptr(traitCollection) &&
+            remote_call_current_success();
+    }
+
+    printf("[SBR_LIBRARY_PIPELINE] stage=preflight roots=%d "
+           "manager=%#llx model=%#llx controller=%#llx route=%s "
+           "cache=%#llx layout=%#llx appearance=%#llx trait=%#llx "
+           "icon=%.2fx%.2f@%.2f/r%.2f cell=%.2fx%.2f ok=%d\n",
+           rootCount, (unsigned long long)iconManager,
+           (unsigned long long)iconModel,
+           (unsigned long long)libraryController,
+           controllerRoute ?: "-",
+           (unsigned long long)folderImageCache,
+           (unsigned long long)listLayout,
+           (unsigned long long)appearance,
+           (unsigned long long)traitCollection,
+           iconImageInfo.size.width, iconImageInfo.size.height,
+           iconImageInfo.scale, iconImageInfo.continuousCornerRadius,
+           gridCellSize.width, gridCellSize.height, preflightOK);
+
+    NSMutableOrderedSet<NSString *> *candidateSet =
+        [NSMutableOrderedSet orderedSetWithArray:@[
+            @"com.apple.MobileSMS",
+            @"com.toyopagroup.picaboo",
+            @"com.zhiliaoapp.musically",
+            @"com.8bit.bitwarden",
+        ]];
+    for (NSString *identifier in
+             themer_springboard_refresh_bundle_identifiers_snapshot()) {
+        if (candidateSet.count >= SAMPLE_CAP) break;
+        if ([identifier isKindOfClass:NSString.class] &&
+            identifier.length > 0) {
+            [candidateSet addObject:identifier];
+        }
+    }
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *samples =
+        [NSMutableArray array];
+    NSUInteger attempted = 0;
+    NSUInteger associatedSources = 0;
+    NSUInteger sourceBaked = 0;
+    NSUInteger compositorAddsPlate = 0;
+    NSUInteger alphaPreserved = 0;
+    NSUInteger inconclusive = 0;
+    uint64_t sourceSelector = r_sel(
+        "iconImageWithInfo:traitCollection:options:");
+    for (NSString *identifier in candidateSet) {
+        if (!preflightOK || !remote_call_current_success() ||
+            attempted >= SAMPLE_CAP) break;
+        attempted++;
+        uint64_t icon = themer_lookup_model_icon_for_bundle_with_roots(
+            identifier.UTF8String, roots, rootCount);
+        if (!r_is_objc_ptr(icon)) {
+            [samples addObject:@{
+                @"bundleIdentifier": identifier,
+                @"ok": @NO,
+                @"stage": @"icon-not-found",
+            }];
+            continue;
+        }
+
+        uint64_t sourceImage = sourceSelector
+            ? r_dlsym_call(R_TIMEOUT, "objc_getAssociatedObject",
+                           icon, sourceSelector, 0, 0, 0, 0, 0, 0)
+            : 0;
+        NSString *sourceRoute = @"associated-themed-image";
+        if (r_is_objc_ptr(sourceImage)) {
+            associatedSources++;
+        } else if (themer_springboard_method_encoding_is(
+                       icon,
+                       "iconImageWithInfo:traitCollection:options:",
+                       "@64@0:8{SBIconImageInfo={CGSize=dd}dd}16@48Q56")) {
+            uint64_t traitArgument = traitCollection;
+            uint64_t options = 1;
+            sourceImage = r_msg2_main_raw(
+                icon, "iconImageWithInfo:traitCollection:options:",
+                &iconImageInfo, sizeof(iconImageInfo),
+                &traitArgument, sizeof(traitArgument),
+                &options, sizeof(options), NULL, 0);
+            sourceRoute = @"stock-iconImageWithInfo";
+        }
+        if (!r_is_objc_ptr(sourceImage) ||
+            r_msg2(sourceImage, "retain", 0, 0, 0, 0) != sourceImage) {
+            [samples addObject:@{
+                @"bundleIdentifier": identifier,
+                @"ok": @NO,
+                @"stage": @"source-image",
+                @"sourceRoute": sourceRoute,
+            }];
+            continue;
+        }
+
+        uint64_t sourceArgument = sourceImage;
+        uint64_t compositedImage = r_msg2_main_raw(
+            folderCacheClass, "gridCellImageOfSize:forIconImage:",
+            &gridCellSize, sizeof(gridCellSize),
+            &sourceArgument, sizeof(sourceArgument),
+            NULL, 0, NULL, 0);
+        if (r_is_objc_ptr(compositedImage) &&
+            r_msg2(compositedImage, "retain", 0, 0, 0, 0) !=
+                compositedImage) {
+            compositedImage = 0;
+        }
+
+        NSMutableDictionary<NSString *, id> *sample = [@{
+            @"bundleIdentifier": identifier,
+            @"sourceRoute": sourceRoute,
+            @"sourcePointer": @(sourceImage),
+            @"compositedPointer": @(compositedImage),
+        } mutableCopy];
+        NSData *sourcePNG = nil;
+        NSData *compositedPNG = nil;
+        if (r_is_objc_ptr(compositedImage)) {
+            uint64_t sourceData = r_dlsym_call(
+                R_TIMEOUT, "UIImagePNGRepresentation", sourceImage,
+                0, 0, 0, 0, 0, 0, 0);
+            uint64_t outputData = r_dlsym_call(
+                R_TIMEOUT, "UIImagePNGRepresentation", compositedImage,
+                0, 0, 0, 0, 0, 0, 0);
+            if (r_is_objc_ptr(sourceData)) {
+                (void)r_msg2(sourceData, "retain", 0, 0, 0, 0);
+                uint64_t length = r_msg2(sourceData, "length", 0, 0, 0, 0);
+                uint64_t bytes = length > 0 && length <= (8U << 20)
+                    ? r_msg2(sourceData, "bytes", 0, 0, 0, 0) : 0;
+                NSMutableData *copy = bytes
+                    ? [NSMutableData dataWithLength:(NSUInteger)length] : nil;
+                if (copy && remote_read(bytes, copy.mutableBytes,
+                                        (size_t)length)) {
+                    sourcePNG = [copy copy];
+                }
+                if (remote_call_current_success())
+                    (void)r_msg2(sourceData, "release", 0, 0, 0, 0);
+            }
+            if (r_is_objc_ptr(outputData)) {
+                (void)r_msg2(outputData, "retain", 0, 0, 0, 0);
+                uint64_t length = r_msg2(outputData, "length", 0, 0, 0, 0);
+                uint64_t bytes = length > 0 && length <= (8U << 20)
+                    ? r_msg2(outputData, "bytes", 0, 0, 0, 0) : 0;
+                NSMutableData *copy = bytes
+                    ? [NSMutableData dataWithLength:(NSUInteger)length] : nil;
+                if (copy && remote_read(bytes, copy.mutableBytes,
+                                        (size_t)length)) {
+                    compositedPNG = [copy copy];
+                }
+                if (remote_call_current_success())
+                    (void)r_msg2(outputData, "release", 0, 0, 0, 0);
+            }
+        }
+
+        NSDictionary<NSString *, id> *(^alphaMetrics)(NSData *) =
+            ^NSDictionary<NSString *, id> *(NSData *png) {
+                UIImage *image = png.length ? [UIImage imageWithData:png] : nil;
+                CGImageRef cgImage = image.CGImage;
+                size_t width = cgImage ? CGImageGetWidth(cgImage) : 0;
+                size_t height = cgImage ? CGImageGetHeight(cgImage) : 0;
+                if (!cgImage || width == 0 || height == 0 ||
+                    width > 2048 || height > 2048 ||
+                    width > SIZE_MAX / height || width * height > SIZE_MAX / 4) {
+                    return @{};
+                }
+                size_t pixelCount = width * height;
+                size_t bytesPerRow = width * 4;
+                uint8_t *pixels = calloc(pixelCount, 4);
+                CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+                CGContextRef context = pixels && colorSpace
+                    ? CGBitmapContextCreate(
+                        pixels, width, height, 8, bytesPerRow, colorSpace,
+                        kCGBitmapByteOrder32Big |
+                            kCGImageAlphaPremultipliedLast)
+                    : NULL;
+                if (context) {
+                    CGContextSetBlendMode(context, kCGBlendModeCopy);
+                    CGContextDrawImage(
+                        context, CGRectMake(0, 0, width, height), cgImage);
+                }
+                size_t clearCount = 0;
+                size_t partialCount = 0;
+                size_t opaqueCount = 0;
+                size_t outerCount = 0;
+                size_t outerOpaqueCount = 0;
+                uint64_t alphaSum = 0;
+                uint64_t outerAlphaSum = 0;
+                size_t band = MAX((size_t)1, MIN(width, height) / 10);
+                if (context) {
+                    for (size_t y = 0; y < height; y++) {
+                        for (size_t x = 0; x < width; x++) {
+                            uint8_t alpha = pixels[(y * width + x) * 4 + 3];
+                            alphaSum += alpha;
+                            if (alpha <= 8) clearCount++;
+                            else if (alpha >= 247) opaqueCount++;
+                            else partialCount++;
+                            BOOL outer = x < band || y < band ||
+                                x >= width - band || y >= height - band;
+                            if (outer) {
+                                outerCount++;
+                                outerAlphaSum += alpha;
+                                if (alpha >= 247) outerOpaqueCount++;
+                            }
+                        }
+                    }
+                }
+                uint8_t digest[CC_SHA256_DIGEST_LENGTH] = {0};
+                CC_SHA256(png.bytes, (CC_LONG)png.length, digest);
+                char sha[CC_SHA256_DIGEST_LENGTH * 2 + 1] = {0};
+                for (size_t index = 0;
+                     index < CC_SHA256_DIGEST_LENGTH; index++) {
+                    snprintf(sha + index * 2, 3, "%02x", digest[index]);
+                }
+                NSDictionary *result = context ? @{
+                    @"pixelWidth": @(width),
+                    @"pixelHeight": @(height),
+                    @"pngLength": @(png.length),
+                    @"pngSHA256": [NSString stringWithUTF8String:sha],
+                    @"clearFraction": @((double)clearCount /
+                                         (double)pixelCount),
+                    @"partialFraction": @((double)partialCount /
+                                           (double)pixelCount),
+                    @"opaqueFraction": @((double)opaqueCount /
+                                          (double)pixelCount),
+                    @"meanAlpha": @((double)alphaSum /
+                                     (double)pixelCount / 255.0),
+                    @"outerOpaqueFraction": @((double)outerOpaqueCount /
+                                               (double)outerCount),
+                    @"outerMeanAlpha": @((double)outerAlphaSum /
+                                          (double)outerCount / 255.0),
+                } : @{};
+                if (context) CGContextRelease(context);
+                if (colorSpace) CGColorSpaceRelease(colorSpace);
+                free(pixels);
+                return result;
+            };
+
+        NSDictionary<NSString *, id> *sourceMetrics =
+            alphaMetrics(sourcePNG);
+        NSDictionary<NSString *, id> *outputMetrics =
+            alphaMetrics(compositedPNG);
+        NSString *verdict = @"capture-incomplete";
+        if (sourceMetrics.count && outputMetrics.count) {
+            double sourceOpaque =
+                [sourceMetrics[@"opaqueFraction"] doubleValue];
+            double sourceClear =
+                [sourceMetrics[@"clearFraction"] doubleValue];
+            double sourcePartial =
+                [sourceMetrics[@"partialFraction"] doubleValue];
+            double sourceOuter =
+                [sourceMetrics[@"outerOpaqueFraction"] doubleValue];
+            double outputOpaque =
+                [outputMetrics[@"opaqueFraction"] doubleValue];
+            double outputOuter =
+                [outputMetrics[@"outerOpaqueFraction"] doubleValue];
+            double opaqueDelta = outputOpaque - sourceOpaque;
+            double outerDelta = outputOuter - sourceOuter;
+            double sourceTransparency = sourceClear + sourcePartial;
+            sample[@"opaqueFractionDelta"] = @(opaqueDelta);
+            sample[@"outerOpaqueFractionDelta"] = @(outerDelta);
+            if (sourceOpaque >= 0.80 && sourceOuter >= 0.60 &&
+                sourceTransparency <= 0.20) {
+                verdict = @"source-baked-opaque";
+                sourceBaked++;
+            } else if (sourceTransparency >= 0.18 &&
+                       opaqueDelta >= 0.12 && outerDelta >= 0.10) {
+                verdict = @"compositor-adds-opaque-plate";
+                compositorAddsPlate++;
+            } else if (opaqueDelta > -0.06 && opaqueDelta < 0.06 &&
+                       outerDelta > -0.06 && outerDelta < 0.06) {
+                verdict = @"alpha-preserved";
+                alphaPreserved++;
+            } else {
+                verdict = @"inconclusive";
+                inconclusive++;
+            }
+            sample[@"ok"] = @YES;
+            sample[@"stage"] = @"captured";
+        } else {
+            sample[@"ok"] = @NO;
+            sample[@"stage"] = @"png-capture";
+            inconclusive++;
+        }
+        sample[@"source"] = sourceMetrics;
+        sample[@"composited"] = outputMetrics;
+        sample[@"verdict"] = verdict;
+        [samples addObject:sample];
+        printf("[SBR_LIBRARY_PIPELINE] bundle=%s route=%s verdict=%s "
+               "source-opaque=%.4f output-opaque=%.4f "
+               "source-outer=%.4f output-outer=%.4f\n",
+               identifier.UTF8String,
+               sourceRoute.UTF8String,
+               verdict.UTF8String,
+               [sourceMetrics[@"opaqueFraction"] doubleValue],
+               [outputMetrics[@"opaqueFraction"] doubleValue],
+               [sourceMetrics[@"outerOpaqueFraction"] doubleValue],
+               [outputMetrics[@"outerOpaqueFraction"] doubleValue]);
+
+        if (r_is_objc_ptr(compositedImage) &&
+            remote_call_current_success()) {
+            (void)r_msg2(compositedImage, "release", 0, 0, 0, 0);
+        }
+        if (r_is_objc_ptr(sourceImage) && remote_call_current_success()) {
+            (void)r_msg2(sourceImage, "release", 0, 0, 0, 0);
+        }
+    }
+
+    NSUInteger captured = 0;
+    for (NSDictionary *sample in samples) {
+        if ([sample[@"ok"] boolValue]) captured++;
+    }
+    BOOL remoteOK = remote_call_current_success();
+    BOOL ok = preflightOK && remoteOK && captured > 0;
+    NSString *message = nil;
+    if (!preflightOK) {
+        message = @"The exact live App Library image pipeline did not pass ABI and geometry preflight.";
+    } else if (!remoteOK) {
+        message = @"The source/compositor capture lost its bounded SpringBoard transport.";
+    } else if (captured == 0) {
+        message = @"No installed themed candidate produced a complete source/compositor capture.";
+    } else if (compositorAddsPlate > 0 && sourceBaked == 0) {
+        message = @"The captured source retained transparency and Apple's App Library compositor added the opaque plate.";
+    } else if (sourceBaked > 0 && compositorAddsPlate == 0) {
+        message = @"The captured source was already opaque before Apple's App Library compositor.";
+    } else if (sourceBaked > 0 && compositorAddsPlate > 0) {
+        message = @"The capture is mixed: some miniatures arrive opaque while Apple's compositor adds opacity to others.";
+    } else {
+        message = @"The capture completed, but its alpha change is not decisive; inspect the per-bundle metrics.";
+    }
+    printf("[SBR_LIBRARY_PIPELINE] result=%s attempted=%lu captured=%lu "
+           "associated=%lu source-baked=%lu compositor-plate=%lu "
+           "preserved=%lu inconclusive=%lu lifecycle=0 cache-mutations=0 "
+           "shared-cache-writes=0\n",
+           ok ? "complete" : "incomplete", (unsigned long)attempted,
+           (unsigned long)captured, (unsigned long)associatedSources,
+           (unsigned long)sourceBaked,
+           (unsigned long)compositorAddsPlate,
+           (unsigned long)alphaPreserved,
+           (unsigned long)inconclusive);
+    (void)r_settle_us(previousSettleUS);
+
+    return @{
+        @"ok": @(ok),
+        @"stage": ok ? @"app-library-miniature-pipeline-inspected" :
+            (preflightOK ? @"capture" : @"preflight"),
+        @"message": message,
+        @"readOnly": @YES,
+        @"controllerRoute": controllerRoute
+            ? [NSString stringWithUTF8String:controllerRoute] : @"",
+        @"iconImageInfo": @{
+            @"width": @(iconImageInfo.size.width),
+            @"height": @(iconImageInfo.size.height),
+            @"scale": @(iconImageInfo.scale),
+            @"continuousCornerRadius":
+                @(iconImageInfo.continuousCornerRadius),
+        },
+        @"gridCellSize": @{
+            @"width": @(gridCellSize.width),
+            @"height": @(gridCellSize.height),
+        },
+        @"attemptedCount": @(attempted),
+        @"capturedCount": @(captured),
+        @"associatedSourceCount": @(associatedSources),
+        @"sourceBakedOpaqueCount": @(sourceBaked),
+        @"compositorAddsOpaquePlateCount": @(compositorAddsPlate),
+        @"alphaPreservedCount": @(alphaPreserved),
+        @"inconclusiveCount": @(inconclusive),
+        @"samples": samples,
+        @"cachePurgeIssued": @NO,
+        @"reloadIssued": @NO,
+        @"relayoutIssued": @NO,
+        @"updateHandlerIssued": @NO,
+        @"processLifecycleMutationCount": @0,
+        @"sharedCacheWriteCount": @0,
+        @"remoteOK": @(remoteOK),
+    };
+}
+
+NSDictionary<NSString *, id> *
+themer_refresh_springboard_app_library_miniatures_in_session(void)
+{
+    if (!remote_call_current_success()) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"transport",
+            @"message": @"The SpringBoard RemoteCall transport was not healthy.",
+            @"mutationCount": @0,
+            @"processLifecycleMutationCount": @0,
+            @"sharedCacheWriteCount": @0,
+        };
+    }
+
+    /* This is intentionally narrower than the production SpringBoard refresh
+     * below. It repairs only stale App Library category miniatures. Resolve
+     * and ABI-check the complete bounded object graph before sending the first
+     * mutating message. */
+    uint32_t previousSettleUS = r_settle_us(0);
+    enum {
+        ROOT_CAP = 24,
+        LIBRARY_CONTROLLER_CAP = 2,
+        LIBRARY_CACHE_CAP = 3,
+        TARGET_BUNDLE_CAP = 512,
+        LEAF_ICON_CAP = 1024,
+        RELOAD_ICON_OBJECT_CAP = 1024,
+    };
+    uint64_t roots[ROOT_CAP] = {0};
+    uint64_t libraryControllers[LIBRARY_CONTROLLER_CAP] = {0};
+    uint64_t libraryFolderControllers[LIBRARY_CONTROLLER_CAP] = {0};
+    uint64_t caches[LIBRARY_CACHE_CAP] = {0};
+    int rootCount = themer_collect_model_lookup_roots(roots, ROOT_CAP);
+    int libraryControllerCount = 0;
+    int libraryFolderControllerCount = 0;
+    int cacheCount = 0;
+    uint64_t iconManager = 0;
+    uint64_t iconModel = 0;
+    uint64_t folderImageCache = 0;
+    uint64_t folderSourceCache = 0;
+    uint64_t reloadIconObjects[RELOAD_ICON_OBJECT_CAP] = {0};
+    int reloadIconObjectCount = 0;
+    int reloadCanonicalMatches = 0;
+    int reloadLeafMatches = 0;
+    int reloadLookupMisses = 0;
+    uint64_t reloadLeafModelCount = 0;
+    char iconManagerClass[96] = {0};
+    char iconModelClass[96] = {0};
+    char folderImageCacheClass[96] = {0};
+    char folderSourceCacheClass[96] = {0};
+    NSArray<NSString *> *configuredBundleIdentifiers =
+        themer_springboard_refresh_bundle_identifiers_snapshot();
+    NSMutableArray<NSString *> *reloadBundleIdentifiers =
+        [NSMutableArray arrayWithCapacity:configuredBundleIdentifiers.count];
+    NSMutableArray<NSString *> *ignoredNonApplicationTargets =
+        [NSMutableArray array];
+    for (NSString *identifier in configuredBundleIdentifiers) {
+        /* AirDrop is intentionally journaled as an IconServices producer, but
+         * it is not an installed application and has no SBApplicationIcon or
+         * App Library category miniature. Ignore only this measured pseudo-
+         * bundle; every other unresolved identity remains a hard preflight
+         * failure. */
+        if ([identifier isEqualToString:@"com.apple.Sharing.AirDrop"]) {
+            [ignoredNonApplicationTargets addObject:identifier];
+        } else {
+            [reloadBundleIdentifiers addObject:identifier];
+        }
+    }
+    NSMutableSet<NSString *> *reloadIdentifierSet =
+        [NSMutableSet setWithArray:reloadBundleIdentifiers ?: @[]];
+    NSMutableSet<NSString *> *matchedReloadIdentifiers =
+        [NSMutableSet setWithCapacity:reloadIdentifierSet.count];
+    BOOL reloadTargetsTruncated =
+        reloadBundleIdentifiers.count > TARGET_BUNDLE_CAP;
+    BOOL reloadLeafModelsTruncated = NO;
+    BOOL preflightOK = remote_call_current_success();
+    NSString *failure = nil;
+
+    for (int index = 0;
+         index < rootCount && remote_call_current_success(); index++) {
+        uint64_t root = roots[index];
+        char rootClass[96] = {0};
+        themer_read_class_name(root, rootClass, sizeof(rootClass));
+        if (!iconManager && !strcmp(rootClass, "SBHIconManager")) {
+            iconManager = root;
+            snprintf(iconManagerClass, sizeof(iconManagerClass), "%s",
+                     rootClass);
+        } else if (!iconModel &&
+                   (!strcmp(rootClass, "SBHIconModel") ||
+                    !strcmp(rootClass, "SBIconModel")) &&
+                   r_responds_main(
+                       root, "applicationIconForBundleIdentifier:")) {
+            iconModel = root;
+            snprintf(iconModelClass, sizeof(iconModelClass), "%s",
+                     rootClass);
+        }
+    }
+    if (!r_is_objc_ptr(iconManager) ||
+        !themer_springboard_method_encoding_is(
+            iconManager, "folderIconImageCache", "@16@0:8")) {
+        preflightOK = NO;
+        failure = @"The exact SBHIconManager folder-cache interface was unavailable.";
+    }
+    if (preflightOK &&
+        (reloadBundleIdentifiers.count == 0 || reloadTargetsTruncated)) {
+        preflightOK = NO;
+        failure = reloadTargetsTruncated
+            ? @"The configured themed bundle set exceeded the bounded miniature-repair limit."
+            : @"No active themed bundle identifiers were configured for the miniature repair.";
+    }
+    if (preflightOK &&
+        (!r_is_objc_ptr(iconModel) ||
+         !themer_springboard_method_encoding_is(
+             iconModel, "applicationIconForBundleIdentifier:",
+             "@24@0:8@16") ||
+         !themer_springboard_method_encoding_is(
+             iconModel,
+             "leafIconsUniquedByApplicationBundleIdentifier",
+             "@16@0:8"))) {
+        preflightOK = NO;
+        failure = @"The exact SpringBoard icon-model lookup interfaces were unavailable.";
+    }
+
+    if (preflightOK) {
+        folderImageCache = r_msg2_main(
+            iconManager, "folderIconImageCache", 0, 0, 0, 0);
+        themer_read_class_name(folderImageCache, folderImageCacheClass,
+                               sizeof(folderImageCacheClass));
+        if (strcmp(folderImageCacheClass, "SBFolderIconImageCache") ||
+            !themer_springboard_method_encoding_is(
+                folderImageCache, "iconImageCache", "@16@0:8") ||
+            !themer_springboard_method_encoding_is(
+                folderImageCache, "rebuildAllCachedFolderImages",
+                "v16@0:8")) {
+            preflightOK = NO;
+            failure = @"The exact SBFolderIconImageCache rebuild interface was unavailable.";
+        }
+    }
+
+    if (preflightOK) {
+        folderSourceCache = r_msg2_main(
+            folderImageCache, "iconImageCache", 0, 0, 0, 0);
+        themer_read_class_name(folderSourceCache, folderSourceCacheClass,
+                               sizeof(folderSourceCacheClass));
+        if (strcmp(folderSourceCacheClass, "SBHIconImageCache") ||
+            !themer_springboard_method_encoding_is(
+                folderSourceCache, "purgeAllCachedImages", "v16@0:8")) {
+            preflightOK = NO;
+            failure = @"The retained folder-composite source cache did not match the proven ABI.";
+        } else {
+            themer_add_unique(caches, &cacheCount, LIBRARY_CACHE_CAP,
+                              folderSourceCache);
+        }
+    }
+
+    if (preflightOK) {
+        const char *librarySelectors[] = {
+            "trailingLibraryViewController",
+            "overlayLibraryViewController",
+        };
+        for (size_t index = 0;
+             index < sizeof(librarySelectors) / sizeof(librarySelectors[0]) &&
+             remote_call_current_success(); index++) {
+            if (!themer_springboard_method_encoding_is(
+                    iconManager, librarySelectors[index], "@16@0:8")) {
+                continue;
+            }
+            uint64_t controller = r_msg2_main(
+                iconManager, librarySelectors[index], 0, 0, 0, 0);
+            if (!r_is_objc_ptr(controller)) continue;
+
+            int beforeCount = libraryControllerCount;
+            themer_add_unique(libraryControllers,
+                              &libraryControllerCount,
+                              LIBRARY_CONTROLLER_CAP, controller);
+            if (libraryControllerCount == beforeCount) continue;
+
+            BOOL controllerABI =
+                themer_springboard_method_encoding_is(
+                    controller, "iconImageCache", "@16@0:8") &&
+                themer_springboard_method_encoding_is(
+                    controller, "folderController", "@16@0:8") &&
+                themer_springboard_method_encoding_is(
+                    controller, "_enqueueAppLibraryUpdate", "v16@0:8");
+            uint64_t libraryCache = controllerABI
+                ? r_msg2_main(controller, "iconImageCache", 0, 0, 0, 0)
+                : 0;
+            uint64_t folderController = controllerABI
+                ? r_msg2_main(controller, "folderController", 0, 0, 0, 0)
+                : 0;
+            char libraryCacheClass[96] = {0};
+            themer_read_class_name(libraryCache, libraryCacheClass,
+                                   sizeof(libraryCacheClass));
+            BOOL cacheABI = !strcmp(libraryCacheClass,
+                                    "SBHIconImageCache") &&
+                themer_springboard_method_encoding_is(
+                    libraryCache, "purgeAllCachedImages", "v16@0:8");
+            BOOL folderControllerABI =
+                themer_springboard_method_encoding_is(
+                    folderController, "_reloadAppIcons", "v16@0:8");
+            if (!controllerABI || !cacheABI || !folderControllerABI) {
+                preflightOK = NO;
+                failure = @"An App Library controller did not match the proven cache/reload ABI.";
+                break;
+            }
+            themer_add_unique(caches, &cacheCount, LIBRARY_CACHE_CAP,
+                              libraryCache);
+            themer_add_unique(libraryFolderControllers,
+                              &libraryFolderControllerCount,
+                              LIBRARY_CONTROLLER_CAP, folderController);
+        }
+    }
+
+    /* Resolve every exact application object before the first cache mutation.
+     * The category compositor can retain a source cache even after its outer
+     * cache is purged, and SBApplicationIcon generation is the refill
+     * boundary. Include both the canonical lookup and live model leaves so a
+     * mounted category cannot keep an older generation through an alias. */
+    if (preflightOK) {
+        for (NSString *identifier in reloadBundleIdentifiers) {
+            const char *bundle = identifier.UTF8String;
+            uint64_t remoteIdentifier = bundle && bundle[0]
+                ? r_nsstr_retained(bundle) : 0;
+            uint64_t icon = r_is_objc_ptr(remoteIdentifier)
+                ? r_msg2_main(
+                    iconModel, "applicationIconForBundleIdentifier:",
+                    remoteIdentifier, 0, 0, 0)
+                : 0;
+            if (r_is_objc_ptr(remoteIdentifier)) {
+                r_msg2(remoteIdentifier, "release", 0, 0, 0, 0);
+            }
+            if (!remote_call_current_success()) break;
+
+            char actual[192] = {0};
+            BOOL exactIdentity = r_is_objc_ptr(icon) &&
+                themer_read_bundle_for_icon(
+                    icon, 0, actual, sizeof(actual)) &&
+                bundle && !strcmp(actual, bundle);
+            if (!exactIdentity) continue;
+            [matchedReloadIdentifiers addObject:identifier];
+            int beforeCount = reloadIconObjectCount;
+            themer_add_unique(reloadIconObjects, &reloadIconObjectCount,
+                              RELOAD_ICON_OBJECT_CAP, icon);
+            if (reloadIconObjectCount > beforeCount) {
+                reloadCanonicalMatches++;
+            }
+        }
+
+        uint64_t leafCollection = remote_call_current_success()
+            ? r_msg2_main(
+                iconModel,
+                "leafIconsUniquedByApplicationBundleIdentifier",
+                0, 0, 0, 0)
+            : 0;
+        uint64_t leafObjects = 0;
+        if (r_is_objc_ptr(leafCollection) &&
+            r_responds_main(leafCollection, "allValues")) {
+            leafObjects = r_msg2_main(
+                leafCollection, "allValues", 0, 0, 0, 0);
+        } else if (r_is_objc_ptr(leafCollection) &&
+                   r_responds_main(leafCollection, "allObjects")) {
+            leafObjects = r_msg2_main(
+                leafCollection, "allObjects", 0, 0, 0, 0);
+        }
+        reloadLeafModelCount = r_is_objc_ptr(leafObjects) &&
+            r_responds_main(leafObjects, "count")
+                ? r_msg2_main(leafObjects, "count", 0, 0, 0, 0)
+                : 0;
+        reloadLeafModelsTruncated = reloadLeafModelCount > LEAF_ICON_CAP;
+        uint64_t boundedLeafCount = reloadLeafModelsTruncated
+            ? LEAF_ICON_CAP : reloadLeafModelCount;
+        for (uint64_t index = 0;
+             index < boundedLeafCount && remote_call_current_success();
+             index++) {
+            uint64_t icon = r_msg2_main(
+                leafObjects, "objectAtIndex:", index, 0, 0, 0);
+            if (!r_is_objc_ptr(icon)) continue;
+            char actual[192] = {0};
+            if (!themer_read_bundle_for_icon(
+                    icon, 0, actual, sizeof(actual))) continue;
+            NSString *identifier =
+                [NSString stringWithUTF8String:actual];
+            if (identifier.length == 0 ||
+                ![reloadIdentifierSet containsObject:identifier]) {
+                continue;
+            }
+            [matchedReloadIdentifiers addObject:identifier];
+            int beforeCount = reloadIconObjectCount;
+            themer_add_unique(reloadIconObjects, &reloadIconObjectCount,
+                              RELOAD_ICON_OBJECT_CAP, icon);
+            if (reloadIconObjectCount > beforeCount) reloadLeafMatches++;
+        }
+
+        reloadLookupMisses = (int)(
+            reloadIdentifierSet.count > matchedReloadIdentifiers.count
+                ? reloadIdentifierSet.count - matchedReloadIdentifiers.count
+                : 0);
+        BOOL reloadObjectsTruncated =
+            reloadIconObjectCount >= RELOAD_ICON_OBJECT_CAP;
+        if (reloadLeafModelsTruncated || reloadObjectsTruncated ||
+            reloadLookupMisses > 0 || reloadIconObjectCount == 0) {
+            preflightOK = NO;
+            failure = reloadLeafModelsTruncated || reloadObjectsTruncated
+                ? @"The bounded live icon-object inventory was truncated."
+                : (reloadLookupMisses > 0
+                    ? @"At least one active themed bundle had no exact SpringBoard icon identity."
+                    : @"No exact themed SpringBoard icon objects were available to reload.");
+        }
+    }
+
+    if (preflightOK) {
+        for (int index = 0; index < reloadIconObjectCount; index++) {
+            uint64_t icon = reloadIconObjects[index];
+            BOOL exactReloadABI = themer_springboard_method_encoding_is(
+                icon, "reloadIconImage", "v16@0:8");
+            BOOL exactApplicationABI =
+                themer_springboard_method_encoding_is(
+                    icon, "isApplicationIcon", "B16@0:8");
+            BOOL applicationIcon = exactApplicationABI &&
+                ((r_msg2_main(
+                    icon, "isApplicationIcon", 0, 0, 0, 0) & 0xff) != 0);
+            if (!exactReloadABI || !applicationIcon ||
+                !remote_call_current_success()) {
+                preflightOK = NO;
+                failure = @"A targeted icon did not match the proven SBApplicationIcon reload ABI.";
+                break;
+            }
+        }
+    }
+
+    preflightOK = preflightOK && remote_call_current_success() &&
+        libraryControllerCount > 0 &&
+        libraryFolderControllerCount > 0 && cacheCount > 0;
+    if (!preflightOK && !failure) {
+        failure = @"No complete App Library category-controller graph was available.";
+    }
+    printf("[SBR_LIBRARY_MINI_REFRESH] stage=preflight roots=%d "
+           "manager=0x%llx/%s model=0x%llx/%s folder=0x%llx/%s "
+           "source=0x%llx/%s configured=%lu ignored=%lu targets=%lu "
+           "objects=%d canonical=%d "
+           "leaf=%d misses=%d controllers=%d folder-controllers=%d "
+           "caches=%d ok=%d\n",
+           rootCount, (unsigned long long)iconManager,
+           iconManagerClass[0] ? iconManagerClass : "-",
+           (unsigned long long)iconModel,
+           iconModelClass[0] ? iconModelClass : "-",
+           (unsigned long long)folderImageCache,
+           folderImageCacheClass[0] ? folderImageCacheClass : "-",
+           (unsigned long long)folderSourceCache,
+           folderSourceCacheClass[0] ? folderSourceCacheClass : "-",
+           (unsigned long)configuredBundleIdentifiers.count,
+           (unsigned long)ignoredNonApplicationTargets.count,
+           (unsigned long)reloadBundleIdentifiers.count,
+           reloadIconObjectCount, reloadCanonicalMatches,
+           reloadLeafMatches, reloadLookupMisses,
+           libraryControllerCount, libraryFolderControllerCount,
+           cacheCount, preflightOK);
+
+    int cachesPurged = 0;
+    int iconReloads = 0;
+    int folderRebuilds = 0;
+    int podReloads = 0;
+    int updatesEnqueued = 0;
+    if (preflightOK) {
+        printf("[SBR_LIBRARY_MINI_REFRESH] stage=purge caches=%d\n",
+               cacheCount);
+        for (int index = 0;
+             index < cacheCount && remote_call_current_success(); index++) {
+            r_msg2_main(caches[index], "purgeAllCachedImages",
+                        0, 0, 0, 0);
+            if (remote_call_current_success()) cachesPurged++;
+        }
+    }
+    if (preflightOK && cachesPurged == cacheCount &&
+        remote_call_current_success()) {
+        printf("[SBR_LIBRARY_MINI_REFRESH] stage=reload-themed-generations "
+               "objects=%d\n", reloadIconObjectCount);
+        for (int index = 0;
+             index < reloadIconObjectCount &&
+             remote_call_current_success(); index++) {
+            r_msg2_main(reloadIconObjects[index], "reloadIconImage",
+                        0, 0, 0, 0);
+            if (remote_call_current_success()) iconReloads++;
+        }
+    }
+    if (preflightOK && cachesPurged == cacheCount &&
+        iconReloads == reloadIconObjectCount &&
+        remote_call_current_success()) {
+        printf("[SBR_LIBRARY_MINI_REFRESH] stage=rebuild-composites\n");
+        r_msg2_main(folderImageCache, "rebuildAllCachedFolderImages",
+                    0, 0, 0, 0);
+        if (remote_call_current_success()) folderRebuilds = 1;
+    }
+    if (folderRebuilds == 1) {
+        printf("[SBR_LIBRARY_MINI_REFRESH] stage=reload-pods count=%d\n",
+               libraryFolderControllerCount);
+        for (int index = 0;
+             index < libraryFolderControllerCount &&
+             remote_call_current_success(); index++) {
+            r_msg2_main(libraryFolderControllers[index],
+                        "_reloadAppIcons", 0, 0, 0, 0);
+            if (remote_call_current_success()) podReloads++;
+        }
+    }
+    if (podReloads == libraryFolderControllerCount &&
+        folderRebuilds == 1) {
+        printf("[SBR_LIBRARY_MINI_REFRESH] stage=enqueue-updates count=%d\n",
+               libraryControllerCount);
+        for (int index = 0;
+             index < libraryControllerCount &&
+             remote_call_current_success(); index++) {
+            r_msg2_main(libraryControllers[index],
+                        "_enqueueAppLibraryUpdate", 0, 0, 0, 0);
+            if (remote_call_current_success()) updatesEnqueued++;
+        }
+    }
+
+    BOOL remoteOK = remote_call_current_success();
+    BOOL ok = preflightOK && remoteOK &&
+        cachesPurged == cacheCount &&
+        iconReloads == reloadIconObjectCount && folderRebuilds == 1 &&
+        podReloads == libraryFolderControllerCount &&
+        updatesEnqueued == libraryControllerCount;
+    int mutationCount = cachesPurged + iconReloads + folderRebuilds +
+        podReloads + updatesEnqueued;
+    printf("[SBR_LIBRARY_MINI_REFRESH] result=%s caches=%d/%d "
+           "icon-reload=%d/%d rebuild=%d pods=%d/%d enqueue=%d/%d "
+           "mutations=%d manager-reset=0 list-reload=0 relayout=0 "
+           "objc-method-mutation=0 lifecycle=0 shared-cache-write=0\n",
+           ok ? "complete" : "incomplete", cachesPurged, cacheCount,
+           iconReloads, reloadIconObjectCount,
+           folderRebuilds, podReloads, libraryFolderControllerCount,
+           updatesEnqueued, libraryControllerCount, mutationCount);
+    (void)r_settle_us(previousSettleUS);
+
+    return @{
+        @"ok": @(ok),
+        @"stage": ok ? @"app-library-miniatures-refreshed" :
+            (preflightOK ? @"app-library-miniature-refresh" : @"preflight"),
+        @"message": ok
+            ? @"The targeted App Library miniature generations and folder composites were refreshed; inspect the category folders manually."
+            : (failure ?: @"The App Library miniature refresh did not complete."),
+        @"iconManagerPointer": @(iconManager),
+        @"iconModelPointer": @(iconModel),
+        @"folderImageCachePointer": @(folderImageCache),
+        @"folderSourceCachePointer": @(folderSourceCache),
+        @"configuredTargetBundleCount":
+            @(configuredBundleIdentifiers.count),
+        @"ignoredNonApplicationTargetCount":
+            @(ignoredNonApplicationTargets.count),
+        @"ignoredNonApplicationTargets": ignoredNonApplicationTargets,
+        @"targetBundleCount": @(reloadBundleIdentifiers.count),
+        @"targetIconObjectCount": @(reloadIconObjectCount),
+        @"canonicalIconMatches": @(reloadCanonicalMatches),
+        @"liveLeafIconMatches": @(reloadLeafMatches),
+        @"iconLookupMisses": @(reloadLookupMisses),
+        @"leafModelCount": @(reloadLeafModelCount),
+        @"targetBundlesTruncated": @(reloadTargetsTruncated),
+        @"leafModelsTruncated": @(reloadLeafModelsTruncated),
+        @"libraryControllerCount": @(libraryControllerCount),
+        @"libraryFolderControllerCount": @(libraryFolderControllerCount),
+        @"cacheCount": @(cacheCount),
+        @"cachesPurged": @(cachesPurged),
+        @"iconReloads": @(iconReloads),
+        @"folderRebuilds": @(folderRebuilds),
+        @"podReloads": @(podReloads),
+        @"updatesEnqueued": @(updatesEnqueued),
+        @"mutationCount": @(mutationCount),
+        @"managerResetIssued": @NO,
+        @"applicationIconReloadIssued": @(iconReloads > 0),
+        @"appLibraryListReloadIssued": @NO,
+        @"relayoutIssued": @NO,
+        @"objectiveCMethodMutationCount": @0,
+        @"processLifecycleMutationCount": @0,
+        @"sharedCacheWriteCount": @0,
+        @"remoteOK": @(remoteOK),
     };
 }
 
@@ -27405,7 +30138,7 @@ static uint64_t themer_iconservices_lab_make_structured_if_image(
             types, sizeof(types)) &&
         strcmp(types, "@40@0:8^{CGImage=}16d24@32") == 0;
     uint64_t remoteLayerData = abiReady
-        ? themer_iconservices_lab_make_remote_nsdata(layerData) : 0;
+        ? themer_make_remote_nsdata(layerData) : 0;
     uint64_t retainedCGImage = r_is_objc_ptr(remoteLayerData)
         ? r_dlsym_call(R_TIMEOUT, "CGImageRetain", cgImage,
                        0, 0, 0, 0, 0, 0, 0) : 0;
@@ -28177,7 +30910,7 @@ static uint64_t themer_iconservices_lab_overwrite_file(
     return ready ? 0 : UINT64_MAX;
 }
 
-static uint64_t themer_iconservices_lab_make_remote_nsdata(NSData *data)
+static uint64_t themer_make_remote_nsdata(NSData *data)
 {
     if (![data isKindOfClass:NSData.class] || data.length == 0 ||
         data.length > (8U << 20) || !remote_call_current_success()) {
@@ -29434,7 +32167,7 @@ static uint64_t themer_iconservices_lab_make_store_backed_cache_image(
     uint64_t donorToken = donorClassOK
         ? themer_iconservices_lab_retained_getter(
             donor, "validationToken")
-        : themer_iconservices_lab_make_remote_nsdata(persistedTokenData);
+        : themer_make_remote_nsdata(persistedTokenData);
     uint64_t uuidString = r_is_objc_ptr(donorUUID)
         ? themer_iconservices_lab_retained_getter(donorUUID, "UUIDString") : 0;
     char uuidText[80] = {0};
@@ -29452,7 +32185,7 @@ static uint64_t themer_iconservices_lab_make_store_backed_cache_image(
         ? themer_iconservices_lab_read_local_file(targetPath) : nil;
     NSUInteger targetLength = targetData.length;
     uint64_t remoteStockData = targetData.length > 0
-        ? themer_iconservices_lab_make_remote_nsdata(targetData) : 0;
+        ? themer_make_remote_nsdata(targetData) : 0;
     uint64_t stockValidationImage = r_is_objc_ptr(remoteStockData) &&
             r_is_objc_ptr(donorUUID) && r_is_objc_ptr(donorToken)
         ? themer_iconservices_lab_make_if_cache_image(
@@ -29498,7 +32231,7 @@ static uint64_t themer_iconservices_lab_make_store_backed_cache_image(
     // 5. Validate the padded bytes still construct a correct 68-pt cache image
     //    under the stock68 uuid + token before touching any existing inode.
     uint64_t remotePadded = paddedData != nil
-        ? themer_iconservices_lab_make_remote_nsdata(paddedData) : 0;
+        ? themer_make_remote_nsdata(paddedData) : 0;
     uint64_t cacheImage = r_is_objc_ptr(remotePadded) &&
             r_is_objc_ptr(donorUUID) && r_is_objc_ptr(donorToken)
         ? themer_iconservices_lab_make_if_cache_image(
@@ -32118,7 +34851,7 @@ static bool themer_stock68_validate_identity(
     NSData *fileData = path.length > 0
         ? themer_iconservices_lab_read_local_file(path) : nil;
     uint64_t remoteData = fileData.length > 0
-        ? themer_iconservices_lab_make_remote_nsdata(fileData) : 0;
+        ? themer_make_remote_nsdata(fileData) : 0;
     uint64_t reconstructed = r_is_objc_ptr(remoteData) &&
         r_is_objc_ptr(uuid) && r_is_objc_ptr(token)
         ? themer_iconservices_lab_make_if_cache_image(remoteData, uuid, token)
@@ -32834,7 +35567,7 @@ themer_stock68_recovery_inspect_common(
     bool imageMatchesFile = imageDataExact && fileData.length == imageCapture.objectLength &&
         memcmp(fileData.bytes, imageCapture.bytes, fileData.length) == 0;
     uint64_t remoteFileData = fileData.length > 0
-        ? themer_iconservices_lab_make_remote_nsdata(fileData) : 0;
+        ? themer_make_remote_nsdata(fileData) : 0;
     uint64_t reconstructed = r_is_objc_ptr(remoteFileData) && r_is_objc_ptr(uuid) && r_is_objc_ptr(token)
         ? themer_iconservices_lab_make_if_cache_image(remoteFileData, uuid, token) : 0;
     report.reconstructionValid = r_is_objc_ptr(reconstructed) &&

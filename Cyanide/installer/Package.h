@@ -52,6 +52,14 @@ typedef NS_ENUM(NSInteger, PackageInstallKind) {
     // Direct settings tool. It has a Settings bundle but no install queue,
     // active state, or PackageQueue commit step.
     PackageInstallKindDirectTool = 6,
+
+    // Direct live lock-screen camera/flashlight glyph control. Apply and
+    // Restore are manual RemoteCall actions and never enter PackageQueue.
+    PackageInstallKindLockscreenGlyphs = 7,
+
+    // Transactional Control Center resource replacement. Apply and Restore
+    // run from the durable queue before its automatic shared respring.
+    PackageInstallKindControlCenterTheming = 8,
 };
 
 @interface Package : NSObject
@@ -100,6 +108,10 @@ typedef NS_ENUM(NSInteger, PackageInstallKind) {
 @property (nonatomic, readonly, assign) BOOL isInstalled;
 @property (nonatomic, readonly, assign) BOOL isQueuedForApply;
 @property (nonatomic, readonly, assign) BOOL isInstallDisabled;
+/// Ephemeral applied marker for durable mutations whose UI state is valid for
+/// one explicitly-authorized SpringBoard epoch (currently SnowBoard Remix and
+/// Font Changer). This is intentionally distinct from `isInstalled`.
+@property (nonatomic, readonly, assign) BOOL isAppliedForCurrentSystemEpoch;
 
 - (instancetype)initWithIdentifier:(NSString *)identifier
                               name:(NSString *)name
@@ -117,7 +129,7 @@ typedef NS_ENUM(NSInteger, PackageInstallKind) {
 
 - (void)install;
 - (void)uninstall;
-- (void)applyCommittedState:(BOOL)installed;
+- (BOOL)applyCommittedState:(BOOL)installed;
 
 @end
 

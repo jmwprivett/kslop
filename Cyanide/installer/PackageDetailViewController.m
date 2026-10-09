@@ -5,6 +5,8 @@
 
 #import "PackageDetailViewController.h"
 #import "PackageQueue.h"
+#import "InstallProgressViewController.h"
+#import "CNDQueuedActionCatalog.h"
 #import "../LogTextView.h"
 #import "../PatreonAuth.h"
 #import "../SettingsViewController.h"
@@ -28,6 +30,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 @property (nonatomic, copy)   NSArray<NSArray<NSString *> *> *infoRows;       // [[label, value], ...]
 @property (nonatomic, copy)   NSArray<NSNumber *> *visibleSections;            // ordered PackageDetailSection values
 @property (nonatomic, copy)   NSArray<NSDictionary<NSString *, NSString *> *> *settingsSummary;
+@property (nonatomic) BOOL glyphOperationInProgress;
 @end
 
 @implementation PackageDetailViewController
@@ -73,12 +76,28 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         || self.package.kind == PackageInstallKindNanoRegistry
         || self.package.kind == PackageInstallKindCallRecordingSound
         || self.package.kind == PackageInstallKindHideHomeBar
-        || self.package.kind == PackageInstallKindFontChanger;
+        || self.package.kind == PackageInstallKindFontChanger
+        || self.package.kind == PackageInstallKindControlCenterTheming
+        || self.package.kind == PackageInstallKindLockscreenGlyphs;
 }
 
 - (BOOL)isDirectToolPackage
 {
     return self.package.kind == PackageInstallKindDirectTool;
+}
+
+- (BOOL)isSnowBoardRemixPackage
+{
+    return [self.package.identifier isEqualToString:
+        @"com.darksword.snowboardlite"];
+}
+
+- (CNDQueuedAction *)queuedSnowBoardRemixAction
+{
+    if (![self isSnowBoardRemixPackage]) return nil;
+    return [[PackageQueue sharedQueue]
+        standaloneActionForConflictKey:
+            CNDQueuedActionConflictKeySnowBoardRemix];
 }
 
 - (NSString *)manualActionTitleForIntent:(PackageQueueIntent)intent
@@ -96,12 +115,21 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         if (self.package.kind == PackageInstallKindFontChanger) {
             return (intent == PackageQueueIntentInstall) ? @"Cancel Apply" : @"Cancel Restore";
         }
+        if (self.package.kind == PackageInstallKindControlCenterTheming) {
+            return (intent == PackageQueueIntentInstall) ? @"Cancel Apply" : @"Cancel Restore";
+        }
+        if (self.package.kind == PackageInstallKindLockscreenGlyphs) {
+            return (intent == PackageQueueIntentInstall) ? @"Cancel Apply" : @"Cancel Restore";
+        }
         return (intent == PackageQueueIntentInstall) ? @"Cancel Disable" : @"Cancel Enable";
     }
     if (self.package.kind == PackageInstallKindNanoRegistry) return @"Apply/Remove";
     if (self.package.kind == PackageInstallKindCallRecordingSound) return @"Silence/Restore";
     if (self.package.kind == PackageInstallKindHideHomeBar) return @"Hide/Restore";
-    if (self.package.kind == PackageInstallKindFontChanger) return @"Apply/Restore";
+    if (self.package.kind == PackageInstallKindFontChanger) return @"Apply";
+    if (self.package.kind == PackageInstallKindControlCenterTheming) return @"Apply/Restore";
+    if (self.package.kind == PackageInstallKindLockscreenGlyphs)
+        return self.glyphOperationInProgress ? @"Working…" : @"Apply/Restore";
     return @"Disable/Enable";
 }
 
@@ -126,6 +154,16 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     if (self.package.kind == PackageInstallKindFontChanger) {
         if (intent == PackageQueueIntentInstall) return @"Apply Pending";
         if (intent == PackageQueueIntentUninstall) return @"Restore Pending";
+        if (self.package.isAppliedForCurrentSystemEpoch) return @"Active";
+        return @"Manual Control";
+    }
+    if (self.package.kind == PackageInstallKindControlCenterTheming) {
+        if (intent == PackageQueueIntentInstall) return @"Apply Pending";
+        if (intent == PackageQueueIntentUninstall) return @"Restore Pending";
+        return @"Manual Control";
+    }
+    if (self.package.kind == PackageInstallKindLockscreenGlyphs) {
+        if (self.glyphOperationInProgress) return @"Updating live glyphs…";
         return @"Manual Control";
     }
     if (intent == PackageQueueIntentInstall) return @"Disable Pending";
@@ -138,6 +176,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:self.package];
     if (intent == PackageQueueIntentInstall) return @"Activation Pending";
     if (intent == PackageQueueIntentUninstall) return @"Deactivation Pending";
+    if (self.package.isAppliedForCurrentSystemEpoch) return @"Active";
     if (self.package.isInstalled) return @"Installed";
     return @"Inactive";
 }
@@ -147,18 +186,33 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:self.package];
     if (intent == PackageQueueIntentInstall) return self.view.tintColor;
     if (intent == PackageQueueIntentUninstall) return UIColor.systemRedColor;
+    if (self.package.isAppliedForCurrentSystemEpoch) return UIColor.systemGreenColor;
     if (self.package.isInstalled) return UIColor.systemGreenColor;
     return UIColor.secondaryLabelColor;
 }
 
 - (NSString *)packageStateText
 {
+    if ([self isSnowBoardRemixPackage]) {
+        CNDQueuedAction *queued = [self queuedSnowBoardRemixAction];
+        if ([queued.operation isEqualToString:
+                CNDQueuedActionOperationApplyTheme]) return @"Apply Pending";
+        if ([queued.operation isEqualToString:
+                CNDQueuedActionOperationRestoreTheme]) return @"Restore Pending";
+        return self.package.isAppliedForCurrentSystemEpoch
+            ? @"Active" : @"Manual Control";
+    }
     if ([self isDirectToolPackage]) return @"Manual Control";
     return [self isManualPackage] ? [self manualStateText] : [self toggleStateText];
 }
 
 - (UIColor *)packageStateColor
 {
+    if ([self isSnowBoardRemixPackage]) {
+        if ([self queuedSnowBoardRemixAction]) return self.view.tintColor;
+        return self.package.isAppliedForCurrentSystemEpoch
+            ? UIColor.systemGreenColor : UIColor.secondaryLabelColor;
+    }
     if ([self isDirectToolPackage]) return UIColor.secondaryLabelColor;
     return [self isManualPackage] ? [self manualStateColor] : [self toggleStateColor];
 }
@@ -167,6 +221,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:self.package];
     if (intent != PackageQueueIntentNone) return self.view.tintColor;
+    if (self.package.isAppliedForCurrentSystemEpoch) {
+        return UIColor.systemGreenColor;
+    }
     return UIColor.secondaryLabelColor;
 }
 
@@ -180,8 +237,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     }
 
     UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:@"Run System Edit Alone"
-                                            message:reason ?: @"This system edit must be the only pending queue item."
+        [UIAlertController alertControllerWithTitle:@"Could Not Queue Change"
+                                            message:reason ?: @"The queued change could not be saved."
                                      preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK"
                                               style:UIAlertActionStyleDefault
@@ -213,6 +270,12 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     } else if (self.package.kind == PackageInstallKindFontChanger) {
         log_user("[INSTALLER] Pending font %s\n",
                  intent == PackageQueueIntentInstall ? "apply" : "restore");
+    } else if (self.package.kind == PackageInstallKindControlCenterTheming) {
+        log_user("[INSTALLER] Pending Control Center resource %s\n",
+                 intent == PackageQueueIntentInstall ? "apply" : "restore");
+    } else if (self.package.kind == PackageInstallKindLockscreenGlyphs) {
+        log_user("[INSTALLER] Pending lockscreen glyph %s\n",
+                 intent == PackageQueueIntentInstall ? "apply" : "restore");
     } else {
         log_user("[INSTALLER] Pending OTA %s\n",
                  intent == PackageQueueIntentInstall ? "disable" : "enable");
@@ -220,8 +283,104 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     [[PackageQueue sharedQueue] queueIntent:intent forPackage:self.package];
 }
 
+- (void)presentActivityLogWithCompletion:(dispatch_block_t)completion
+{
+    if (self.presentedViewController) {
+        if ([self.presentedViewController isKindOfClass:UIAlertController.class]) {
+            __weak typeof(self) weakSelf = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(250 * NSEC_PER_MSEC)),
+                           dispatch_get_main_queue(), ^{
+                [weakSelf presentActivityLogWithCompletion:completion];
+            });
+            return;
+        }
+        if (completion) completion();
+        return;
+    }
+
+    InstallProgressViewController *vc = [[InstallProgressViewController alloc] init];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    nav.modalPresentationStyle = UIModalPresentationAutomatic;
+    [self presentViewController:nav animated:YES completion:completion];
+}
+
+- (void)runLockscreenGlyphRuntimeOperation:(BOOL)apply
+{
+    if (self.glyphOperationInProgress) return;
+    self.glyphOperationInProgress = YES;
+    [self updateActionButton];
+    [self.tableView reloadData];
+    __weak typeof(self) weakSelf = self;
+    dispatch_block_t startOperation = ^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSError *error = nil;
+            BOOL success = settings_apply_lockscreen_pulsar_runtime(apply, &error);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                __strong typeof(weakSelf) self = weakSelf;
+                if (!self) return;
+                self.glyphOperationInProgress = NO;
+                [self updateActionButton];
+                self.tableView.tableHeaderView = [self buildHeaderView];
+                [self.tableView reloadData];
+                NSString *message = success
+                    ? (apply
+                        ? @"Pulsar camera and flashlight artwork is active. The live theme remains until a respring or reboot."
+                        : @"The native camera and flashlight glyphs were rebuilt and restored.")
+                    : (error.localizedDescription ?:
+                        (apply ? @"The artwork apply did not verify."
+                               : @"The stock glyph restore did not verify."));
+                [[NSNotificationCenter defaultCenter]
+                    postNotificationName:kSettingsActionsDidCompleteNotification
+                    object:nil userInfo:@{
+                        kSettingsActionsDidCompleteSuccessKey: @(success),
+                        kSettingsActionsDidCompleteMessageKey: message
+                    }];
+                if (self.navigationController.topViewController != self ||
+                    !self.view.window) return;
+                UIViewController *presenter = self.presentedViewController ?: self;
+                UIAlertController *alert = [UIAlertController
+                    alertControllerWithTitle:success
+                        ? (apply ? @"Applied" : @"Restored")
+                        : (apply ? @"Apply Failed" : @"Restore Failed")
+                    message:message preferredStyle:UIAlertControllerStyleAlert];
+                [alert addAction:[UIAlertAction actionWithTitle:@"Done"
+                    style:UIAlertActionStyleCancel handler:nil]];
+                [presenter presentViewController:alert animated:YES completion:nil];
+            });
+        });
+    };
+    [self presentActivityLogWithCompletion:startOperation];
+}
+
 - (UIMenu *)manualActionMenu
 {
+    if (self.package.kind == PackageInstallKindLockscreenGlyphs) {
+        PackageQueue *queue = [PackageQueue sharedQueue];
+        BOOL busy = self.glyphOperationInProgress;
+        BOOL queueBlocked = queue.commitInFlight || queue.hasDurableTransaction || queue.pendingCount > 0;
+        UIAction *apply = [UIAction actionWithTitle:@"Apply"
+                                              image:[UIImage systemImageNamed:@"sparkles"]
+                                         identifier:nil
+                                            handler:^(__kindof UIAction *_) {
+            [self runLockscreenGlyphRuntimeOperation:YES];
+        }];
+        UIAction *restore = [UIAction actionWithTitle:@"Restore"
+                                                image:[UIImage systemImageNamed:@"arrow.clockwise"]
+                                           identifier:nil
+                                              handler:^(__kindof UIAction *_) {
+            [self runLockscreenGlyphRuntimeOperation:NO];
+        }];
+        if (busy || queueBlocked) {
+            apply.attributes = UIMenuElementAttributesDisabled;
+            restore.attributes = UIMenuElementAttributesDisabled;
+        }
+        if (queueBlocked) {
+            apply.subtitle = @"Finish or clear the saved queue first";
+            restore.subtitle = apply.subtitle;
+        }
+        return [UIMenu menuWithTitle:@"Lockscreen Glyphs"
+            children:@[apply, restore]];
+    }
     if (self.package.kind == PackageInstallKindNanoRegistry) {
         UIAction *apply = [UIAction actionWithTitle:@"Apply Pairing Override"
                                               image:[UIImage systemImageNamed:@"applewatch.radiowaves.left.and.right"]
@@ -239,6 +398,24 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         remove.attributes = UIMenuElementAttributesDestructive;
 
         return [UIMenu menuWithTitle:@"Watch Pairing Override" children:@[apply, remove]];
+    }
+
+    if (self.package.kind == PackageInstallKindControlCenterTheming) {
+        UIAction *apply = [UIAction actionWithTitle:@"Apply Pulsar Resources"
+                                              image:[UIImage systemImageNamed:@"sparkles"]
+                                         identifier:nil
+                                            handler:^(__kindof UIAction *_) {
+            [self queueManualIntent:PackageQueueIntentInstall];
+        }];
+        UIAction *restore = [UIAction actionWithTitle:@"Restore Stock Resources"
+                                                image:[UIImage systemImageNamed:@"arrow.clockwise"]
+                                           identifier:nil
+                                              handler:^(__kindof UIAction *_) {
+            [self queueManualIntent:PackageQueueIntentUninstall];
+        }];
+        restore.attributes = UIMenuElementAttributesDestructive;
+        return [UIMenu menuWithTitle:@"Control Center Resources"
+            children:@[apply, restore]];
     }
 
     if (self.package.kind == PackageInstallKindCallRecordingSound) {
@@ -281,31 +458,6 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         }];
 
         return [UIMenu menuWithTitle:@"Home Bar" children:@[hide, restore]];
-    }
-
-    if (self.package.kind == PackageInstallKindFontChanger) {
-        UIAction *apply = [UIAction actionWithTitle:@"Apply Selected Family"
-                                              image:[UIImage systemImageNamed:@"textformat"]
-                                         identifier:nil
-                                            handler:^(__kindof UIAction *_) {
-            if (!settings_font_changer_has_regular_font()) {
-                SettingsViewController *detail = [[SettingsViewController alloc] initWithUnderlyingSection:self.package.settingsSection
-                                                                                              bundleTitle:self.package.name];
-                [self.navigationController pushViewController:detail animated:YES];
-                return;
-            }
-            [self queueManualIntent:PackageQueueIntentInstall];
-        }];
-        apply.attributes = UIMenuElementAttributesDestructive;
-
-        UIAction *restore = [UIAction actionWithTitle:@"Restore Stock Fonts"
-                                                image:[UIImage systemImageNamed:@"arrow.clockwise"]
-                                           identifier:nil
-                                              handler:^(__kindof UIAction *_) {
-            [self queueManualIntent:PackageQueueIntentUninstall];
-        }];
-
-        return [UIMenu menuWithTitle:@"Font Changer" children:@[apply, restore]];
     }
 
     UIAction *disable = [UIAction actionWithTitle:@"Disable OTA Updates"
@@ -480,9 +632,10 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     // Status badge (optional)
     UIView *badge = nil;
     if ([self isDirectToolPackage]) {
-        badge = [self badgeWithText:@"MANUAL"
-                         background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.16]
-                          textColor:UIColor.secondaryLabelColor];
+        UIColor *color = [self packageStateColor];
+        badge = [self badgeWithText:[self packageStateText].uppercaseString
+                         background:[color colorWithAlphaComponent:0.16]
+                          textColor:color];
     } else if ([self isManualPackage]) {
         UIColor *color = [self manualStateColor];
         badge = [self badgeWithText:[self manualStateText].uppercaseString
@@ -632,7 +785,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         style = UIBarButtonItemStyleDone;
     }
 
-    BOOL useMenu = manual && intent == PackageQueueIntentNone;
+    BOOL directFontApply = self.package.kind == PackageInstallKindFontChanger;
+    BOOL useMenu = manual && !directFontApply &&
+        intent == PackageQueueIntentNone;
     UIBarButtonItem *item = [[UIBarButtonItem alloc] initWithTitle:title
                                                              style:style
                                                             target:useMenu ? nil : self
@@ -642,6 +797,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     }
     if (tint) item.tintColor = tint;
     item.enabled = !self.package.isInstallDisabled || installed || intent != PackageQueueIntentNone;
+    if (self.package.kind == PackageInstallKindLockscreenGlyphs &&
+        self.glyphOperationInProgress)
+        item.enabled = NO;
     self.navigationItem.rightBarButtonItems = @[
         item,
         [self favoriteBarButtonItem],
@@ -710,8 +868,12 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         [self promptConfigureBeforeInstall];
         return;
     }
-    // Manual packages dispatch via menu — didTapAction should never run for
-    // them when intent == None (the bar item carries a UIMenu instead of a
+    if (self.package.kind == PackageInstallKindFontChanger) {
+        [self queueManualIntent:PackageQueueIntentInstall];
+        return;
+    }
+    // Other manual packages dispatch via menu — didTapAction should never run
+    // for them when intent == None (the bar item carries a UIMenu instead of a
     // selector target).
     if ([self isManualPackage]) {
         return;

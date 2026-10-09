@@ -1,0 +1,354 @@
+{
+  "allStockRenditionTypesScalesAndGeometryVerified": true,
+  "artworkLayout": {
+    "AirplaneGlyph": {
+      "bottom": 2.75,
+      "drawnHeight": 36.0,
+      "drawnWidth": 25.2,
+      "edgeMarginSourcePixels": 0.5,
+      "effectiveScale": 0.9,
+      "left": 0.8000000000000007,
+      "mappedAlphaBounds": [
+        2.3000000000000007,
+        8.15,
+        25.7,
+        31.85
+      ],
+      "nativeCanvasChanged": false,
+      "requestedScale": 0.9,
+      "sourceAlphaBounds": [
+        5,
+        23,
+        83,
+        102
+      ],
+      "sourceAlphaBytesChanged": false
+    },
+    "CellularDataGlyph": {
+      "bottom": -0.75,
+      "drawnHeight": 43.68421052631579,
+      "drawnWidth": 30.57894736842105,
+      "edgeMarginSourcePixels": 0.5,
+      "effectiveScale": 1.0921052631578947,
+      "left": -1.2894736842105257,
+      "mappedAlphaBounds": [
+        0.16666666666666718,
+        5.074561403508771,
+        27.833333333333336,
+        34.925438596491226
+      ],
+      "nativeCanvasChanged": false,
+      "requestedScale": 1.12,
+      "sourceAlphaBounds": [
+        4,
+        22,
+        80,
+        104
+      ],
+      "sourceAlphaBytesChanged": false
+    },
+    "HotspotGlyph": {
+      "bottom": -0.09429824561403422,
+      "drawnHeight": 40.526315789473685,
+      "drawnWidth": 26.342105263157894,
+      "edgeMarginSourcePixels": 0.5,
+      "effectiveScale": 1.013157894736842,
+      "left": -0.1710526315789469,
+      "mappedAlphaBounds": [
+        0.16666666666666713,
+        7.335526315789474,
+        25.833333333333336,
+        32.66447368421053
+      ],
+      "nativeCanvasChanged": false,
+      "requestedScale": 1.12,
+      "sourceAlphaBounds": [
+        1,
+        23,
+        77,
+        98
+      ],
+      "sourceAlphaBytesChanged": false
+    }
+  },
+  "artworkMaskAlphaLevels": 256,
+  "artworkMaskMaximumDimension": 120,
+  "artworkOpacityPreserved": true,
+  "artworkRepresentation": "unmodified-native-3x-source-alpha-in-PDF-soft-mask",
+  "assetutilValidated": true,
+  "generatedCatalogTreePaddingCompaction": {
+    "allNonzeroTreePageBytesPreserved": true,
+    "allTreeEntriesPreserved": true,
+    "allValueBlocksByteIdentical": true,
+    "compactedLength": 38884,
+    "method": "generated-BOM-declared-tree-entry-padding-compaction",
+    "originalLength": 50488,
+    "treePageCount": 4
+  },
+  "packedAtlasTypesScalesAndGeometryVerified": true,
+  "payloadLength": 39304,
+  "payloadRenditionContract": [
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "AirplaneGlyph",
+      "NameIdentifier": 61947,
+      "PixelHeight": 120,
+      "PixelWidth": 84,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "AirplaneGlyph",
+      "NameIdentifier": 61947,
+      "PixelHeight": 40,
+      "PixelWidth": 28,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "CellularDataGlyph",
+      "NameIdentifier": 19910,
+      "PixelHeight": 120,
+      "PixelWidth": 84,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "CellularDataGlyph",
+      "NameIdentifier": 19910,
+      "PixelHeight": 40,
+      "PixelWidth": 28,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "HotspotGlyph",
+      "NameIdentifier": 45811,
+      "PixelHeight": 120,
+      "PixelWidth": 78,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "HotspotGlyph",
+      "NameIdentifier": 45811,
+      "PixelHeight": 40,
+      "PixelWidth": 26,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "PackedImage",
+      "Idiom": "universal",
+      "Name": "ZZZZPackedAsset-1.0.1-gamut0",
+      "PixelHeight": 44,
+      "PixelWidth": 90,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "PackedImage",
+      "Idiom": "universal",
+      "Name": "ZZZZPackedAsset-3.0.1-gamut0",
+      "PixelHeight": 124,
+      "PixelWidth": 254,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "AirplaneGlyph",
+      "NameIdentifier": 61947,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 28
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "CellularDataGlyph",
+      "NameIdentifier": 19910,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 28
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "HotspotGlyph",
+      "NameIdentifier": 45811,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 26
+    }
+  ],
+  "payloadSHA256": "572c71b8c1f5f9b7d7a73e8de91db2fbf240f7a9a1c606508451ba3bef0b4606",
+  "productBuildVersion": "23A341",
+  "schemaVersion": 1,
+  "sourceAlphaPlanes": {
+    "AirplaneGlyph": [
+      122,
+      255
+    ],
+    "CellularDataGlyph": [
+      122,
+      255
+    ],
+    "HotspotGlyph": [
+      122,
+      255
+    ]
+  },
+  "sourceArtworkSHA256": {
+    "AirplaneGlyph": "8915c5baa3dafbb3a136a310192721f03c10ebbb9f109795e48187c1d0321ae2",
+    "CellularDataGlyph": "ff96db2a40e7616140cfa9a156d10de746f0424b1bd2ee138ca076c34f63f2ee",
+    "HotspotGlyph": "d561e836d2597d077131e364ea33ba3d15cbda5ed9ab729c6b97d9ba3656d074"
+  },
+  "stockCoreUISubtype": 2688,
+  "stockLength": 39304,
+  "stockRenditionContract": [
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "AirplaneGlyph",
+      "NameIdentifier": 61947,
+      "PixelHeight": 120,
+      "PixelWidth": 84,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "AirplaneGlyph",
+      "NameIdentifier": 61947,
+      "PixelHeight": 40,
+      "PixelWidth": 28,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "CellularDataGlyph",
+      "NameIdentifier": 19910,
+      "PixelHeight": 120,
+      "PixelWidth": 84,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "CellularDataGlyph",
+      "NameIdentifier": 19910,
+      "PixelHeight": 40,
+      "PixelWidth": 28,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "HotspotGlyph",
+      "NameIdentifier": 45811,
+      "PixelHeight": 120,
+      "PixelWidth": 78,
+      "Preserved Vector Representation": true,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Image",
+      "Idiom": "universal",
+      "Name": "HotspotGlyph",
+      "NameIdentifier": 45811,
+      "PixelHeight": 40,
+      "PixelWidth": 26,
+      "Preserved Vector Representation": true,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "PackedImage",
+      "Idiom": "universal",
+      "Name": "ZZZZPackedAsset-1.0.1-gamut0",
+      "PixelHeight": 44,
+      "PixelWidth": 90,
+      "Scale": 1,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "PackedImage",
+      "Idiom": "universal",
+      "Name": "ZZZZPackedAsset-3.0.1-gamut0",
+      "PixelHeight": 124,
+      "PixelWidth": 254,
+      "Scale": 3,
+      "State": "Normal"
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "AirplaneGlyph",
+      "NameIdentifier": 61947,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 28
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "CellularDataGlyph",
+      "NameIdentifier": 19910,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 28
+    },
+    {
+      "AssetType": "Vector",
+      "Height": 40,
+      "Idiom": "universal",
+      "Name": "HotspotGlyph",
+      "NameIdentifier": 45811,
+      "Scale": 1,
+      "State": "Normal",
+      "Width": 26
+    }
+  ],
+  "stockSHA256": "2e1f4b5aa95cbee1257707ab4926a3e9c10151d57a06621bb5f425ad776aca44",
+  "themedRenditionNames": [
+    "AirplaneGlyph",
+    "CellularDataGlyph",
+    "HotspotGlyph"
+  ],
+  "unrelatedNamedRenditions": [],
+  "unrelatedNamedRenditionsPreserved": true
+}

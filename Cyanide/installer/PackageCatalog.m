@@ -398,6 +398,32 @@ static const NSInteger kSecFontChanger      = 25;
         fontChanger.settingsSection = kSecFontChanger;
         fontChanger.unstableWarning = @"Warning: persistent system font replacement. kslop backs up stock fonts first, but bad or incompatible fonts can cause broken text rendering until stock backups are restored and the device resprings.";
 
+        Package *ccTheming = [[Package alloc] initWithIdentifier:@"com.darksword.cc-theming"
+                                           name:@"CC Theming"
+                               shortDescription:@"Apply or restore Pulsar Control Center artwork"
+                                longDescription:@"Applies the validated Pulsar Control Center packages and native CoreUI catalogs with durable stock backups, or restores every modified resource from that journal. Both operations run through Cyanide's durable queue and automatically respring after the file transaction completes.\n\nThe operation is file-backed only: it installs no live glyph adapter, view override, trace, inventory probe, or mutation canary."
+                                        version:version
+                                         author:@"Phuc Do / zeroxjf"
+                                       category:@"Beta"
+                                     symbolName:@"switch.2"
+                                           kind:PackageInstallKindControlCenterTheming
+                                     enabledKey:nil
+                                          isNew:YES];
+        ccTheming.unstableWarning = @"Build-locked system-resource modification for iOS 26 build 23A341. Keep Cyanide and its durable CC Theming journal installed until you restore stock. Unknown target bytes are refused and verified write failures roll back before the automatic respring.";
+
+        Package *lockscreenGlyphs = [[Package alloc] initWithIdentifier:@"com.darksword.lockscreen-glyphs"
+                                           name:@"Lockscreen Glyphs"
+                               shortDescription:@"Pulsar camera and flashlight artwork"
+                                longDescription:@"Themes the live lock-screen camera and flashlight buttons with the original Pulsar artwork. The flashlight includes separate off and on states. Restore rebuilds both native stock glyphs immediately.\n\nThe change is held in SpringBoard memory and naturally returns to stock after a respring or reboot. No system asset file is overwritten."
+                                        version:version
+                                         author:@"EPOS05 / zeroxjf"
+                                       category:@"System"
+                                     symbolName:@"lock.display"
+                                           kind:PackageInstallKindLockscreenGlyphs
+                                     enabledKey:nil
+                                          isNew:YES];
+        lockscreenGlyphs.unstableWarning = @"This live theme is temporary. A SpringBoard respring or device reboot restores the stock glyphs.";
+
         Package *otaBlock = [[Package alloc] initWithIdentifier:@"com.darksword.ota-block"
                                            name:@"OTA Updates"
                                shortDescription:@"Enable or disable over-the-air system updates"
@@ -428,6 +454,7 @@ static const NSInteger kSecFontChanger      = 25;
             nsBar,
             niceBarLite,
             sbc,
+            lockscreenGlyphs,
             layoutExtras,
             gravityLite,
             powercuff,
@@ -507,6 +534,7 @@ static const NSInteger kSecFontChanger      = 25;
             axon,
             nanoRegistry,
             fontChanger,
+            ccTheming,
             callRecordingSound,
             hideHomeBar,
 #if CYANIDE_PRIVATE_TWEAKS_AVAILABLE

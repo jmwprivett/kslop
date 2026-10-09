@@ -12,6 +12,9 @@
 #import "CNDLaunchServicesRegistration.h"
 #import "../TaskRop/CNDKernelTaskBridge.h"
 #import "../TaskRop/RemoteCall.h"
+#import "../CNDHailMaryImpRedirect.h"
+#import "../CNDHailMaryReadOnlyDataPage.h"
+#import "../kexploit/kexploit_opa334.h"
 #import "../kexploit/kutils.h"
 #import "../map_app.h"
 #import "../tweaks/remote_objc.h"
@@ -44,6 +47,12 @@ static NSString * const CNDRemixPayloadPipelineIdentifier =
  * unowned identifier schedules the daemon's global garbage collector. */
 static NSString * const CNDRemixIconServicesWakeIdentifier =
     @"com.zeroxjf.cyanide.iconservices-wake";
+/* UIAirDropActivity returns this exact IconServices identity from
+ * -_bundleIdentifierForActivityImageCreation. It is intentionally not an
+ * installed application and must never broaden into arbitrary pseudo-bundle
+ * publication. */
+static NSString * const CNDRemixAirDropPseudoBundleIdentifier =
+    @"com.apple.Sharing.AirDrop";
 
 NSString * const CNDSnowBoardRemixStatusesDidRefreshNotification =
     @"CNDSnowBoardRemixStatusesDidRefreshNotification";
@@ -123,6 +132,18 @@ static NSString *CNDRemixSHA256(NSData *data)
     return text;
 }
 
+static NSArray<NSString *> *CNDRemixSupportedPseudoBundleIdentifiers(void)
+{
+    return @[CNDRemixAirDropPseudoBundleIdentifier];
+}
+
+static BOOL CNDRemixIsSupportedPseudoBundleIdentifier(NSString *identifier)
+{
+    return [identifier isKindOfClass:NSString.class] &&
+        [identifier caseInsensitiveCompare:
+            CNDRemixAirDropPseudoBundleIdentifier] == NSOrderedSame;
+}
+
 static BOOL CNDRemixIsSHA256String(NSString *value);
 
 static NSString *CNDRemixCatalogText(NSDictionary *record, NSString *key)
@@ -135,6 +156,42 @@ static NSString *CNDRemixCatalogText(NSDictionary *record, NSString *key)
     }
     if ([value isKindOfClass:NSNumber.class]) return [value stringValue];
     return @"";
+}
+
+/* AirDrop's activity identity has a normal IconServices source record but no
+ * installed LSApplicationRecord catalog row. Bind its recovery baseline to
+ * the current OS identity instead: an OS update must rebase this Apple-owned
+ * pseudo-bundle before Cyanide can publish it again. */
+static NSDictionary *CNDRemixPseudoBundleFingerprint(
+    NSString *bundleIdentifier)
+{
+    if (!CNDRemixIsSupportedPseudoBundleIdentifier(bundleIdentifier))
+        return nil;
+    NSProcessInfo *processInfo = NSProcessInfo.processInfo;
+    NSOperatingSystemVersion version = processInfo.operatingSystemVersion;
+    NSString *versionString = processInfo.operatingSystemVersionString ?: @"";
+    NSString *material = [NSString stringWithFormat:
+        @"schema=%lu\npseudo=%@\nos=%ld.%ld.%ld\n%lu:%@",
+        (unsigned long)CNDRemixApplicationFingerprintSchemaVersion,
+        CNDRemixAirDropPseudoBundleIdentifier,
+        (long)version.majorVersion, (long)version.minorVersion,
+        (long)version.patchVersion,
+        (unsigned long)[versionString
+            lengthOfBytesUsingEncoding:NSUTF8StringEncoding],
+        versionString];
+    NSString *identity = CNDRemixSHA256(
+        [material dataUsingEncoding:NSUTF8StringEncoding]);
+    if (!CNDRemixIsSHA256String(identity)) return nil;
+    return @{
+        @"schemaVersion": @(CNDRemixApplicationFingerprintSchemaVersion),
+        @"identity": identity,
+        @"bundleIdentifier": CNDRemixAirDropPseudoBundleIdentifier,
+        @"pseudoBundle": @YES,
+        @"operatingSystemVersion": versionString,
+        @"operatingSystemMajorVersion": @(version.majorVersion),
+        @"operatingSystemMinorVersion": @(version.minorVersion),
+        @"operatingSystemPatchVersion": @(version.patchVersion),
+    };
 }
 
 /* The path catches replacement installs/container rotation, while the three
@@ -654,6 +711,21 @@ static NSArray<CNDIconServicesDescriptorSpec *> *
 CNDRemixDescriptorSpecificationsForBundleIdentifier(
     NSString *bundleIdentifier)
 {
+    if (CNDRemixIsSupportedPseudoBundleIdentifier(bundleIdentifier)) {
+        /* UIAirDropActivity uses its pseudo-bundle for two bounded consumers:
+         * HomeScreen/64pt in the horizontal activity strip, and TableUIName
+         * 28pt with drawBorder=YES (variantOptions 0x4) in the Apps list. */
+        CNDIconServicesDescriptorSpec *activityStrip =
+            [CNDIconServicesDescriptorSpec specWithPointWidth:64
+                pointHeight:64 scale:3 appearance:0
+                iconVariant:0 options:0];
+        CNDIconServicesDescriptorSpec *moreList =
+            [CNDIconServicesDescriptorSpec specWithPointWidth:28
+                pointHeight:28 scale:3 appearance:0
+                iconVariant:0x4 options:0];
+        return activityStrip && moreList
+            ? @[activityStrip, moreList] : @[];
+    }
     /* The 20-point response remains specific to Safari-backed SnippetUI
      * badges. The 64-point response is part of the core profile because
      * SearchUI's vertical Apps results request it for ordinary applications. */
@@ -765,13 +837,26 @@ static BOOL CNDRemixVariantProvesNoIconServicesMutation(
     NSString *state = variant[@"state"];
     if (![@[@"prepared", @"dispatch-possible", @"recovery-required",
             @"unmutated-skipped"] containsObject:state ?: @""]) return NO;
-    if (!CNDRemixReportProvesNoIconServicesMutation(
+    /* New journals checkpoint dispatch independently for each descriptor.
+     * Only the durable, explicit NO proves a prepared variant was never
+     * sent. Older dispatch-possible records remain crash-ambiguous. */
+    id dispatchPossible = variant[@"publicationDispatchPossible"];
+    BOOL neverDispatched = [dispatchPossible isKindOfClass:NSNumber.class] &&
+        [dispatchPossible isEqualToNumber:@NO] &&
+        variant[@"publication"] == nil;
+    if (!neverDispatched && !CNDRemixReportProvesNoIconServicesMutation(
             variant[@"publication"])) return NO;
     /* An earlier failed Restore may itself have generated or written stock.
      * It is safe to skip only if that attempt independently proves untouched
      * too. A crash checkpoint in state restoring is never accepted above. */
-    return variant[@"restoration"] == nil ||
-        CNDRemixReportProvesNoIconServicesMutation(variant[@"restoration"]);
+    if (variant[@"restoration"] != nil) {
+        return CNDRemixReportProvesNoIconServicesMutation(
+            variant[@"restoration"]);
+    }
+    id restoreDispatchPossible = variant[@"restorationDispatchPossible"];
+    return restoreDispatchPossible == nil ||
+        ([restoreDispatchPossible isKindOfClass:NSNumber.class] &&
+         [restoreDispatchPossible isEqualToNumber:@NO]);
 }
 
 static BOOL CNDRemixJournalProvesNoIconServicesMutation(
@@ -779,7 +864,8 @@ static BOOL CNDRemixJournalProvesNoIconServicesMutation(
 {
     if ([journal[@"schemaVersion"] unsignedIntegerValue] !=
             CNDRemixIconServicesJournalSchemaVersion ||
-        ![journal[@"state"] isEqualToString:@"recovery-required"]) {
+        ![@[@"prepared", @"dispatch-possible", @"recovery-required",
+            @"unmutated-skipped"] containsObject:journal[@"state"] ?: @""]) {
         return NO;
     }
     NSArray<NSDictionary *> *variants = [journal[@"variants"]
@@ -787,6 +873,35 @@ static BOOL CNDRemixJournalProvesNoIconServicesMutation(
     if (variants.count == 0) return NO;
     for (NSDictionary *variant in variants) {
         if (!CNDRemixVariantProvesNoIconServicesMutation(variant)) return NO;
+    }
+    return YES;
+}
+
+/* Native stock generation is not a themed publication. A source admission
+ * failure after that generation must remain a failed Apply, but cannot by
+ * itself claim themed data needs recovery. Live stock readback still decides
+ * whether the recovery journal can be cleared. */
+static BOOL CNDRemixReportProvesNoThemedIconServicesMutation(
+    NSDictionary *publication)
+{
+    if (![publication isKindOfClass:NSDictionary.class]) return NO;
+    for (NSString *key in @[
+            @"ok", @"directStoreRemoveIssued", @"directStoreRemoveVerified",
+            @"directStoreWriteIssued", @"directStoreWriteVerified",
+            @"persistentIndexTokenWriteIssued", @"replacementPublished",
+            @"installed", @"hookStillInstalledAtCleanup"]) {
+        id value = publication[key];
+        if (![value isKindOfClass:NSNumber.class] ||
+            ![value isEqualToNumber:@NO]) return NO;
+    }
+    for (NSString *key in @[
+            @"stockCaptured", @"stockGenerationInitiallyPersisted",
+            @"stockGenerationPersisted", @"persistentIndexIdentitySettled",
+            @"transportHealthy", @"transportLifecycleVerified",
+            @"hookRestored", @"hookQuiescent"]) {
+        id value = publication[key];
+        if (![value isKindOfClass:NSNumber.class] ||
+            ![value isEqualToNumber:@YES]) return NO;
     }
     return YES;
 }
@@ -865,6 +980,34 @@ static BOOL CNDRemixJournalMatchesCurrentApplication(
             journal[@"applicationFingerprint"], applicationFingerprint);
 }
 
+/* AirDrop journals created before source-registry verification can contain
+ * perfectly themed store units that IconServices does not associate with the
+ * pseudo-bundle's native provider.  They must not take the ordinary
+ * already-active fast path: rotate the two-record journal through stock and
+ * republish it once so Apply repairs and records both UUID -> source links. */
+static BOOL CNDRemixAirDropJournalHasVerifiedSourceRegistry(
+    NSDictionary *journal,
+    NSArray<CNDIconServicesDescriptorSpec *> *specifications)
+{
+    NSArray<NSDictionary *> *variants = CNDRemixJournalVariants(journal);
+    if (variants.count == 0 || variants.count != specifications.count) {
+        return NO;
+    }
+    for (NSDictionary *variant in variants) {
+        NSDictionary *publication = [variant[@"publication"]
+            isKindOfClass:NSDictionary.class]
+            ? variant[@"publication"] : nil;
+        if (![variant[@"state"] isEqualToString:@"active"] ||
+            ![publication[@"sourceRegistrationRequired"] boolValue] ||
+            ![publication[@"sourceIdentifiersResolved"] boolValue] ||
+            [publication[@"sourceIdentifierCount"] unsignedIntegerValue] == 0 ||
+            ![publication[@"sourceRegistryFreshReadbackVerified"] boolValue]) {
+            return NO;
+        }
+    }
+    return YES;
+}
+
 static BOOL CNDRemixJournalProvesNoIconServicesMutation(
     NSDictionary *journal);
 
@@ -897,6 +1040,68 @@ static NSArray<NSString *> *CNDRemixActiveIconServicesBundleIdentifiers(void)
         @selector(localizedCaseInsensitiveCompare:)];
 }
 
+/* Return the exact serialized 68-point response for one appearance that the
+ * verified Calendar journal says is active.  The presentation repair uses
+ * both appearance 0 and 1 as acceptance identities after it evicts Calendar's
+ * process-local source cache; the raw theme PNG is not comparable with
+ * IFCacheImage.data. Keep the payloads out of the journal itself and recover
+ * them from the already validated, content-addressed payload cache. */
+static NSData *CNDRemixActiveCalendar68StructuredResponse(
+    NSInteger appearance)
+{
+    if (appearance != 0 && appearance != 1) return nil;
+    NSString *bundleIdentifier = @"com.apple.mobilecal";
+    NSDictionary *journal =
+        CNDRemixReadIconServicesJournal(bundleIdentifier);
+    if (![journal[@"state"] isEqualToString:@"active"] ||
+        !CNDRemixJournalRepresentsDirtyPersistentData(journal)) {
+        return nil;
+    }
+
+    CNDIconServicesDescriptorSpec *specification =
+        [CNDIconServicesDescriptorSpec specWithPointWidth:68
+            pointHeight:68 scale:3 appearance:appearance
+            iconVariant:0 options:0];
+    if (!specification) return nil;
+
+    NSDictionary *matchedVariant = nil;
+    for (NSDictionary *variant in CNDRemixJournalVariants(journal)) {
+        if ([variant[@"state"] isEqualToString:@"active"] &&
+            [variant[@"descriptorIdentity"]
+                isEqualToString:specification.canonicalIdentity]) {
+            matchedVariant = variant;
+            break;
+        }
+    }
+    NSString *sourceSHA256 = [matchedVariant[@"themeSourceSHA256"]
+        isKindOfClass:NSString.class]
+        ? matchedVariant[@"themeSourceSHA256"] : nil;
+    if (sourceSHA256.length == 0) {
+        sourceSHA256 = [journal[@"themeSourceSHA256"]
+            isKindOfClass:NSString.class]
+            ? journal[@"themeSourceSHA256"] : nil;
+    }
+    NSString *cacheKey = [matchedVariant[@"payloadCacheKey"]
+        isKindOfClass:NSString.class]
+        ? matchedVariant[@"payloadCacheKey"] : nil;
+    NSString *expectedSHA256 = [matchedVariant[@"structuredImageSHA256"]
+        isKindOfClass:NSString.class]
+        ? matchedVariant[@"structuredImageSHA256"] : nil;
+    if (!matchedVariant || sourceSHA256.length == 0 ||
+        cacheKey.length == 0 || !CNDRemixIsSHA256String(expectedSHA256)) {
+        return nil;
+    }
+
+    BOOL invalid = NO;
+    NSDictionary *entry = CNDRemixReadPayloadCacheEntry(
+        sourceSHA256, cacheKey, specification, &invalid);
+    NSData *structured = [entry[@"structuredImageData"]
+        isKindOfClass:NSData.class] ? entry[@"structuredImageData"] : nil;
+    return !invalid && structured.length > 0 &&
+        [CNDRemixSHA256(structured) isEqualToString:expectedSHA256]
+        ? structured : nil;
+}
+
 static NSDictionary<NSString *, id> *
 CNDRemixStaticDynamicIconDataFromThemeLookup(
     NSDictionary<NSString *, NSData *> *themeLookup,
@@ -913,7 +1118,9 @@ CNDRemixStaticDynamicIconDataFromThemeLookup(
         @"com.apple.mobiletimer"];
     BOOL wantsCalendar = [foldedActive containsObject:
         @"com.apple.mobilecal"];
-    if (!wantsClock && !wantsCalendar) return @{};
+    BOOL wantsFiles = [foldedActive containsObject:
+        @"com.apple.DocumentsApp".lowercaseString];
+    if (!wantsClock && !wantsCalendar && !wantsFiles) return @{};
 
     NSMutableDictionary<NSString *, NSData *> *result =
         [NSMutableDictionary dictionaryWithCapacity:8];
@@ -926,10 +1133,32 @@ CNDRemixStaticDynamicIconDataFromThemeLookup(
         themeLookup[@"com.apple.mobilecal"].length > 0) {
         result[@"com.apple.mobilecal"] =
             themeLookup[@"com.apple.mobilecal"];
+        NSData *structured68Appearance0 =
+            CNDRemixActiveCalendar68StructuredResponse(0);
+        NSData *structured68Appearance1 =
+            CNDRemixActiveCalendar68StructuredResponse(1);
+        if (structured68Appearance0.length > 0) {
+            result[@"__cnd_calendar_68_structured"] =
+                structured68Appearance0;
+        }
+        if (structured68Appearance1.length > 0) {
+            result[@"__cnd_calendar_68_structured_a1"] =
+                structured68Appearance1;
+        }
         /* The exact Calendar provider bridge consumes the same canonical
          * com.apple.mobilecal descriptor matrix published by Apply. Do not
-         * stage a separate 68-point face: the VM proof showed that Apple's
-         * provider owns the outer presentation size and layer conversion. */
+         * stage a separate face: the two serialized responses above are
+         * verification inputs only. Apple's provider still owns the outer
+         * presentation size and layer conversion. */
+    }
+    if (wantsFiles &&
+        themeLookup[@"com.apple.DocumentsApp"].length > 0) {
+        /* Spotlight presents the local File Provider root as a Quick Look
+         * folder thumbnail. Its SearchUIDetailedRowModel already carries a
+         * Files SearchUIAppIconImage fallback, so pass only an activation
+         * marker; the target process resolves the persistent themed icon. */
+        result[@"com.apple.DocumentsApp"] =
+            themeLookup[@"com.apple.DocumentsApp"];
     }
     if (wantsClock) {
         for (NSString *componentKey in @[
@@ -981,26 +1210,17 @@ CNDRemixReconcilePresentationLifecycle(void)
     themer_set_springboard_iconservices_refresh_bundle_identifiers(active);
     BOOL enabled = [NSUserDefaults.standardUserDefaults
         boolForKey:kSettingsSnowBoardRemixInstallConsumerMappings];
-    NSDictionary *status = CNDIconServicesConsumerLifecycleStatus();
-    NSDictionary *spotlight = status[@"hosts"][@"Spotlight"] ?: @{};
-    BOOL spotlightReady = [spotlight[@"installedPID"] intValue] > 1;
-    BOOL running = CNDIconServicesConsumerLifecycleIsRunning();
     return @{
         @"ok": @YES,
-        @"stage": running
-            ? (spotlightReady ? @"spotlight-watcher-ready"
-                              : @"spotlight-watcher-pending")
-            : @"watcher-not-started",
-        @"message": running
-            ? @"The explicitly started Spotlight watcher is active."
-            : @"Presentation watchers are not started automatically.",
+        @"stage": @"queued-repair-required",
+        @"message": @"Persistent icon publication is independent of presentation repair. Queue SpringBoard Fixes and Spotlight Fixes separately to install their process-local repairs and the retained Spotlight assertion.",
         @"desired": @(enabled && active.count > 0),
         @"enabled": @(enabled),
         @"activeBundleIdentifiers": active,
         @"springBoardWatcherEnabled": @NO,
         @"watcherAutoStart": @NO,
-        @"spotlightReady": @(spotlightReady),
-        @"watcherStatus": status ?: @{},
+        @"spotlightReady": @NO,
+        @"watcherStatus": @{},
         @"remoteCallUsed": @NO,
     };
 }
@@ -1066,6 +1286,25 @@ CNDRemixRunInitialCacheRefresh(void)
         @"dynamicIconRepairCompleted": @NO,
         @"watcherStarted": @NO,
         @"remoteCallUsed": springBoard[@"remoteCallUsed"] ?: @NO,
+    };
+}
+
+static NSDictionary<NSString *, id> *
+CNDRemixRefreshAirDropPresentationIfNeeded(BOOL required)
+{
+    if (!required) {
+        return @{
+            @"ok": @YES,
+            @"stage": @"not-required",
+            @"message": @"No verified AirDrop pseudo-bundle mutation requires a Share sheet consumer refresh.",
+            @"remoteCallUsed": @NO,
+        };
+    }
+    return CNDIconServicesConsumerHookRetireSharingUIService() ?: @{
+        @"ok": @NO,
+        @"stage": @"sharing-ui-refresh",
+        @"message": @"The Share sheet cache-owner refresh returned no report.",
+        @"remoteCallUsed": @NO,
     };
 }
 
@@ -1334,6 +1573,183 @@ static NSDictionary *CNDRemixCompactPublisherReport(NSDictionary *report)
     return compact;
 }
 
+/* A failed AirDrop publication can roll its pixels back to stock while
+ * leaving a recovery journal behind because the pseudo-bundle source map was
+ * not yet repairable.  Do not strand that journal forever.  Accept the
+ * current record as clean only when a getter-only audit proves the exact
+ * indexed store unit contains the captured stock bytes. For a rejected
+ * publication with no themed writes, its captured stock UUID and token bind
+ * that proof even if the process cache is empty. Otherwise require cache and
+ * store to agree and no longer carry the themed token. Source proof is not part
+ * of stock cleanliness: it is required before publishing themed bytes, but a
+ * missing association cannot make byte-exact stock data dirty. */
+static BOOL CNDRemixAuditProvesSavedStock(
+    NSDictionary *audit, NSDictionary *savedVariant)
+{
+    if (![audit isKindOfClass:NSDictionary.class] ||
+        ![savedVariant isKindOfClass:NSDictionary.class]) return NO;
+    NSDictionary *publication = [savedVariant[@"publication"]
+        isKindOfClass:NSDictionary.class] ? savedVariant[@"publication"] : @{};
+    NSDictionary *stock = [publication[@"stockResponse"]
+        isKindOfClass:NSDictionary.class] ? publication[@"stockResponse"] : @{};
+    NSDictionary *restoration = [savedVariant[@"restoration"]
+        isKindOfClass:NSDictionary.class] ? savedVariant[@"restoration"] : @{};
+    /* A prior Restore may have captured and persisted fresh stock before a
+     * source-association check failed. Keep that byte baseline usable even
+     * when the original publication failed before capturing any stock. */
+    NSDictionary *restoredStock = [restoration[@"stockResponse"]
+        isKindOfClass:NSDictionary.class]
+        ? restoration[@"stockResponse"] : @{};
+    NSDictionary *themed = [publication[@"agentCacheResponse"]
+        isKindOfClass:NSDictionary.class]
+        ? publication[@"agentCacheResponse"] : @{};
+    NSString *expectedStockHash = CNDRemixCatalogText(stock, @"dataSHA256");
+    NSString *expectedStockIdentifier = CNDRemixCatalogText(stock, @"uuid");
+    NSString *expectedStockToken =
+        CNDRemixCatalogText(stock, @"validationTokenSHA256");
+    NSString *restoredStockHash =
+        [restoration[@"stockCaptured"] boolValue] &&
+        [restoration[@"stockGenerationPersisted"] boolValue]
+            ? CNDRemixCatalogText(restoredStock, @"dataSHA256") : @"";
+    NSString *expectedThemedHash = CNDRemixCatalogText(
+        savedVariant, @"structuredImageSHA256");
+    NSString *themedTokenHash = CNDRemixCatalogText(
+        themed, @"validationTokenSHA256");
+    NSString *cacheHash = CNDRemixCatalogText(audit, @"cacheDataSHA256");
+    NSString *storeHash = CNDRemixCatalogText(audit, @"storeDataSHA256");
+    NSString *storeTokenHash = CNDRemixCatalogText(
+        audit, @"storeValidationTokenSHA256");
+    NSString *indexedIdentifier = CNDRemixCatalogText(
+        audit, @"indexedIdentifier");
+    NSString *storeIdentifier = CNDRemixCatalogText(
+        audit, @"storeIdentifier");
+    NSString *stage = CNDRemixCatalogText(audit, @"stage");
+    BOOL observationReachedOnlyTheSourceBoundary =
+        [audit[@"ok"] boolValue] ||
+        [stage hasPrefix:@"audit-source-"] ||
+        [stage isEqualToString:@"audit-current-source-provider"];
+    BOOL matchesCapturedStock =
+        (CNDRemixIsSHA256String(expectedStockHash) &&
+         [cacheHash caseInsensitiveCompare:expectedStockHash] ==
+            NSOrderedSame &&
+         [storeHash caseInsensitiveCompare:expectedStockHash] ==
+            NSOrderedSame) ||
+        (CNDRemixIsSHA256String(restoredStockHash) &&
+         [cacheHash caseInsensitiveCompare:restoredStockHash] ==
+            NSOrderedSame &&
+         [storeHash caseInsensitiveCompare:restoredStockHash] ==
+            NSOrderedSame);
+    BOOL persistentReadbackComplete = observationReachedOnlyTheSourceBoundary &&
+        [audit[@"transportHealthy"] boolValue] &&
+        audit[@"persistentMutationsIssued"] &&
+        ![audit[@"persistentMutationsIssued"] boolValue] &&
+        audit[@"generationIssued"] && ![audit[@"generationIssued"] boolValue] &&
+        [audit[@"storeIndexLookupReady"] boolValue] &&
+        [audit[@"storeIndexEntryPresent"] boolValue] &&
+        [audit[@"storeUnitPresent"] boolValue] &&
+        [audit[@"storeUnitValid"] boolValue] &&
+        [audit[@"storeIndexUnitIdentifierEqual"] boolValue] &&
+        CNDRemixIsSHA256String(expectedThemedHash) &&
+        [storeHash caseInsensitiveCompare:expectedThemedHash] !=
+            NSOrderedSame &&
+        CNDRemixIsSHA256String(storeHash) &&
+        indexedIdentifier.length > 0 && storeIdentifier.length > 0 &&
+        [indexedIdentifier isEqualToString:storeIdentifier] &&
+        CNDRemixIsSHA256String(storeTokenHash) &&
+        (!CNDRemixIsSHA256String(themedTokenHash) ||
+         [storeTokenHash caseInsensitiveCompare:themedTokenHash] !=
+            NSOrderedSame);
+    if (!persistentReadbackComplete) return NO;
+    BOOL unpublishedStock =
+        CNDRemixReportProvesNoThemedIconServicesMutation(publication) &&
+        CNDRemixIsSHA256String(expectedStockHash) &&
+        CNDRemixIsSHA256String(expectedStockToken) &&
+        expectedStockIdentifier.length > 0 &&
+        [indexedIdentifier isEqualToString:expectedStockIdentifier] &&
+        [storeHash caseInsensitiveCompare:expectedStockHash] == NSOrderedSame &&
+        [storeTokenHash caseInsensitiveCompare:expectedStockToken] == NSOrderedSame;
+    BOOL cacheAndStoreStock =
+        [audit[@"canonicalCacheReadReady"] boolValue] &&
+        [audit[@"cacheResponsePresent"] boolValue] &&
+        [audit[@"cacheStoreEqual"] boolValue] &&
+        [audit[@"cacheStoreIdentifierEqual"] boolValue] &&
+        [audit[@"cacheStoreValidationTokenEqual"] boolValue] &&
+        CNDRemixIsSHA256String(cacheHash) && matchesCapturedStock;
+    return unpublishedStock || cacheAndStoreStock;
+}
+
+static NSDictionary *CNDRemixCompactStockReadbackAudit(NSDictionary *audit)
+{
+    if (![audit isKindOfClass:NSDictionary.class]) return @{};
+    NSMutableDictionary *compact = [NSMutableDictionary dictionary];
+    for (NSString *key in @[
+            @"ok", @"stage", @"transportHealthy",
+            @"canonicalCacheReadReady", @"cacheResponsePresent",
+            @"cacheDataSHA256", @"cacheIdentifier",
+            @"storeIndexLookupReady", @"storeIndexEntryPresent",
+            @"indexedIdentifier", @"storeValidationTokenSHA256",
+            @"storeUnitPresent", @"storeUnitValid", @"storeDataSHA256",
+            @"storeIdentifier", @"cacheStoreEqual",
+            @"cacheStoreIdentifierEqual",
+            @"cacheStoreValidationTokenEqual",
+            @"storeIndexUnitIdentifierEqual", @"sourceIdentityAuditReady",
+            @"sourceRegistryEntryCount", @"persistentMutationsIssued",
+            @"generationIssued", @"mutationsIssued"]) {
+        if (audit[key]) compact[key] = audit[key];
+    }
+    return compact;
+}
+
+/* Apply may encounter a failed/rolled-back AirDrop journal or a stock
+ * checkpoint whose local deletion failed. Reconcile against live readers
+ * before that recovery metadata can block another publication. A partial
+ * observation never removes the recovery record. */
+static BOOL CNDRemixReconcileAirDropJournalToCurrentStockInBatch(
+    NSString *bundleIdentifier, NSDictionary *savedJournal)
+{
+    if (!CNDRemixIsSupportedPseudoBundleIdentifier(bundleIdentifier) ||
+        [savedJournal[@"schemaVersion"] unsignedIntegerValue] !=
+            CNDRemixIconServicesJournalSchemaVersion) return NO;
+    NSArray<NSDictionary *> *savedVariants =
+        CNDRemixJournalVariants(savedJournal);
+    if (savedVariants.count == 0) return NO;
+    NSMutableArray<NSDictionary *> *updatedVariants = [NSMutableArray array];
+    for (NSDictionary *savedVariant in savedVariants) {
+        NSMutableDictionary *updated = [savedVariant mutableCopy];
+        if (CNDRemixVariantProvesNoIconServicesMutation(savedVariant)) {
+            updated[@"state"] = @"unmutated-skipped";
+        } else {
+            CNDIconServicesDescriptorSpec *specification =
+                [CNDIconServicesDescriptorSpec specWithDictionary:
+                    savedVariant[@"descriptorSpecification"] error:nil];
+            if (!specification || !CNDIconServicesPublisherBatchIsHealthy()) {
+                return NO;
+            }
+            NSDictionary *audit = CNDIconServicesPublisherAuditVariantInBatch(
+                bundleIdentifier, specification.dictionaryRepresentation);
+            if (!CNDRemixAuditProvesSavedStock(audit, savedVariant)) return NO;
+            updated[@"stockReadbackAudit"] =
+                CNDRemixCompactStockReadbackAudit(audit);
+            updated[@"state"] = @"persistent-stock-verified";
+        }
+        updated[@"updatedAt"] = NSDate.date;
+        [updatedVariants addObject:updated];
+    }
+    NSMutableDictionary *journal = [savedJournal mutableCopy];
+    journal[@"variants"] = updatedVariants;
+    journal[@"state"] = @"persistent-stock-verified";
+    journal[@"updatedAt"] = NSDate.date;
+    BOOL saved = CNDRemixWriteIconServicesJournal(journal);
+    BOOL removed = CNDRemixRemoveIconServicesJournal(bundleIdentifier);
+    log_user("[SBR_AIRDROP_RECOVERY] reconciled-stock variants=%lu "
+             "checkpoint=%d journal-cleared=%d mutations=0\n",
+             (unsigned long)updatedVariants.count, saved, removed);
+    /* Live readback is the truth. The next pre-publication checkpoint must
+     * survive exact readback before Apply can issue any write, even if this
+     * clean old journal could not be saved or removed. */
+    return YES;
+}
+
 static void CNDRemixLogIconServicesTransaction(
     const char *action,
     NSString *bundleIdentifier,
@@ -1565,6 +1981,9 @@ static NSDictionary *CNDRemixRebaseActiveJournalToCurrentStock(
 }
 
 static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
+    NSSet<NSString *> *bundleFilter,
+    BOOL refreshSpringBoardConsumers,
+    BOOL forceMatchedTargetRepublish,
     CNDSnowBoardRemixProgress progress,
     CNDSnowBoardRemixCancellation cancellation)
 {
@@ -1583,6 +2002,19 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
     if (themeLookup.count == 0) {
         return CNDRemixCoordinatorResult(NO, @"theme",
             @"Select or import a SnowBoard Remix theme first.", nil);
+    }
+    NSData *airDropThemeSource = themeLookup[
+        CNDRemixAirDropPseudoBundleIdentifier.lowercaseString];
+    BOOL airDropThemeAssetPresent = airDropThemeSource.length > 0;
+    NSMutableSet<NSString *> *foldedBundleFilter = nil;
+    if (bundleFilter) {
+        foldedBundleFilter = [NSMutableSet setWithCapacity:bundleFilter.count];
+        for (NSString *identifier in bundleFilter) {
+            if ([identifier isKindOfClass:NSString.class] &&
+                identifier.length > 0) {
+                [foldedBundleFilter addObject:identifier.lowercaseString];
+            }
+        }
     }
 
     if (progress) progress(@"cataloging", 0, 0, nil);
@@ -1639,17 +2071,34 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                         identifier.lowercaseString] = fingerprint;
                 }
             }
+            for (NSString *pseudoBundleIdentifier in
+                 CNDRemixSupportedPseudoBundleIdentifiers()) {
+                NSDictionary *fingerprint =
+                    CNDRemixPseudoBundleFingerprint(
+                        pseudoBundleIdentifier);
+                if (fingerprint.count > 0) {
+                    applicationFingerprintByFoldedIdentifier[
+                        pseudoBundleIdentifier.lowercaseString] =
+                            fingerprint;
+                }
+            }
             NSMutableSet<NSString *> *seenFolded = [NSMutableSet set];
             for (NSString *bundleIdentifier in installed) {
                 NSString *folded = bundleIdentifier.lowercaseString;
                 if (folded.length == 0 || [seenFolded containsObject:folded])
                     continue;
+                if (CNDRemixIsSupportedPseudoBundleIdentifier(bundleIdentifier) &&
+                    ![foldedBundleFilter containsObject:folded]) continue;
                 [seenFolded addObject:folded];
-                if (themeLookup[folded]) [matched addObject:bundleIdentifier];
+                if ((!foldedBundleFilter ||
+                     [foldedBundleFilter containsObject:folded]) &&
+                    themeLookup[folded]) {
+                    [matched addObject:bundleIdentifier];
+                }
             }
             BOOL debugApplicationLimit = [NSUserDefaults.standardUserDefaults
                 boolForKey:kSettingsSnowBoardRemixDebugThreeAppLimit];
-            if (debugApplicationLimit) {
+            if (debugApplicationLimit && !foldedBundleFilter) {
                 NSArray<NSString *> *debugSelection =
                     CNDRemixDebugSelectionFromBundleIdentifiers(matched);
                 NSSet<NSString *> *selectedFoldedIdentifiers = [NSSet setWithArray:
@@ -1668,6 +2117,24 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                 skipped += matched.count - debugSelection.count;
                 [matched setArray:debugSelection];
             }
+            /* Pseudo-bundles are not part of the installed-app debug count.
+             * AirDrop is temporarily isolated from normal Apply/Update Repair.
+             * Admit it only through an explicit filter and matching asset. */
+            for (NSString *pseudoBundleIdentifier in
+                 CNDRemixSupportedPseudoBundleIdentifiers()) {
+                NSString *folded = pseudoBundleIdentifier.lowercaseString;
+                if (themeLookup[folded] &&
+                    [foldedBundleFilter containsObject:folded] &&
+                    ![seenFolded containsObject:folded]) {
+                    [seenFolded addObject:folded];
+                    [matched addObject:pseudoBundleIdentifier];
+                }
+            }
+            log_user("[SBR_SHARE] airdrop asset=%s bytes=%lu admitted=%d filename=com.apple.Sharing.AirDrop.png\n",
+                     airDropThemeAssetPresent ? "present" : "missing",
+                     (unsigned long)airDropThemeSource.length,
+                     [matched containsObject:
+                         CNDRemixAirDropPseudoBundleIdentifier]);
             if (progress) progress(@"matching", matched.count,
                                    matched.count, nil);
 
@@ -1718,6 +2185,14 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                     }
                     NSDictionary *existing =
                         CNDRemixReadIconServicesJournal(bundleIdentifier);
+                    if (CNDRemixJournalProvesNoIconServicesMutation(existing)) {
+                        (void)CNDRemixRemoveIconServicesJournal(bundleIdentifier);
+                        existing = nil;
+                    } else if (existing.count > 0 &&
+                        CNDRemixReconcileAirDropJournalToCurrentStockInBatch(
+                            bundleIdentifier, existing)) {
+                        existing = nil;
+                    }
                     BOOL hasCompleteActiveMatrix =
                         CNDRemixJournalIsCompleteActiveMatrix(
                             existing, sourceHash, specifications);
@@ -1754,9 +2229,30 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                             continue;
                         }
                     }
+                    BOOL applicationFingerprintMatches =
+                        CNDRemixApplicationFingerprintMatches(
+                            existing[@"applicationFingerprint"],
+                            applicationFingerprint);
+                    BOOL airDropSourceRegistryUpgradeRequired =
+                        [bundleIdentifier caseInsensitiveCompare:
+                            CNDRemixAirDropPseudoBundleIdentifier] ==
+                                NSOrderedSame &&
+                        hasCompleteActiveMatrix &&
+                        applicationFingerprintMatches &&
+                        !CNDRemixAirDropJournalHasVerifiedSourceRegistry(
+                            existing, specifications);
+                    BOOL forcedTargetRepublish =
+                        forceMatchedTargetRepublish &&
+                        (!foldedBundleFilter ||
+                         [foldedBundleFilter containsObject:
+                            bundleIdentifier.lowercaseString]) &&
+                        hasCompatibleActiveMatrix &&
+                        applicationFingerprintMatches;
                     if (CNDRemixJournalMatchesCurrentApplication(
                             existing, sourceHash, specifications,
-                            applicationFingerprint)) {
+                            applicationFingerprint) &&
+                        !airDropSourceRegistryUpgradeRequired &&
+                        !forcedTargetRepublish) {
                         alreadyActive++;
                         [activeIdentifiers addObject:bundleIdentifier];
                         [results addObject:@{
@@ -1765,15 +2261,13 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                         }];
                         continue;
                     }
-                    BOOL applicationFingerprintMatches =
-                        CNDRemixApplicationFingerprintMatches(
-                            existing[@"applicationFingerprint"],
-                            applicationFingerprint);
                     BOOL needsProfileExpansion =
                         hasExpandableActiveMatrixSubset &&
                         applicationFingerprintMatches;
                     BOOL needsUpdateRebase = hasCompatibleActiveMatrix &&
-                        !applicationFingerprintMatches;
+                        (!applicationFingerprintMatches ||
+                         airDropSourceRegistryUpgradeRequired ||
+                         forcedTargetRepublish);
                     if (existing.count > 0) {
                         if (needsUpdateRebase || needsProfileExpansion) {
                             /* The publication loop first rotates the current
@@ -2128,7 +2622,11 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                     if (needsUpdateRebase) {
                         preparedTarget[@"updateRebaseJournal"] = existing;
                         preparedTarget[@"updateRebaseReason"] =
-                            @"installed-application-changed";
+                            airDropSourceRegistryUpgradeRequired
+                                ? @"airdrop-source-registry-upgrade"
+                                : (forcedTargetRepublish
+                                    ? @"isolated-target-republish"
+                                    : @"installed-application-changed");
                     } else if (needsProfileExpansion) {
                         preparedTarget[@"profileExpansionJournal"] = existing;
                     }
@@ -2217,7 +2715,8 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                                 variant[@"descriptorIdentity"] ?: @"",
                             @"descriptorSpecification":
                                 variant[@"descriptorSpecification"] ?: @{},
-                            @"state": @"dispatch-possible",
+                            @"state": @"prepared",
+                            @"publicationDispatchPossible": @NO,
                             @"structuredImageSHA256":
                                 variant[@"structuredImageSHA256"] ?: @"",
                             @"structuredImageLength":
@@ -2242,7 +2741,7 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                         @(CNDRemixStorePreservationPolicyVersion);
                     journal[@"engine"] = @"iconservices-publisher";
                     journal[@"bundleIdentifier"] = bundleIdentifier;
-                    journal[@"state"] = @"dispatch-possible";
+                    journal[@"state"] = @"prepared";
                     journal[@"themeSourceSHA256"] = sourceHash;
                     journal[@"descriptorProfileIdentity"] =
                         prepared[@"descriptorProfileIdentity"] ?: @"";
@@ -2303,11 +2802,34 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                         NSData *structured = variant[@"structuredImageData"];
                         NSDictionary *specification =
                             variant[@"descriptorSpecification"];
+                        /* Persist possible dispatch for this descriptor
+                         * before issuing it. Later prepared variants retain
+                         * an explicit never-dispatched proof on interruption. */
+                        NSMutableDictionary *dispatchVariant =
+                            [updatedVariants[
+                                newVariantOffset + variantIndex] mutableCopy];
+                        dispatchVariant[@"state"] = @"dispatch-possible";
+                        dispatchVariant[@"publicationDispatchPossible"] = @YES;
+                        dispatchVariant[@"updatedAt"] = NSDate.date;
+                        updatedVariants[newVariantOffset + variantIndex] =
+                            dispatchVariant;
+                        journal[@"variants"] = updatedVariants;
+                        journal[@"state"] = @"dispatch-possible";
+                        journal[@"updatedAt"] = NSDate.date;
+                        if (!CNDRemixWriteIconServicesJournal(journal)) {
+                            allVerified = NO;
+                            failedVariants +=
+                                preparedVariants.count - variantIndex;
+                            break;
+                        }
                         NSDictionary *publication =
                             CNDIconServicesPublisherPublishVariantInBatch(
                                 bundleIdentifier, structured, specification);
                         NSDictionary *compactPublication =
                             CNDRemixCompactPublisherReport(publication);
+                        BOOL noThemedMutation =
+                            CNDRemixReportProvesNoThemedIconServicesMutation(
+                                publication);
                         BOOL verified =
                             CNDIconServicesPublisherPublicationResultIsVerified(
                                 publication) ||
@@ -2321,6 +2843,8 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                                 newVariantOffset + variantIndex] mutableCopy];
                         variantJournal[@"publication"] =
                             compactPublication;
+                        variantJournal[@"noThemedPublicationMutationVerified"] =
+                            @(noThemedMutation);
                         variantJournal[@"state"] = verified
                             ? @"published-pending-session-close"
                             : @"recovery-required";
@@ -2335,12 +2859,26 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                                 ? @"published-pending-session-close"
                                 : publication[@"stage"] ?: @"publication",
                             @"publication": compactPublication,
+                            @"noThemedPublicationMutationVerified":
+                                @(noThemedMutation),
                         }];
                         if (verified) {
                             publishedVariants++;
                         } else {
                             failedVariants++;
                             allVerified = NO;
+                        }
+                        /* Save the result and captured stock baseline before
+                         * advancing to the next possible write. */
+                        journal[@"variants"] = updatedVariants;
+                        journal[@"state"] = allVerified
+                            ? @"dispatch-possible" : @"recovery-required";
+                        journal[@"updatedAt"] = NSDate.date;
+                        if (!CNDRemixWriteIconServicesJournal(journal)) {
+                            allVerified = NO;
+                            failedVariants +=
+                                preparedVariants.count - variantIndex - 1;
+                            break;
                         }
                         if (!CNDIconServicesPublisherBatchIsHealthy()) {
                             allVerified = NO;
@@ -2358,6 +2896,9 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                     BOOL journalSaved = CNDRemixWriteIconServicesJournal(journal);
                     BOOL appVerified = allVerified &&
                         variantResults.count == preparedVariants.count;
+                    BOOL failedPublicationVerifiedStock = !appVerified &&
+                        CNDRemixReconcileAirDropJournalToCurrentStockInBatch(
+                            bundleIdentifier, journal);
                     if (appVerified && journalSaved) {
                         [verifiedPending addObject:bundleIdentifier];
                     } else {
@@ -2372,6 +2913,10 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                         @"descriptorProfileIdentity":
                             prepared[@"descriptorProfileIdentity"] ?: @"",
                         @"variantResults": variantResults,
+                        @"failedPublicationVerifiedStock":
+                            @(failedPublicationVerifiedStock),
+                        @"recoveryJournalRequired":
+                            @(!failedPublicationVerifiedStock),
                     }];
                 }
             }
@@ -2418,22 +2963,119 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
         }
     }
 
+    NSDictionary *airDropResult = nil;
+    NSDictionary *airDropUnthemed = nil;
+    for (NSDictionary *entry in results) {
+        NSString *identifier = [entry[@"bundleIdentifier"]
+            isKindOfClass:NSString.class] ? entry[@"bundleIdentifier"] : nil;
+        if (identifier.length > 0 && [identifier caseInsensitiveCompare:
+                CNDRemixAirDropPseudoBundleIdentifier] == NSOrderedSame) {
+            airDropResult = entry;
+            break;
+        }
+    }
+    if (!airDropResult) {
+        for (NSDictionary *entry in unthemed) {
+            NSString *identifier = [entry[@"bundleIdentifier"]
+                isKindOfClass:NSString.class] ? entry[@"bundleIdentifier"] : nil;
+            if (identifier.length > 0 && [identifier caseInsensitiveCompare:
+                    CNDRemixAirDropPseudoBundleIdentifier] == NSOrderedSame) {
+                airDropUnthemed = entry;
+                break;
+            }
+        }
+    }
+    BOOL airDropActive = [activeIdentifiers containsObject:
+        CNDRemixAirDropPseudoBundleIdentifier];
+    NSString *airDropStage = airDropResult[@"stage"] ?:
+        airDropUnthemed[@"reason"] ?:
+        (airDropThemeAssetPresent ? @"not-admitted" : @"asset-missing");
+    NSArray *airDropVariantResults = [airDropResult[@"variantResults"]
+        isKindOfClass:NSArray.class] ? airDropResult[@"variantResults"] : @[];
+    BOOL airDropFailedPublicationVerifiedStock =
+        [airDropResult[@"failedPublicationVerifiedStock"] boolValue];
+    BOOL airDropRecoveryJournalRequired =
+        [airDropResult[@"recoveryJournalRequired"] boolValue];
+    NSUInteger airDropVerifiedVariants = 0;
+    NSUInteger airDropResolvedSourceVariants = 0;
+    NSUInteger airDropVerifiedSourceVariants = 0;
+    NSUInteger airDropSourceEntriesBefore = 0;
+    NSUInteger airDropSourceEntriesAfter = 0;
+    BOOL airDropSourceWriteIssued = NO;
+    for (NSDictionary *variantResult in airDropVariantResults) {
+        NSDictionary *publication = [variantResult[@"publication"]
+            isKindOfClass:NSDictionary.class]
+            ? variantResult[@"publication"] : @{};
+        if ([variantResult[@"ok"] boolValue]) airDropVerifiedVariants++;
+        if ([publication[@"sourceIdentifiersResolved"] boolValue]) {
+            airDropResolvedSourceVariants++;
+        }
+        if ([publication[@"sourceRegistryFreshReadbackVerified"]
+                boolValue]) {
+            airDropVerifiedSourceVariants++;
+        }
+        airDropSourceEntriesBefore +=
+            [publication[@"sourceRegistryEntryCountBefore"]
+                unsignedIntegerValue];
+        airDropSourceEntriesAfter +=
+            [publication[@"sourceRegistryEntryCountAfter"]
+                unsignedIntegerValue];
+        airDropSourceWriteIssued = airDropSourceWriteIssued ||
+            [publication[@"sourceRegistryWriteIssued"] boolValue];
+    }
+    log_user("[SBR_SHARE] airdrop active=%d verified=%lu/%lu "
+             "source=%lu/%lu registry=%lu->%lu write=%d "
+             "stage=%s session-closed=%d stock-reconciled=%d "
+             "journal-required=%d\n",
+             airDropActive, (unsigned long)airDropVerifiedVariants,
+             (unsigned long)airDropVariantResults.count,
+             (unsigned long)airDropVerifiedSourceVariants,
+             (unsigned long)airDropResolvedSourceVariants,
+             (unsigned long)airDropSourceEntriesBefore,
+             (unsigned long)airDropSourceEntriesAfter,
+             airDropSourceWriteIssued,
+             airDropStage.UTF8String ?: "unknown", sessionClosed,
+             airDropFailedPublicationVerifiedStock,
+             airDropRecoveryJournalRequired);
+    NSDictionary *airDropPresentation =
+        CNDRemixRefreshAirDropPresentationIfNeeded(
+            airDropActive && sessionClosed);
+    BOOL airDropPresentationOK =
+        [airDropPresentation[@"ok"] boolValue];
+
     NSArray<NSString *> *presentationBundleIdentifiers =
-        CNDRemixActiveIconServicesBundleIdentifiers();
+        refreshSpringBoardConsumers
+            ? CNDRemixActiveIconServicesBundleIdentifiers()
+            : [activeIdentifiers copy];
     /* Initial Apply owns persistent records and cache eviction only. Dynamic
      * inputs are staged when the user explicitly requests presentation work. */
-    themer_set_springboard_iconservices_refresh_bundle_identifiers(
-        presentationBundleIdentifiers);
-    NSDictionary *oneShotPresentation =
-        CNDRemixRunInitialCacheRefresh();
-    BOOL presentationOK = [oneShotPresentation[@"ok"] boolValue];
-    NSDictionary *presentationLifecycle =
-        CNDRemixReconcilePresentationLifecycle();
+    NSDictionary *oneShotPresentation = @{
+        @"ok": @YES,
+        @"stage": @"isolated-airdrop-not-required",
+        @"message": @"The isolated AirDrop test does not refresh any SpringBoard icon consumer.",
+        @"cacheInvalidationIssued": @NO,
+        @"springBoardCacheRefreshCompleted": @NO,
+        @"remoteCallUsed": @NO,
+    };
+    if (refreshSpringBoardConsumers) {
+        themer_set_springboard_iconservices_refresh_bundle_identifiers(
+            presentationBundleIdentifiers);
+        oneShotPresentation = CNDRemixRunInitialCacheRefresh();
+    }
+    BOOL presentationOK = [oneShotPresentation[@"ok"] boolValue] &&
+        airDropPresentationOK;
+    NSDictionary *presentationLifecycle = refreshSpringBoardConsumers
+        ? CNDRemixReconcilePresentationLifecycle()
+        : @{
+            @"ok": @YES,
+            @"stage": @"isolated-airdrop-not-required",
+            @"message": @"No process-wide presentation lifecycle was changed.",
+        };
     NSDictionary *presentationStatus =
         presentationLifecycle[@"watcherStatus"] ?: @{};
     NSDictionary *spotlightPresentation =
         presentationStatus[@"hosts"][@"Spotlight"] ?: @{};
-    BOOL spotlightReady =
+    BOOL spotlightReady = !refreshSpringBoardConsumers ||
         [spotlightPresentation[@"installedPID"] intValue] > 1;
 
     NSDictionary *summary = @{
@@ -2444,6 +3086,21 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
         @"totalApplicationsDiscovered": catalog[@"applicationCount"] ?: @0,
         @"themeEntriesLoaded": @(themeLookup.count),
         @"matchedApplications": @(matched.count),
+        @"airDropThemeAssetPresent": @(airDropThemeAssetPresent),
+        @"airDropTargetActive": @(airDropActive),
+        @"airDropTargetStage": airDropStage,
+        @"airDropFailedPublicationVerifiedStock":
+            @(airDropFailedPublicationVerifiedStock),
+        @"airDropVerifiedVariants": @(airDropVerifiedVariants),
+        @"airDropResolvedSourceVariants":
+            @(airDropResolvedSourceVariants),
+        @"airDropVerifiedSourceVariants":
+            @(airDropVerifiedSourceVariants),
+        @"airDropSourceEntriesBefore": @(airDropSourceEntriesBefore),
+        @"airDropSourceEntriesAfter": @(airDropSourceEntriesAfter),
+        @"airDropSourceWriteIssued": @(airDropSourceWriteIssued),
+        @"airDropPresentation": airDropPresentation ?: @{},
+        @"airDropPresentationOK": @(airDropPresentationOK),
         @"applied": @(applied),
         @"alreadyActive": @(alreadyActive),
         @"plannedVariants": @(plannedVariants),
@@ -2471,18 +3128,28 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
         @"presentationAutoStart": @NO,
         @"springBoardWatcherEnabled": @NO,
         @"presentationBundleIdentifiers": presentationBundleIdentifiers,
+        @"bundleFilter": foldedBundleFilter.allObjects ?: @[],
+        @"isolatedAirDropOnly": @(!refreshSpringBoardConsumers &&
+            foldedBundleFilter.count == 1 &&
+            [foldedBundleFilter containsObject:
+                CNDRemixAirDropPseudoBundleIdentifier.lowercaseString]),
+        @"springBoardPresentationSkipped": @(!refreshSpringBoardConsumers),
         @"spotlightPresentationPending": @(!spotlightReady),
         @"cacheInvalidationIssued":
             oneShotPresentation[@"cacheInvalidationIssued"] ?: @NO,
         @"cacheInvalidationPolicy":
-            CNDRemixEnableSpringBoardCacheInvalidation
+            (refreshSpringBoardConsumers &&
+             CNDRemixEnableSpringBoardCacheInvalidation)
                 ? @"bounded-springboard-refresh"
-                : @"disabled-experiment",
+                : (refreshSpringBoardConsumers
+                    ? @"disabled-experiment"
+                    : @"isolated-share-sheet-only"),
         @"springBoardCacheRefreshCompleted":
             oneShotPresentation[@"springBoardCacheRefreshCompleted"] ?: @NO,
         @"iconServicesStorePreserved": @YES,
         @"presentationRemoteCallUsed":
-            oneShotPresentation[@"remoteCallUsed"] ?: @NO,
+            @([oneShotPresentation[@"remoteCallUsed"] boolValue] ||
+              [airDropPresentation[@"remoteCallUsed"] boolValue]),
         @"structuredPayloadCache": @{
             @"schemaVersion": @(CNDRemixPayloadCacheSchemaVersion),
             @"pipelineIdentifier": CNDRemixPayloadPipelineIdentifier,
@@ -2512,10 +3179,15 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
     return CNDRemixCoordinatorResult(ok,
         ok ? @"complete" : @"partial",
         ok
-            ? (CNDRemixEnableSpringBoardCacheInvalidation
+            ? (!refreshSpringBoardConsumers
+                ? @"The isolated AirDrop test published and verified exactly two persistent records, verified their source associations, and refreshed only SharingUIService."
+                : (CNDRemixEnableSpringBoardCacheInvalidation
                 ? @"SnowBoard Remix published and verified every matched persistent IconServices response, then refreshed SpringBoard's icon caches. Use the separate presentation actions to apply tweaks."
-                : @"SnowBoard Remix published and verified every matched persistent IconServices response. SpringBoard cache invalidation was intentionally skipped for the current experiment.")
-            : @"The complete apply operation did not verify. Persistent per-app journal state still reflects each app's actual store state.",
+                : @"SnowBoard Remix published and verified every matched persistent IconServices response. SpringBoard cache invalidation was intentionally skipped for the current experiment."))
+            : (!refreshSpringBoardConsumers &&
+                airDropFailedPublicationVerifiedStock
+                ? @"AirDrop publication did not verify. Both persistent records are verified stock; no recovery write is required."
+                : @"The complete apply operation did not verify. Persistent per-app journal state still reflects each app's actual store state."),
         summary);
 }
 
@@ -2562,9 +3234,14 @@ CNDRemixRestoreSpringBoardPresentationIfNeeded(
 
 static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
     NSSet<NSString *> *bundleFilter,
+    BOOL refreshAirDropConsumer,
     CNDSnowBoardRemixProgress progress,
     CNDSnowBoardRemixCancellation cancellation)
 {
+    BOOL isolatedAirDropOnly = bundleFilter.count == 1 &&
+        [bundleFilter containsObject:CNDRemixAirDropPseudoBundleIdentifier];
+    BOOL airDropRefreshRequested = refreshAirDropConsumer &&
+        [bundleFilter containsObject:CNDRemixAirDropPseudoBundleIdentifier];
     NSArray<NSDictionary *> *allJournals = CNDRemixIconServicesJournals();
     NSMutableArray<NSDictionary *> *journals = [NSMutableArray array];
     NSMutableArray<NSDictionary *> *discardResults =
@@ -2574,6 +3251,10 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
     NSUInteger discardFailures = 0;
     for (NSDictionary *journal in allJournals) {
         NSString *bundleIdentifier = journal[@"bundleIdentifier"];
+        /* Restore All leaves the isolated AirDrop transaction untouched,
+         * including its recovery journal. Its dedicated Restore owns it. */
+        if (!bundleFilter &&
+            CNDRemixIsSupportedPseudoBundleIdentifier(bundleIdentifier)) continue;
         if (!bundleFilter || [bundleFilter containsObject:bundleIdentifier]) {
             selectedJournalCount++;
             if (CNDRemixJournalProvesNoIconServicesMutation(journal)) {
@@ -2597,9 +3278,21 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
         }
     }
     if (journals.count == 0) {
-        BOOL ok = discardFailures == 0;
-        NSDictionary *restorePresentation =
-            CNDRemixRestoreSpringBoardPresentationIfNeeded(NO);
+        BOOL ok = YES;
+        NSDictionary *restorePresentation = isolatedAirDropOnly
+            ? @{
+                @"ok": @YES,
+                @"stage": @"isolated-airdrop-not-required",
+                @"message": @"The isolated AirDrop restore does not repair any SpringBoard icon consumer.",
+                @"completed": @YES,
+                @"remoteCallUsed": @NO,
+            }
+            : CNDRemixRestoreSpringBoardPresentationIfNeeded(NO);
+        NSDictionary *airDropPresentation =
+            CNDRemixRefreshAirDropPresentationIfNeeded(
+                airDropRefreshRequested);
+        BOOL presentationOK = [restorePresentation[@"ok"] boolValue] &&
+            [airDropPresentation[@"ok"] boolValue];
         NSDictionary *summary = @{
             @"engine": @"iconservices-publisher",
             @"journaled": @(selectedJournalCount),
@@ -2611,21 +3304,26 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
             @"persistentCleanApplications": @(selectedJournalCount),
             @"persistentDirtyApplications": @0,
             @"persistentRecoveryOK": @(ok),
-            @"presentationOK": @([restorePresentation[@"ok"] boolValue]),
+            @"journalCleanupOK": @(discardFailures == 0),
+            @"presentationOK": @(presentationOK),
             @"presentationCompleted": @YES,
             @"restorePresentation": restorePresentation ?: @{},
+            @"airDropPresentation": airDropPresentation ?: @{},
+            @"isolatedAirDropOnly": @(isolatedAirDropOnly),
+            @"springBoardPresentationSkipped": @(isolatedAirDropOnly),
             @"presentationAutoStart": @NO,
             @"springBoardWatcherEnabled": @NO,
             @"presentationRemoteCallUsed":
-                restorePresentation[@"remoteCallUsed"] ?: @NO,
+                @([restorePresentation[@"remoteCallUsed"] boolValue] ||
+                  [airDropPresentation[@"remoteCallUsed"] boolValue]),
         };
         NSError *indexError = nil;
         (void)CNDRemixWriteIndex(summary, &indexError);
         return CNDRemixCoordinatorResult(ok,
-            !ok ? @"persistent-restored-journal-cleanup"
+            discardFailures > 0 ? @"persistent-restored-journal-cleanup"
                 : (discardedUnmutated > 0
                     ? @"discarded-unmutated-preflight" : @"already-restored"),
-            ok
+            discardFailures == 0
                 ? (discardedUnmutated > 0
                     ? @"The failed descriptor preflight journals were cleared; no IconServices data had been modified."
                     : @"No IconServices theme transaction requires restoration.")
@@ -2646,8 +3344,10 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
     NSDictionary *batchFinish = nil;
     NSMutableArray<NSDictionary *> *results =
         [discardResults mutableCopy];
-    NSUInteger failed = discardFailures, plannedVariants = 0;
+    NSUInteger failed = 0, plannedVariants = 0;
+    NSUInteger journalCleanupFailures = discardFailures;
     NSUInteger restoredVariants = 0, failedVariants = 0;
+    NSUInteger alreadyStockVariants = 0;
     NSUInteger skippedUnmutatedVariants = 0;
     NSUInteger restored = 0;
     NSUInteger persistentClean = discardedUnmutated + discardFailures;
@@ -2669,7 +3369,12 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                         cancelled = YES;
                         break;
                     }
-                    if (![installed containsObject:bundleIdentifier.lowercaseString]) {
+                    BOOL targetAvailable =
+                        [installed containsObject:
+                            bundleIdentifier.lowercaseString] ||
+                        CNDRemixIsSupportedPseudoBundleIdentifier(
+                            bundleIdentifier);
+                    if (!targetAvailable) {
                         failed++;
                         [results addObject:@{
                             @"bundleIdentifier": bundleIdentifier,
@@ -2692,18 +3397,11 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                             CNDRemixIconServicesJournalSchemaVersion;
                     for (NSDictionary *variant in savedVariants) {
                         NSMutableDictionary *updated = [variant mutableCopy];
-                        updated[@"state"] = currentSchema &&
-                            CNDRemixVariantProvesNoIconServicesMutation(variant)
-                                ? @"unmutated-skipped" : @"restoring";
-                        updated[@"updatedAt"] = NSDate.date;
+                        if (currentSchema &&
+                            CNDRemixVariantProvesNoIconServicesMutation(variant)) {
+                            updated[@"state"] = @"unmutated-skipped";
+                        }
                         [restoringVariants addObject:updated];
-                    }
-                    journal[@"variants"] = restoringVariants;
-                    journal[@"state"] = @"restoring";
-                    journal[@"updatedAt"] = NSDate.date;
-                    if (!CNDRemixWriteIconServicesJournal(journal)) {
-                        failed++;
-                        continue;
                     }
                     if (progress) progress(@"restoring", index,
                                            journals.count, bundleIdentifier);
@@ -2739,6 +3437,73 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                         CNDIconServicesDescriptorSpec *validatedSpec =
                             [CNDIconServicesDescriptorSpec
                                 specWithDictionary:specification error:nil];
+                        BOOL isAirDrop =
+                            CNDRemixIsSupportedPseudoBundleIdentifier(
+                                bundleIdentifier);
+                        NSDictionary *stockAudit = validatedSpec && isAirDrop
+                            ? CNDIconServicesPublisherAuditVariantInBatch(
+                                bundleIdentifier,
+                                validatedSpec.dictionaryRepresentation)
+                            : nil;
+                        BOOL alreadyStock = validatedSpec && isAirDrop &&
+                            CNDRemixAuditProvesSavedStock(
+                                stockAudit, savedVariant);
+                        if (isAirDrop) {
+                            log_user("[SBR_AIRDROP_RECOVERY] descriptor=%s "
+                                     "already-stock=%d audit-stage=%s "
+                                     "source-ready=%d mutations=0\n",
+                                     [savedVariant[@"descriptorIdentity"]
+                                        UTF8String] ?: "?",
+                                     alreadyStock,
+                                     [stockAudit[@"stage"] UTF8String] ?:
+                                        "not-audited",
+                                     [stockAudit[@"sourceIdentityAuditReady"]
+                                        boolValue]);
+                        }
+                        if (alreadyStock) {
+                            alreadyStockVariants++;
+                            NSMutableDictionary *variantJournal =
+                                [updatedVariants[variantIndex] mutableCopy];
+                            variantJournal[@"stockReadbackAudit"] =
+                                CNDRemixCompactStockReadbackAudit(stockAudit);
+                            variantJournal[@"state"] =
+                                @"persistent-stock-verified";
+                            variantJournal[@"updatedAt"] = NSDate.date;
+                            updatedVariants[variantIndex] = variantJournal;
+                            journal[@"variants"] = updatedVariants;
+                            journal[@"updatedAt"] = NSDate.date;
+                            (void)CNDRemixWriteIconServicesJournal(journal);
+                            [variantResults addObject:@{
+                                @"descriptorIdentity":
+                                    savedVariant[@"descriptorIdentity"] ?: @"",
+                                @"ok": @YES,
+                                @"stage": @"already-stock-readback",
+                                @"persistentDataVerified": @YES,
+                                @"mutationsIssued": @NO,
+                                @"stockAudit":
+                                    CNDRemixCompactStockReadbackAudit(
+                                        stockAudit),
+                            }];
+                            continue;
+                        }
+                        /* Getter audits do not enter recovery dispatch. Only
+                         * checkpoint this one descriptor as restoring when a
+                         * stock generation/write is actually about to run. */
+                        NSMutableDictionary *dispatchVariant =
+                            [updatedVariants[variantIndex] mutableCopy];
+                        dispatchVariant[@"state"] = @"restoring";
+                        dispatchVariant[@"restorationDispatchPossible"] = @YES;
+                        dispatchVariant[@"updatedAt"] = NSDate.date;
+                        updatedVariants[variantIndex] = dispatchVariant;
+                        journal[@"variants"] = updatedVariants;
+                        journal[@"state"] = @"restoring";
+                        journal[@"updatedAt"] = NSDate.date;
+                        if (!CNDRemixWriteIconServicesJournal(journal)) {
+                            allVerified = NO;
+                            failedVariants +=
+                                savedVariants.count - variantIndex;
+                            break;
+                        }
                         NSDictionary *restoration = validatedSpec
                             ? CNDIconServicesPublisherRestoreStockVariantInBatch(
                                 bundleIdentifier,
@@ -2753,6 +3518,20 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                                 restoration) ||
                              CNDRemixPublisherResultIsLegacyAcceptable(
                                 restoration, @"stock"));
+                        NSDictionary *postRestoreStockAudit = nil;
+                        if (!verified && validatedSpec && isAirDrop &&
+                            CNDIconServicesPublisherBatchIsHealthy()) {
+                            NSMutableDictionary *currentVariant =
+                                [savedVariant mutableCopy];
+                            currentVariant[@"restoration"] =
+                                CNDRemixCompactPublisherReport(restoration);
+                            postRestoreStockAudit =
+                                CNDIconServicesPublisherAuditVariantInBatch(
+                                    bundleIdentifier,
+                                    validatedSpec.dictionaryRepresentation);
+                            verified = CNDRemixAuditProvesSavedStock(
+                                postRestoreStockAudit, currentVariant);
+                        }
                         CNDRemixLogIconServicesTransaction(
                             "RESTORE", bundleIdentifier, restoration,
                             verified);
@@ -2760,6 +3539,11 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                             [updatedVariants[variantIndex] mutableCopy];
                         variantJournal[@"restoration"] =
                             CNDRemixCompactPublisherReport(restoration);
+                        if (verified && postRestoreStockAudit) {
+                            variantJournal[@"stockReadbackAudit"] =
+                                CNDRemixCompactStockReadbackAudit(
+                                    postRestoreStockAudit);
+                        }
                         variantJournal[@"state"] = verified
                             ? @"persistent-stock-verified"
                             : @"recovery-required";
@@ -2774,12 +3558,22 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                                 : restoration[@"stage"] ?: @"restore",
                             @"restoration":
                                 CNDRemixCompactPublisherReport(restoration),
+                            @"stockAudit":
+                                CNDRemixCompactStockReadbackAudit(
+                                    postRestoreStockAudit),
                         }];
                         if (verified) {
                             restoredVariants++;
                         } else {
                             failedVariants++;
                             allVerified = NO;
+                        }
+                        journal[@"variants"] = updatedVariants;
+                        journal[@"updatedAt"] = NSDate.date;
+                        if (!CNDRemixWriteIconServicesJournal(journal) &&
+                            variantIndex + 1 < savedVariants.count) {
+                            allVerified = NO;
+                            break;
                         }
                         if (!CNDIconServicesPublisherBatchIsHealthy()) {
                             allVerified = NO;
@@ -2807,12 +3601,14 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                     if (appVerified) persistentClean++;
                     if (journalCleared) {
                         restored++;
+                    } else if (appVerified) {
+                        journalCleanupFailures++;
                     } else {
                         failed++;
                     }
                     [results addObject:@{
                         @"bundleIdentifier": bundleIdentifier,
-                        @"ok": @(journalCleared),
+                        @"ok": @(appVerified),
                         @"stage": journalCleared
                             ? @"persistent-restored"
                             : (appVerified
@@ -2841,7 +3637,7 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
     };
     BOOL persistentThemeMutationWasRestored =
         persistentClean > discardedUnmutated + discardFailures;
-    if (persistentThemeMutationWasRestored) {
+    if (persistentThemeMutationWasRestored && !isolatedAirDropOnly) {
         /* Persistent state is already clean at this point. Finish the
          * operation by restoring Clock/Calendar sources and rebuilding the
          * current SpringBoard consumers synchronously. Report this optional
@@ -2850,18 +3646,26 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
         restorePresentation =
             CNDRemixRestoreSpringBoardPresentationIfNeeded(YES);
     }
-    BOOL presentationOK = [restorePresentation[@"ok"] boolValue];
+    NSDictionary *airDropPresentation =
+        CNDRemixRefreshAirDropPresentationIfNeeded(
+            airDropRefreshRequested);
+    BOOL presentationOK = [restorePresentation[@"ok"] boolValue] &&
+        [airDropPresentation[@"ok"] boolValue];
     BOOL persistentDataClean = persistentClean == selectedJournalCount;
     BOOL persistentRecoveryOK = persistentDataClean && !cancelled && failed == 0;
-    BOOL cleanupOK = sessionClosed && presentationOK;
+    BOOL cleanupOK = sessionClosed && presentationOK &&
+        journalCleanupFailures == 0;
     NSDictionary *summary = @{
         @"engine": @"iconservices-publisher",
         @"journaled": @(selectedJournalCount),
         @"restored": @(restored),
         @"discardedUnmutatedPreflight": @(discardedUnmutated),
         @"discardFailures": @(discardFailures),
+        @"journalCleanupFailures": @(journalCleanupFailures),
+        @"journalCleanupOK": @(journalCleanupFailures == 0),
         @"plannedVariants": @(plannedVariants),
         @"restoredVariants": @(restoredVariants),
+        @"alreadyStockVariants": @(alreadyStockVariants),
         @"skippedUnmutatedVariants": @(skippedUnmutatedVariants),
         @"failedVariants": @(failedVariants),
         @"failed": @(failed),
@@ -2872,11 +3676,12 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
         @"batchSessionFinish": batchFinish ?: @{},
         @"cacheInvalidationIssued": @(
             CNDRemixEnableSpringBoardCacheInvalidation &&
-            persistentThemeMutationWasRestored),
-        @"cacheInvalidationPolicy":
-            CNDRemixEnableSpringBoardCacheInvalidation
+            persistentThemeMutationWasRestored && !isolatedAirDropOnly),
+        @"cacheInvalidationPolicy": isolatedAirDropOnly
+            ? @"isolated-share-sheet-only"
+            : (CNDRemixEnableSpringBoardCacheInvalidation
                 ? @"bounded-springboard-refresh"
-                : @"disabled-experiment",
+                : @"disabled-experiment"),
         @"iconServicesStorePreserved": @YES,
         @"restoreStrategy":
             @"per-descriptor-stock-generation-exact-readback",
@@ -2893,10 +3698,14 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
         @"presentationCompleted": @YES,
         @"presentationOK": @(presentationOK),
         @"restorePresentation": restorePresentation ?: @{},
+        @"airDropPresentation": airDropPresentation ?: @{},
+        @"isolatedAirDropOnly": @(isolatedAirDropOnly),
+        @"springBoardPresentationSkipped": @(isolatedAirDropOnly),
         @"presentationAutoStart": @NO,
         @"springBoardWatcherEnabled": @NO,
         @"presentationRemoteCallUsed":
-            restorePresentation[@"remoteCallUsed"] ?: @NO,
+            @([restorePresentation[@"remoteCallUsed"] boolValue] ||
+              [airDropPresentation[@"remoteCallUsed"] boolValue]),
     };
     NSError *indexError = nil;
     (void)CNDRemixWriteIndex(summary, &indexError);
@@ -2908,14 +3717,165 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
         persistentRecoveryOK
             ? (cleanupOK
                 ? @"Persistent IconServices recovery completed: every changed descriptor verified stock, untouched descriptors were skipped, and presentation cleanup completed."
-                : @"Persistent IconServices recovery succeeded and its journals were cleared. Session or presentation cleanup is incomplete; persistent data remains clean.")
+                : @"Every selected persistent record is clean. Journal, session, or presentation cleanup is incomplete; this does not require another stock write.")
             : (persistentDataClean
                 ? @"Persistent IconServices data is clean, but recovery journal cleanup is incomplete."
                 : @"Some persistent IconServices responses still require recovery. Apps already verified stock remain clean and do not regain recovery journals."),
         summary);
 }
 
+static NSDictionary<NSString *, id> *CNDRemixRunTransparencyFixOperation(
+    CNDHailMaryImpRedirectOperation operation)
+{
+    if (NSThread.isMainThread) {
+        return CNDRemixCoordinatorResult(
+            NO, @"main-thread-refused",
+            @"Transparency Fix must run on the queue worker, not the main thread.",
+            nil);
+    }
+
+    NSString *supportReason = nil;
+    if (!CNDHailMaryImpRedirectIsSupported(&supportReason)) {
+        return CNDRemixCoordinatorResult(
+            NO, @"unsupported", supportReason ?: @"Transparency Fix is unsupported on this device.", nil);
+    }
+    if (!kexploit_krw_ready()) {
+        return CNDRemixCoordinatorResult(
+            NO, @"krw-unavailable",
+            @"Validated kernel read/write is required for Transparency Fix.",
+            nil);
+    }
+
+    NSError *identityError = nil;
+    pid_t spotlightPID = CNDKernelTaskBridgeResolveProcessPID(
+        @"Spotlight", &identityError);
+    NSDictionary<NSString *, id> *presentation = @{};
+    if (spotlightPID <= 1) {
+        log_user("[TRANSPARENCY_FIX] Spotlight is absent; presenting it for the guarded two-process proof.\n");
+        presentation = CNDIconServicesConsumerHookPresentSpotlight() ?: @{};
+        if (![presentation[@"ok"] boolValue]) {
+            NSString *message = [presentation[@"message"]
+                isKindOfClass:NSString.class]
+                ? presentation[@"message"]
+                : @"Spotlight could not be presented for the guarded proof.";
+            return CNDRemixCoordinatorResult(
+                NO, @"spotlight-presentation", message,
+                @{ @"presentation": presentation });
+        }
+        identityError = nil;
+        spotlightPID = CNDKernelTaskBridgeResolveProcessPID(
+            @"Spotlight", &identityError);
+    }
+    if (spotlightPID <= 1) {
+        return CNDRemixCoordinatorResult(
+            NO, @"spotlight-identity",
+            identityError.localizedDescription ?:
+                @"Spotlight did not settle to one live identity for the guarded proof.",
+            @{ @"presentation": presentation });
+    }
+
+    NSDictionary<NSString *, id> *(^runRedirect)(
+        CNDHailMaryImpRedirectOperation) =
+        ^NSDictionary<NSString *, id> *(
+            CNDHailMaryImpRedirectOperation requestedOperation) {
+        __block NSDictionary<NSString *, id> *finished = nil;
+        dispatch_semaphore_t done = dispatch_semaphore_create(0);
+        CNDHailMaryImpRedirectRun(requestedOperation,
+            ^(NSDictionary<NSString *, id> *report) {
+                finished = [report copy];
+                dispatch_semaphore_signal(done);
+            });
+        dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+        return finished ?: @{};
+    };
+
+    NSDictionary<NSString *, id> *mutationReport = runRedirect(operation);
+    NSDictionary<NSString *, id> *permissionProbeReport = @{};
+    NSString *mutationResult = [mutationReport[@"result"]
+        isKindOfClass:NSString.class] ? mutationReport[@"result"] : @"";
+    BOOL permissionProofNeedsRefresh =
+        [mutationResult isEqualToString:@"refused-permission-proof-required"] ||
+        [mutationResult isEqualToString:
+            @"refused-permission-proof-identity-mismatch"];
+    if (permissionProofNeedsRefresh &&
+        [mutationReport[@"kernelWritePrimitiveInvocationCount"]
+            unsignedIntegerValue] == 0) {
+        log_user("[TRANSPARENCY_FIX] Refreshing the same-boot .34 identical-bytes permission proof before the guarded redirect.\n");
+        __block NSDictionary<NSString *, id> *finishedPermissionProbe = nil;
+        dispatch_semaphore_t permissionProbeDone =
+            dispatch_semaphore_create(0);
+        CNDHailMaryReadOnlyDataPageRun(
+            ^(NSDictionary<NSString *, id> *report) {
+                finishedPermissionProbe = [report copy];
+                dispatch_semaphore_signal(permissionProbeDone);
+            });
+        dispatch_semaphore_wait(
+            permissionProbeDone, DISPATCH_TIME_FOREVER);
+        permissionProbeReport = finishedPermissionProbe ?: @{};
+        if ([permissionProbeReport[@"confirmed"] boolValue]) {
+            mutationReport = runRedirect(operation);
+        }
+    }
+
+    BOOL ok = [mutationReport[@"confirmed"] boolValue] ||
+        [mutationReport[@"mutationConfirmed"] boolValue];
+    NSDictionary<NSString *, id> *verificationReport = @{};
+    if (!ok && [mutationReport[@"kernelWritePrimitiveInvocationCount"]
+                    unsignedIntegerValue] == 0) {
+        CNDHailMaryImpRedirectOperation verifyOperation =
+            operation == CNDHailMaryImpRedirectOperationApply
+                ? CNDHailMaryImpRedirectOperationVerifyRedirected
+                : CNDHailMaryImpRedirectOperationVerifyOriginal;
+        __block NSDictionary<NSString *, id> *verified = nil;
+        dispatch_semaphore_t verifyDone = dispatch_semaphore_create(0);
+        CNDHailMaryImpRedirectRun(verifyOperation,
+            ^(NSDictionary<NSString *, id> *report) {
+                verified = [report copy];
+                dispatch_semaphore_signal(verifyDone);
+            });
+        dispatch_semaphore_wait(verifyDone, DISPATCH_TIME_FOREVER);
+        verificationReport = verified ?: @{};
+        ok = [verificationReport[@"confirmed"] boolValue];
+    }
+
+    BOOL apply = operation == CNDHailMaryImpRedirectOperationApply;
+    NSString *message = nil;
+    if (ok) {
+        message = apply
+            ? @"Transparency Fix is active for this boot. No process was killed or restarted; inspect the UI manually."
+            : @"Transparency Fix was restored to stock. No process was killed or restarted; inspect the UI manually.";
+    } else {
+        message = [mutationReport[@"message"] isKindOfClass:NSString.class]
+            ? mutationReport[@"message"]
+            : @"Transparency Fix did not complete.";
+    }
+    log_user("[TRANSPARENCY_FIX] operation=%s ok=%s spotlight-pid=%d result=%s\n",
+        apply ? "apply" : "restore", ok ? "yes" : "no", spotlightPID,
+        [mutationReport[@"result"] UTF8String] ?: "unknown");
+    return CNDRemixCoordinatorResult(
+        ok, ok ? (apply ? @"active" : @"restored") : @"failed",
+        message,
+        @{
+            @"spotlightPID": @(spotlightPID),
+            @"presentation": presentation,
+            @"permissionProbeReport": permissionProbeReport,
+            @"mutationReport": mutationReport,
+            @"verificationReport": verificationReport,
+            @"automaticProcessKillOrRestartCount": @0,
+            @"postwriteProcessLifecycleMutationCount": @0,
+            @"spotlightPresentedForPreflight": @([presentation[@"ok"] boolValue]),
+            @"manualVisualCheckRequired": @YES,
+        });
+}
+
 @implementation CNDSnowBoardRemix
+
++ (NSDictionary<NSString *, id> *)setTransparencyFixEnabled:(BOOL)enabled
+{
+    return CNDRemixRunTransparencyFixOperation(
+        enabled ? CNDHailMaryImpRedirectOperationApply
+                : CNDHailMaryImpRedirectOperationRestore);
+}
 
 + (NSDictionary<NSString *, id> *)reconcilePresentationLifecycle
 {
@@ -3011,6 +3971,11 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
     return result;
 }
 
++ (NSDictionary<NSString *, id> *)presentSpotlight
+{
+    return CNDIconServicesConsumerHookPresentSpotlight();
+}
+
 + (NSDictionary<NSString *, id> *)repairSpotlightPresentation
 {
     NSDictionary<NSString *, NSData *> *themeLookup =
@@ -3021,6 +3986,8 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
     CNDIconServicesConsumerLifecycleSetStaticDynamicIconData(staticIcons);
     BOOL clockRequested = staticIcons[@"com.apple.mobiletimer"].length > 0;
     BOOL calendarRequested = staticIcons[@"com.apple.mobilecal"].length > 0;
+    BOOL filesThumbnailRequested =
+        staticIcons[@"com.apple.DocumentsApp"].length > 0;
     NSDictionary<NSString *, id> *repair =
         CNDIconServicesConsumerLifecycleRepairProcess(
             @"Spotlight", UIScreen.mainScreen.scale);
@@ -3029,17 +3996,39 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
     NSDictionary *sourceResult = [result[@"install"][@"staticIcons"]
         isKindOfClass:NSDictionary.class]
         ? result[@"install"][@"staticIcons"] : @{};
-    result[@"transparencyVerified"] = @([repair[@"ok"] boolValue]);
+    BOOL transparencyVerified = [repair[@"transparencyVerified"] boolValue];
+    BOOL dynamicIconSourcesVerified =
+        (!clockRequested && !calendarRequested && !filesThumbnailRequested) ||
+        [sourceResult[@"ok"] boolValue];
+    result[@"transparencyVerified"] = @(transparencyVerified);
     result[@"clockRequested"] = @(clockRequested);
     result[@"calendarRequested"] = @(calendarRequested);
+    result[@"filesThumbnailRequested"] = @(filesThumbnailRequested);
     result[@"dynamicIconSourcesVerified"] =
-        @((!clockRequested && !calendarRequested) ||
-          [sourceResult[@"ok"] boolValue]);
+        @(dynamicIconSourcesVerified);
     result[@"dynamicIconSourcesAttempted"] =
-        @(clockRequested || calendarRequested);
+        @(clockRequested || calendarRequested || filesThumbnailRequested);
     result[@"dynamicIconSourcesSupported"] = @YES;
     if ([repair[@"ok"] boolValue]) {
-        result[@"message"] = @"Spotlight transparency, its static Clock icon-view selection, and Calendar's exact provider source are verified for this process.";
+        result[@"message"] = @"Spotlight transparency, static Clock selection, Calendar's provider source, and the requested Files root thumbnail presentation are verified for this process.";
+    } else if (transparencyVerified && !dynamicIconSourcesVerified) {
+        NSDictionary *calendarResult =
+            [sourceResult[@"calendarProviderSource"]
+                isKindOfClass:NSDictionary.class]
+                ? sourceResult[@"calendarProviderSource"] : @{};
+        NSString *calendarStage =
+            [calendarResult[@"stage"] isKindOfClass:NSString.class]
+                ? calendarResult[@"stage"] : nil;
+        result[@"stage"] = @"spotlight-transparency-ready-dynamic-icons-failed";
+        result[@"message"] = calendarRequested &&
+            ![sourceResult[@"calendarProviderSourceVerified"] boolValue]
+            ? [NSString stringWithFormat:
+                @"Spotlight transparency verified, but Calendar's Spotlight provider source did not (%@). Open Spotlight, then retry.",
+                calendarStage ?: @"calendar-provider-source-verify"]
+            : (filesThumbnailRequested &&
+               ![sourceResult[@"filesThumbnailVerified"] boolValue]
+                ? @"Spotlight transparency verified, but the Files root thumbnail was not materialized or did not verify. Open Spotlight, search for “files” until “File Provider Storage” appears, then retry."
+                : @"Spotlight transparency verified, but its requested Clock source update did not verify.");
     }
     return result;
 }
@@ -3910,6 +4899,327 @@ static NSDictionary *CNDRemixCompareAppliedAuditRecords(
     return NO;
 }
 
++ (NSDictionary<NSString *, id> *)applyIsolatedAirDropTest
+{
+    NSTimeInterval startedAt = NSProcessInfo.processInfo.systemUptime;
+    NSDictionary<NSString *, NSData *> *themeLookup =
+        CNDRemixNormalizedThemeLookup(settings_sbl_selected_theme_data());
+    NSData *source = themeLookup[
+        CNDRemixAirDropPseudoBundleIdentifier.lowercaseString];
+    if (source.length == 0) {
+        return CNDRemixResultByAddingElapsedTime(
+            CNDRemixCoordinatorResult(NO, @"airdrop-test-asset-missing",
+                @"The selected theme does not contain IconBundles/com.apple.Sharing.AirDrop.png; the isolated test made no target changes.", @{
+                    @"operationMode": @"isolated-airdrop-apply",
+                    @"targetBundleIdentifier":
+                        CNDRemixAirDropPseudoBundleIdentifier,
+                    @"themeAssetPresent": @NO,
+                    @"ordinaryApplicationTargets": @0,
+                    @"springBoardPresentationSkipped": @YES,
+                }), startedAt, @"AirDrop Test Apply");
+    }
+
+    NSSet<NSString *> *target = [NSSet setWithObject:
+        CNDRemixAirDropPseudoBundleIdentifier];
+    NSDictionary *existingJournal = CNDRemixReadIconServicesJournal(
+        CNDRemixAirDropPseudoBundleIdentifier);
+    BOOL preflightRestorePerformed = existingJournal.count > 0;
+    NSDictionary<NSString *, id> *preflightRestore = @{
+        @"ok": @YES,
+        @"stage": @"not-required",
+        @"message": @"No existing AirDrop recovery journal required a targeted restore.",
+        @"persistentDataClean": @YES,
+        @"presentationRemoteCallUsed": @NO,
+    };
+    uint32_t previousSettleUS = r_settle_us(0);
+    NSDictionary<NSString *, id> *raw = nil;
+    @try {
+        if (preflightRestorePerformed) {
+            preflightRestore = CNDRemixRestoreIconServicesJournals(
+                target, NO, nil, nil);
+            BOOL clean = [preflightRestore[@"ok"] boolValue] &&
+                [preflightRestore[@"persistentDataClean"] boolValue];
+            log_user("[SBR_AIRDROP_TEST] preflight-restore ok=%d "
+                     "prior-state=%s persistent-clean=%d "
+                     "presentation-remote=%d\n",
+                     [preflightRestore[@"ok"] boolValue],
+                     [existingJournal[@"state"] UTF8String] ?: "unknown",
+                     [preflightRestore[@"persistentDataClean"] boolValue],
+                     [preflightRestore[@"presentationRemoteCallUsed"]
+                        boolValue]);
+            if (!clean) {
+                return CNDRemixResultByAddingElapsedTime(
+                    CNDRemixCoordinatorResult(NO,
+                        @"airdrop-test-preflight-restore",
+                        @"The existing AirDrop recovery journal could not be restored to verified stock. The isolated test stopped before publishing new records; use its Restore action and inspect the saved log.", @{
+                            @"operationMode": @"isolated-airdrop-apply",
+                            @"targetBundleIdentifier":
+                                CNDRemixAirDropPseudoBundleIdentifier,
+                            @"preflightRestorePerformed": @YES,
+                            @"preflightRestore": preflightRestore ?: @{},
+                            @"ordinaryApplicationTargets": @0,
+                            @"springBoardPresentationSkipped": @YES,
+                        }), startedAt, @"AirDrop Test Apply");
+            }
+        }
+        raw = CNDRemixApplyIconServicesTheme(
+            target, NO, YES, nil, nil);
+    } @finally {
+        r_settle_us(previousSettleUS);
+    }
+    NSMutableDictionary<NSString *, id> *result =
+        [raw mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSArray<NSString *> *active = [result[@"activeBundleIdentifiers"]
+        isKindOfClass:NSArray.class] ? result[@"activeBundleIdentifiers"] : @[];
+    BOOL exactTarget = active.count == 1 &&
+        [active.firstObject isEqualToString:
+            CNDRemixAirDropPseudoBundleIdentifier];
+    BOOL exactRecords = [result[@"airDropVerifiedVariants"]
+            unsignedIntegerValue] == 2 &&
+        [result[@"airDropResolvedSourceVariants"]
+            unsignedIntegerValue] == 2 &&
+        [result[@"airDropVerifiedSourceVariants"]
+            unsignedIntegerValue] == 2;
+    NSDictionary *sharingUI = [result[@"airDropPresentation"]
+        isKindOfClass:NSDictionary.class] ? result[@"airDropPresentation"] : @{};
+    BOOL sharingUIVerified = exactTarget &&
+        [result[@"airDropPresentationOK"] boolValue];
+    BOOL sharingUIRemoteCallUsed = [sharingUI[@"remoteCallUsed"] boolValue];
+    BOOL springBoardSkipped =
+        [result[@"springBoardPresentationSkipped"] boolValue] &&
+        ![result[@"oneShotPresentation"][@"remoteCallUsed"] boolValue];
+    BOOL ok = [result[@"ok"] boolValue] && exactTarget && exactRecords &&
+        sharingUIVerified && springBoardSkipped;
+    result[@"ok"] = @(ok);
+    result[@"stage"] = ok ? @"airdrop-test-themed"
+                            : @"airdrop-test-apply-incomplete";
+    result[@"message"] = ok
+        ? @"The isolated AirDrop test verified both themed records and their source associations, then refreshed only SharingUIService. Open a Share sheet now, run the isolated audit, and use the separate Restore action when finished."
+        : (result[@"message"] ?:
+            @"The isolated AirDrop apply did not verify every bounded requirement; inspect the SBR_AIRDROP_TEST and SBR_SHARE lines before retrying or restoring.");
+    result[@"operationMode"] = @"isolated-airdrop-apply";
+    result[@"targetBundleIdentifier"] =
+        CNDRemixAirDropPseudoBundleIdentifier;
+    result[@"themeAssetPresent"] = @YES;
+    result[@"preflightRestorePerformed"] = @(preflightRestorePerformed);
+    result[@"preflightRestore"] = preflightRestore ?: @{};
+    result[@"expectedDescriptorCount"] = @2;
+    result[@"exactTargetSetVerified"] = @(exactTarget);
+    result[@"exactDescriptorSetVerified"] = @(exactRecords);
+    result[@"sharingUIRefreshVerified"] = @(sharingUIVerified);
+    result[@"sharingUIRemoteCallUsed"] = @(sharingUIRemoteCallUsed);
+    result[@"sharingUIRefreshStage"] = sharingUI[@"stage"] ?: @"missing";
+    result[@"ordinaryApplicationTargets"] = @0;
+    result[@"manualVisibleCheckRequired"] = @YES;
+    log_user("[SBR_AIRDROP_TEST] apply ok=%d exact-target=%d "
+             "records=%lu/2 source=%lu/2 sharing-ui-ready=%d "
+             "sharing-ui-remote=%d sharing-ui-stage=%s "
+             "springboard-skipped=%d ordinary-targets=0\n",
+             ok, exactTarget,
+             (unsigned long)[result[@"airDropVerifiedVariants"]
+                unsignedIntegerValue],
+             (unsigned long)[result[@"airDropVerifiedSourceVariants"]
+                unsignedIntegerValue],
+             sharingUIVerified, sharingUIRemoteCallUsed,
+             [sharingUI[@"stage"] UTF8String] ?: "missing",
+             springBoardSkipped);
+    return CNDRemixResultByAddingElapsedTime(
+        result, startedAt, @"AirDrop Test Apply");
+}
+
++ (NSDictionary<NSString *, id> *)auditIsolatedAirDropTest
+{
+    NSTimeInterval startedAt = NSProcessInfo.processInfo.systemUptime;
+    NSDictionary *journal = CNDRemixReadIconServicesJournal(
+        CNDRemixAirDropPseudoBundleIdentifier);
+    NSArray<CNDIconServicesDescriptorSpec *> *specifications =
+        CNDRemixDescriptorSpecificationsForBundleIdentifier(
+            CNDRemixAirDropPseudoBundleIdentifier);
+    NSArray<NSDictionary *> *variants = CNDRemixJournalVariants(journal);
+    if (![journal[@"state"] isEqualToString:@"active"] ||
+        specifications.count != 2 || variants.count != 2) {
+        return CNDRemixResultByAddingElapsedTime(
+            CNDRemixCoordinatorResult(NO, @"airdrop-test-not-active",
+                @"The isolated AirDrop test does not have one active two-record journal to audit. Run its Apply action first.", @{
+                    @"operationMode": @"isolated-airdrop-audit",
+                    @"targetBundleIdentifier":
+                        CNDRemixAirDropPseudoBundleIdentifier,
+                    @"journalState": journal[@"state"] ?: @"missing",
+                    @"journalVariantCount": @(variants.count),
+                    @"mutationsIssued": @NO,
+                }), startedAt, @"AirDrop Test Audit");
+    }
+
+    NSMutableDictionary<NSString *, NSDictionary *> *variantByIdentity =
+        [NSMutableDictionary dictionaryWithCapacity:variants.count];
+    for (NSDictionary *variant in variants) {
+        NSString *identity = [variant[@"descriptorIdentity"]
+            isKindOfClass:NSString.class]
+            ? variant[@"descriptorIdentity"] : nil;
+        if (identity.length > 0 && !variantByIdentity[identity]) {
+            variantByIdentity[identity] = variant;
+        }
+    }
+    NSMutableArray<NSDictionary *> *targets = [NSMutableArray arrayWithCapacity:2];
+    for (CNDIconServicesDescriptorSpec *specification in specifications) {
+        NSDictionary *variant = variantByIdentity[
+            specification.canonicalIdentity];
+        NSDictionary *savedSpecification = [variant[@"descriptorSpecification"]
+            isKindOfClass:NSDictionary.class]
+            ? variant[@"descriptorSpecification"] : nil;
+        if (!variant || ![savedSpecification isEqualToDictionary:
+                specification.dictionaryRepresentation]) {
+            return CNDRemixResultByAddingElapsedTime(
+                CNDRemixCoordinatorResult(NO,
+                    @"airdrop-test-descriptor-profile",
+                    @"The AirDrop recovery journal does not contain exactly the two measured Share-sheet descriptors; no audit session was opened.", @{
+                        @"operationMode": @"isolated-airdrop-audit",
+                        @"targetBundleIdentifier":
+                            CNDRemixAirDropPseudoBundleIdentifier,
+                        @"mutationsIssued": @NO,
+                    }), startedAt, @"AirDrop Test Audit");
+        }
+        [targets addObject:@{
+            @"bundleIdentifier": CNDRemixAirDropPseudoBundleIdentifier,
+            @"surface": specification.pointWidth == 64
+                ? @"airdrop-activity-strip" : @"airdrop-apps-list",
+            @"descriptorIdentity": specification.canonicalIdentity,
+            @"descriptorSpecification":
+                specification.dictionaryRepresentation,
+            @"expectedThemedSHA256":
+                variant[@"structuredImageSHA256"] ?: @"",
+            @"expectedStockSHA256":
+                variant[@"publication"][@"stockResponse"][@"dataSHA256"]
+                    ?: @"",
+        }];
+    }
+
+    NSDictionary *batchStart = CNDIconServicesPublisherBeginBatch(
+        CNDRemixIconServicesWakeIdentifier);
+    if (![batchStart[@"ok"] boolValue]) {
+        return CNDRemixResultByAddingElapsedTime(
+            CNDRemixCoordinatorResult(NO, @"airdrop-test-audit-session",
+                batchStart[@"message"] ?:
+                    @"The isolated AirDrop audit session could not start.", @{
+                    @"operationMode": @"isolated-airdrop-audit",
+                    @"batchSessionStart": batchStart ?: @{},
+                    @"mutationsIssued": @NO,
+                }), startedAt, @"AirDrop Test Audit");
+    }
+
+    NSMutableArray<NSDictionary *> *records =
+        [NSMutableArray arrayWithCapacity:targets.count];
+    NSUInteger verifiedCount = 0;
+    NSDictionary *batchFinish = nil;
+    @try {
+        for (NSDictionary *target in targets) {
+            if (!CNDIconServicesPublisherBatchIsHealthy()) break;
+            NSDictionary *audit =
+                CNDIconServicesPublisherAuditVariantInBatch(
+                    CNDRemixAirDropPseudoBundleIdentifier,
+                    target[@"descriptorSpecification"]);
+            NSString *cacheState = CNDRemixAuditHashClassification(
+                CNDRemixAppliedAuditText(audit, @"cacheDataSHA256"),
+                target[@"expectedThemedSHA256"],
+                target[@"expectedStockSHA256"]);
+            NSString *storeState = CNDRemixAuditHashClassification(
+                CNDRemixAppliedAuditText(audit, @"storeDataSHA256"),
+                target[@"expectedThemedSHA256"],
+                target[@"expectedStockSHA256"]);
+            NSMutableDictionary *record = [target mutableCopy];
+            record[@"audit"] = audit ?: @{};
+            record[@"cacheState"] = cacheState;
+            record[@"storeState"] = storeState;
+            BOOL verified =
+                CNDRemixAppliedAuditRecordProvesThemedPersistence(record);
+            record[@"verified"] = @(verified);
+            if (verified) verifiedCount++;
+            [records addObject:record];
+            log_user("[SBR_AIRDROP_TEST] audit surface=%s ok=%d "
+                     "store=%s source-count=%llu source-match=%d stage=%s\n",
+                     [target[@"surface"] UTF8String] ?: "?", verified,
+                     storeState.UTF8String ?: "?",
+                     (unsigned long long)[audit[@"sourceRegistryEntryCount"]
+                        unsignedLongLongValue],
+                     [audit[@"sourceIdentityMatchesCurrentRecord"] boolValue],
+                     [CNDRemixAppliedAuditText(audit, @"stage") UTF8String]
+                        ?: "?");
+        }
+    } @finally {
+        batchFinish = CNDIconServicesPublisherFinishBatch();
+    }
+    BOOL ok = verifiedCount == 2 && records.count == 2 &&
+        [batchFinish[@"ok"] boolValue];
+    log_user("[SBR_AIRDROP_TEST] audit-complete ok=%d verified=%lu/2 "
+             "session-closed=%d mutations=0\n", ok,
+             (unsigned long)verifiedCount,
+             [batchFinish[@"ok"] boolValue]);
+    return CNDRemixResultByAddingElapsedTime(
+        CNDRemixCoordinatorResult(ok,
+            ok ? @"airdrop-test-audit-verified"
+               : @"airdrop-test-audit-incomplete",
+            ok
+                ? @"Both isolated AirDrop records retain their themed bytes, exact indexed units, validation tokens, and current native source association. Confirm the visible tile manually before Restore."
+                : @"The isolated AirDrop persistent audit did not verify both records. Inspect the per-surface SBR_AIRDROP_TEST lines and restore before another Apply if recovery is pending.", @{
+                @"operationMode": @"isolated-airdrop-audit",
+                @"targetBundleIdentifier":
+                    CNDRemixAirDropPseudoBundleIdentifier,
+                @"expectedDescriptorCount": @2,
+                @"verifiedDescriptorCount": @(verifiedCount),
+                @"records": records,
+                @"batchSessionStart": batchStart ?: @{},
+                @"batchSessionFinish": batchFinish ?: @{},
+                @"ordinaryApplicationTargets": @0,
+                @"springBoardPresentationSkipped": @YES,
+                @"sharingUIRefreshAttempted": @NO,
+                @"manualVisibleCheckRequired": @YES,
+                @"mutationsIssued": @NO,
+            }), startedAt, @"AirDrop Test Audit");
+}
+
++ (NSDictionary<NSString *, id> *)restoreIsolatedAirDropTest
+{
+    NSTimeInterval startedAt = NSProcessInfo.processInfo.systemUptime;
+    uint32_t previousSettleUS = r_settle_us(0);
+    NSDictionary<NSString *, id> *raw = nil;
+    @try {
+        raw = CNDRemixRestoreIconServicesJournals(
+            [NSSet setWithObject:CNDRemixAirDropPseudoBundleIdentifier],
+            YES, nil, nil);
+    } @finally {
+        r_settle_us(previousSettleUS);
+    }
+    NSMutableDictionary<NSString *, id> *result =
+        [raw mutableCopy] ?: [NSMutableDictionary dictionary];
+    BOOL springBoardSkipped =
+        [result[@"springBoardPresentationSkipped"] boolValue] &&
+        ![result[@"restorePresentation"][@"remoteCallUsed"] boolValue];
+    BOOL sharingUIVerified =
+        [result[@"airDropPresentation"][@"ok"] boolValue];
+    BOOL persistentClean = result[@"persistentDataClean"]
+        ? [result[@"persistentDataClean"] boolValue]
+        : [result[@"ok"] boolValue];
+    BOOL ok = [result[@"ok"] boolValue] && persistentClean &&
+        springBoardSkipped && sharingUIVerified;
+    result[@"ok"] = @(ok);
+    result[@"stage"] = ok ? @"airdrop-test-restored"
+                            : @"airdrop-test-restore-incomplete";
+    result[@"message"] = ok
+        ? @"The isolated AirDrop records verified stock and only SharingUIService was refreshed. A fresh Share sheet should now show the stock AirDrop tile."
+        : (result[@"message"] ?:
+            @"The isolated AirDrop restore did not verify persistent stock plus Share-sheet refresh; inspect the saved operation log before retrying.");
+    result[@"operationMode"] = @"isolated-airdrop-restore";
+    result[@"targetBundleIdentifier"] =
+        CNDRemixAirDropPseudoBundleIdentifier;
+    result[@"ordinaryApplicationTargets"] = @0;
+    result[@"sharingUIRefreshVerified"] = @(sharingUIVerified);
+    log_user("[SBR_AIRDROP_TEST] restore ok=%d persistent-clean=%d "
+             "sharing-ui=%d springboard-skipped=%d ordinary-targets=0\n",
+             ok, persistentClean, sharingUIVerified, springBoardSkipped);
+    return CNDRemixResultByAddingElapsedTime(
+        result, startedAt, @"AirDrop Test Restore");
+}
+
 + (NSDictionary<NSString *, id> *)scanInstalledApplications
 {
     NSDictionary<NSString *, NSData *> *theme =
@@ -3959,7 +5269,8 @@ static NSDictionary *CNDRemixCompareAppliedAuditRecords(
     uint32_t previousSettleUS = r_settle_us(0);
     NSDictionary<NSString *, id> *result = nil;
     @try {
-        result = CNDRemixApplyIconServicesTheme(progress, cancellation);
+        result = CNDRemixApplyIconServicesTheme(
+            nil, YES, NO, progress, cancellation);
     } @finally {
         r_settle_us(previousSettleUS);
     }
@@ -3981,7 +5292,8 @@ static NSDictionary *CNDRemixCompareAppliedAuditRecords(
          * a changed install is rebased to its current stock records before
          * publication; and a matching app without a journal is newly
          * published. Keep one implementation for both Apply and repair. */
-        result = CNDRemixApplyIconServicesTheme(progress, cancellation);
+        result = CNDRemixApplyIconServicesTheme(
+            nil, YES, NO, progress, cancellation);
     } @finally {
         r_settle_us(previousSettleUS);
     }
@@ -4343,7 +5655,7 @@ static NSDictionary *CNDRemixCompareAppliedAuditRecords(
     NSDictionary *result = nil;
     if (CNDRemixReadIconServicesJournal(bundleIdentifier)) {
         result = CNDRemixRestoreIconServicesJournals(
-            [NSSet setWithObject:bundleIdentifier], nil, nil);
+            [NSSet setWithObject:bundleIdentifier], YES, nil, nil);
     } else if ([bundleIdentifier isEqualToString:@"com.ebay.iphone"] &&
                CNDIconServicesInterceptProofIsActive()) {
         result = CNDIconServicesInterceptProofRestore();
@@ -4373,7 +5685,7 @@ static NSDictionary *CNDRemixCompareAppliedAuditRecords(
         NSDictionary *result = nil;
         @try {
             result = CNDRemixRestoreIconServicesJournals(
-                nil, progress, cancellation);
+                nil, YES, progress, cancellation);
         } @finally {
             r_settle_us(previousSettleUS);
         }
@@ -4556,15 +5868,21 @@ static NSDictionary *CNDRemixCompareAppliedAuditRecords(
         NSString *bundleIdentifier = journal[@"bundleIdentifier"];
         NSString *state = [journal[@"state"] isKindOfClass:NSString.class]
             ? journal[@"state"] : @"unknown";
+        BOOL persistentDataClean =
+            !CNDRemixJournalRepresentsDirtyPersistentData(journal);
         NSMutableDictionary *status = [@{
             @"ok": @YES,
             @"engine": @"iconservices-publisher",
             @"bundleIdentifier": bundleIdentifier ?: @"",
             @"stage": state,
             @"active": @([state isEqualToString:@"active"]),
+            @"persistentDataClean": @(persistentDataClean),
+            @"recoveryRequired": @(!persistentDataClean),
             @"message": [state isEqualToString:@"active"]
                 ? @"The marked IconServices response is active."
-                : @"This IconServices response retains recovery state.",
+                : (persistentDataClean
+                    ? @"Persistent data is clean; local journal metadata awaits cleanup."
+                    : @"This IconServices response retains recovery state."),
         } mutableCopy];
         NSString *displayName = bundleIdentifier.length > 0
             ? displayNames[bundleIdentifier] : nil;

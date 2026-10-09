@@ -708,6 +708,7 @@ static void CNDIconInspectLogRequest(const char *label, id request)
         CNDIconInspectPointer(descriptor), CNDIconInspectClass(descriptor),
         CNDIconInspectUUIDText(digest).UTF8String,
         ignoreKnown, ignoreCache);
+    CNDIconInspectLogDescriptor(label, descriptor);
 }
 
 static void CNDIconInspectLogStoreUnit(const char *label, id store, id unit)

@@ -50,6 +50,15 @@ typedef struct {
     __unsafe_unretained id consumer;
 } CNDSurfaceTraceContext;
 
+typedef struct {
+    CGSize size;
+    double scale;
+    double continuousCornerRadius;
+} CNDIconImageInfo;
+
+_Static_assert(sizeof(CNDIconImageInfo) == 32,
+               "SBIconImageInfo ABI changed");
+
 static __thread CNDSurfaceTraceContext gCNDSurfaceTraceContext;
 
 typedef id (*CNDObjectOneArgumentIMP)(id, SEL, id);
@@ -59,6 +68,10 @@ typedef void (*CNDVoidNoArgumentIMP)(id, SEL);
 typedef void (*CNDVoidTwoArgumentIMP)(id, SEL, NSInteger, BOOL);
 typedef void (*CNDVoidIconViewIMP)(id, SEL, id, id);
 typedef id (*CNDFolderGridImageIMP)(id, SEL, id, id);
+typedef id (*CNDFolderGridRendererIMP)(id, SEL, CGSize, id,
+                                       CNDIconImageInfo, id,
+                                       const uint64_t *);
+typedef id (*CNDFolderGridCompositorIMP)(id, SEL, CGSize, id);
 typedef void (*CNDVoidBooleanIMP)(id, SEL, BOOL);
 typedef void (*CNDVoidObjectBooleanIMP)(id, SEL, id, BOOL);
 typedef BOOL (*CNDBooleanBooleanIMP)(id, SEL, BOOL);
@@ -86,6 +99,8 @@ static CNDVoidNoArgumentIMP gCNDOriginalLibraryListReloadApps;
 static CNDVoidObjectIMP gCNDOriginalLibraryListRefreshIcon;
 static CNDVoidBooleanIMP gCNDOriginalLibrarySearchSetActive;
 static CNDFolderGridImageIMP gCNDOriginalFolderGridImage;
+static CNDFolderGridRendererIMP gCNDOriginalFolderGridRenderer;
+static CNDFolderGridCompositorIMP gCNDOriginalFolderGridCompositor;
 static CNDVoidBooleanIMP gCNDOriginalIconViewUpdate;
 static CNDVoidObjectIMP gCNDOriginalIconViewCrossfade;
 static CNDVoidObjectUIntegerIMP gCNDOriginalIconViewCrossfadeOptions;
@@ -116,9 +131,15 @@ static IMP gCNDOriginalISGenerateForDescriptor;
 static _Atomic uint64_t gCNDSurfaceTraceSequence;
 static _Atomic uint64_t gCNDSurfaceTraceCorrelation;
 static _Atomic uint64_t gCNDSurfaceTraceDescriptorEvents;
+static _Atomic uint64_t gCNDSurfaceTraceDescriptorSamples;
+static _Atomic uint64_t gCNDSurfaceTraceCompositeSamples;
 
 static void CNDSurfaceTraceLog(const char *format, ...)
     __attribute__((format(printf, 1, 2)));
+
+static void CNDSurfaceTraceCaptureDescriptorImage(const char *phase,
+                                                   id icon, id descriptor,
+                                                   id image);
 
 static void CNDSurfaceTraceLog(const char *format, ...)
 {
@@ -466,6 +487,8 @@ static void CNDSurfaceTraceLogDescriptor(const char *phase, id icon,
     CNDSurfaceTraceLogEventPrefix("descriptor-stack");
     CNDSurfaceTraceLog("phase=%s stack=%s\n", phase,
                        CNDSurfaceTraceShortStack().UTF8String ?: "-");
+    CNDSurfaceTraceCaptureDescriptorImage(
+        phase, icon, descriptor, image);
 }
 
 static void CNDSurfaceTraceLogViewGeometry(const char *event, id view)
@@ -618,6 +641,97 @@ static void CNDSurfaceTraceLogImage(const char *role, id image)
         stats.cornerAlpha[2], stats.cornerAlpha[3],
         stats.transparentPixels, stats.translucentPixels,
         stats.readable ? 1 : 0);
+}
+
+static void CNDSurfaceTraceCaptureDescriptorImage(const char *phase,
+                                                   id icon, id descriptor,
+                                                   id image)
+{
+    if (!phase || strcmp(phase, "descriptor-image-return") ||
+        gCNDSurfaceTraceContext.scope !=
+            CNDSurfaceTraceScopeAppLibraryCategory ||
+        !image || !descriptor) {
+        return;
+    }
+    CGSize size = CGSizeZero;
+    double scale = 0.0;
+    if (!CNDSurfaceTraceSize(descriptor, &size) ||
+        !CNDSurfaceTraceDouble(descriptor, "scale", &scale) ||
+        size.width < 26.0 || size.width > 28.0 ||
+        size.height < 26.0 || size.height > 28.0 ||
+        scale < 1.0 || scale > 4.0 ||
+        ![image respondsToSelector:sel_registerName("CGImage")]) {
+        return;
+    }
+    CGImageRef cgImage = NULL;
+    @try {
+        cgImage = ((CGImageRef (*)(id, SEL))objc_msgSend)(
+            image, sel_registerName("CGImage"));
+    } @catch (__unused NSException *exception) {
+        cgImage = NULL;
+    }
+    if (!cgImage) return;
+    uint64_t sample = atomic_fetch_add_explicit(
+        &gCNDSurfaceTraceDescriptorSamples, 1U,
+        memory_order_relaxed) + 1U;
+    if (sample > 256U) return;
+    UIImage *uiImage = [UIImage imageWithCGImage:cgImage
+                                           scale:(CGFloat)scale
+                                     orientation:UIImageOrientationUp];
+    CNDSurfaceTraceLogImage("app-library-iconservices-return", uiImage);
+    NSData *png = UIImagePNGRepresentation(uiImage);
+    NSString *path = [NSString stringWithFormat:
+        @"/var/tmp/cyanide-app-library-iconservices-%03llu.png",
+        (unsigned long long)sample];
+    NSError *error = nil;
+    BOOL wrote = [png isKindOfClass:NSData.class] && png.length > 0U &&
+        png.length <= (8U << 20) &&
+        [png writeToFile:path options:NSDataWritingAtomic error:&error];
+    CNDSurfaceTraceLogEventPrefix("app-library-iconservices-evidence");
+    CNDSurfaceTraceLog(
+        "sample=%llu bundle=%s descriptor=%p source=%p/%s "
+        "points=%.3fx%.3f scale=%.3f pixels=%zux%zu evidence=%d "
+        "bytes=%lu path=%s error=%s\n", (unsigned long long)sample,
+        CNDSurfaceTraceIdentifier(icon).UTF8String ?: "-", descriptor,
+        image, class_getName([image class]), size.width, size.height,
+        scale, CGImageGetWidth(cgImage), CGImageGetHeight(cgImage),
+        wrote ? 1 : 0,
+        (unsigned long)([png isKindOfClass:NSData.class] ? png.length : 0U),
+        path.UTF8String ?: "-",
+        error.localizedDescription.UTF8String ?: "-");
+}
+
+static void CNDSurfaceTraceWriteCompositeEvidence(uint64_t sample,
+                                                   NSString *phase,
+                                                   id image)
+{
+    if (sample == 0U || sample > 128U ||
+        ![phase isKindOfClass:NSString.class] ||
+        ![image isKindOfClass:UIImage.class]) {
+        return;
+    }
+    NSData *png = UIImagePNGRepresentation(image);
+    if (![png isKindOfClass:NSData.class] || png.length == 0U ||
+        png.length > (8U << 20)) {
+        CNDSurfaceTraceLog(
+            "[CND_COMPOSITOR] sample=%llu phase=%s evidence=0 "
+            "reason=png-encoding\n", (unsigned long long)sample,
+            phase.UTF8String ?: "-");
+        return;
+    }
+    NSString *path = [NSString stringWithFormat:
+        @"/var/tmp/cyanide-app-library-compositor-%03llu-%@.png",
+        (unsigned long long)sample, phase];
+    NSError *error = nil;
+    BOOL wrote = [png writeToFile:path
+                          options:NSDataWritingAtomic
+                            error:&error];
+    CNDSurfaceTraceLog(
+        "[CND_COMPOSITOR] sample=%llu phase=%s evidence=%d bytes=%lu "
+        "path=%s error=%s\n", (unsigned long long)sample,
+        phase.UTF8String ?: "-", wrote ? 1 : 0,
+        (unsigned long)png.length, path.UTF8String ?: "-",
+        error.localizedDescription.UTF8String ?: "-");
 }
 
 static id CNDSurfaceTraceISImageForDescriptor(id self, SEL selector,
@@ -1054,8 +1168,13 @@ static void CNDSurfaceTraceLibrarySearchSetActive(id self, SEL selector,
 static id CNDSurfaceTraceFolderGridImage(id self, SEL selector, id icon,
                                          id appearance)
 {
-    CNDSurfaceTraceContext previous = CNDSurfaceTracePushContext(
-        CNDSurfaceTraceScopeFolderPreview, self, icon, nil);
+    bool ownsContext = gCNDSurfaceTraceContext.scope ==
+        CNDSurfaceTraceScopeNone;
+    CNDSurfaceTraceContext previous = gCNDSurfaceTraceContext;
+    if (ownsContext) {
+        previous = CNDSurfaceTracePushContext(
+            CNDSurfaceTraceScopeFolderPreview, self, icon, nil);
+    }
     CNDSurfaceTraceLogEventPrefix("folder-grid-begin");
     CNDSurfaceTraceLog(
         "cache=%p/%s icon=%p/%s id=%s generation=%llu "
@@ -1081,7 +1200,80 @@ static id CNDSurfaceTraceFolderGridImage(id self, SEL selector, id icon,
         CNDSurfaceTraceIdentifier(icon).UTF8String ?: "-", appearance,
         appearance ? class_getName([appearance class]) : "-", image,
         image ? class_getName([image class]) : "-");
-    CNDSurfaceTracePopContext(previous);
+    if (ownsContext) CNDSurfaceTracePopContext(previous);
+    return image;
+}
+
+static id CNDSurfaceTraceFolderGridRenderer(
+    id self, SEL selector, CGSize size, id icon,
+    CNDIconImageInfo iconImageInfo, id appearance,
+    const uint64_t *imageAttributes)
+{
+    bool ownsContext = gCNDSurfaceTraceContext.scope ==
+        CNDSurfaceTraceScopeNone;
+    CNDSurfaceTraceContext previous = gCNDSurfaceTraceContext;
+    if (ownsContext) {
+        previous = CNDSurfaceTracePushContext(
+            CNDSurfaceTraceScopeFolderPreview, self, icon, nil);
+    }
+    CNDSurfaceTraceLogEventPrefix("folder-renderer-begin");
+    CNDSurfaceTraceLog(
+        "class=%p/%s icon=%p/%s id=%s size=%.3fx%.3f "
+        "icon-info=%.3fx%.3f@%.3f/r%.3f appearance=%p/%s "
+        "attributes=%p/%s stack=%s\n", self,
+        self ? class_getName(self) : "-", icon,
+        icon ? class_getName([icon class]) : "-",
+        CNDSurfaceTraceIdentifier(icon).UTF8String ?: "-",
+        size.width, size.height, iconImageInfo.size.width,
+        iconImageInfo.size.height, iconImageInfo.scale,
+        iconImageInfo.continuousCornerRadius, appearance,
+        appearance ? class_getName([appearance class]) : "-",
+        imageAttributes, imageAttributes ? "uint64-pointer" : "-",
+        CNDSurfaceTraceShortStack().UTF8String ?: "-");
+    id image = gCNDOriginalFolderGridRenderer(
+        self, selector, size, icon, iconImageInfo, appearance,
+        imageAttributes);
+    CNDSurfaceTraceLogImage("folder-renderer-result", image);
+    CNDSurfaceTraceLogEventPrefix("folder-renderer-end");
+    CNDSurfaceTraceLog(
+        "class=%p icon=%p/%s id=%s size=%.3fx%.3f image=%p/%s\n",
+        self, icon, icon ? class_getName([icon class]) : "-",
+        CNDSurfaceTraceIdentifier(icon).UTF8String ?: "-",
+        size.width, size.height, image,
+        image ? class_getName([image class]) : "-");
+    if (ownsContext) CNDSurfaceTracePopContext(previous);
+    return image;
+}
+
+static id CNDSurfaceTraceFolderGridCompositor(id self, SEL selector,
+                                               CGSize size, id iconImage)
+{
+    uint64_t sample = atomic_fetch_add_explicit(
+        &gCNDSurfaceTraceCompositeSamples, 1U,
+        memory_order_relaxed) + 1U;
+    CNDSurfaceTraceLogEventPrefix("folder-compositor-begin");
+    CNDSurfaceTraceLog(
+        "sample=%llu class=%p/%s size=%.3fx%.3f source=%p/%s "
+        "icon=%p/%s id=%s stack=%s\n", (unsigned long long)sample,
+        self, self ? class_getName(self) : "-", size.width, size.height,
+        iconImage, iconImage ? class_getName([iconImage class]) : "-",
+        gCNDSurfaceTraceContext.icon,
+        gCNDSurfaceTraceContext.icon
+            ? class_getName([gCNDSurfaceTraceContext.icon class]) : "-",
+        CNDSurfaceTraceIdentifier(
+            gCNDSurfaceTraceContext.icon).UTF8String ?: "-",
+        CNDSurfaceTraceShortStack().UTF8String ?: "-");
+    CNDSurfaceTraceLogImage("folder-compositor-source", iconImage);
+    CNDSurfaceTraceWriteCompositeEvidence(sample, @"source", iconImage);
+    id image = gCNDOriginalFolderGridCompositor(
+        self, selector, size, iconImage);
+    CNDSurfaceTraceLogImage("folder-compositor-result", image);
+    CNDSurfaceTraceWriteCompositeEvidence(sample, @"result", image);
+    CNDSurfaceTraceLogEventPrefix("folder-compositor-end");
+    CNDSurfaceTraceLog(
+        "sample=%llu class=%p size=%.3fx%.3f source=%p result=%p/%s\n",
+        (unsigned long long)sample, self, size.width, size.height,
+        iconImage, image, image ? class_getName([image class]) : "-");
     return image;
 }
 
@@ -1262,6 +1454,20 @@ static void CNDSurfaceTraceDumpClass(const char *role, Class cls)
             method_getImplementation(methods[index]));
     }
     free(methods);
+    Class metaclass = object_getClass(cls);
+    methodCount = 0U;
+    methods = metaclass ? class_copyMethodList(metaclass, &methodCount) : NULL;
+    for (unsigned index = 0; methods && index < methodCount; index++) {
+        SEL selector = method_getName(methods[index]);
+        const char *name = selector ? sel_getName(selector) : NULL;
+        if (!CNDSurfaceTraceRelevantSelector(name)) continue;
+        CNDSurfaceTraceLog(
+            "[CND_INVENTORY] role=%s class=%s class-selector=%s "
+            "types=%s imp=%p\n", role ?: "-", class_getName(cls),
+            name ?: "-", method_getTypeEncoding(methods[index]) ?: "-",
+            method_getImplementation(methods[index]));
+    }
+    free(methods);
     unsigned inheritedDepth = 0U;
     for (Class cursor = cls; cursor && inheritedDepth < 4U;
          cursor = class_getSuperclass(cursor), inheritedDepth++) {
@@ -1286,6 +1492,7 @@ static void CNDSurfaceTraceDumpConsumerInventory(void)
 {
     static const char *const classNames[] = {
         "SBHLibraryCategoryPodIconListView",
+        "SBHLibraryCategoryPodIconView",
         "SBHLibraryPodFolderController",
         "SBHLibraryPodFolderView",
         "SBHLibraryViewController",
@@ -1342,6 +1549,84 @@ static bool CNDSurfaceTraceHook(const char *className,
         "replacement=%p observed=%p types=%s\n", className, selectorName,
         ok ? 1 : 0, original, replacement, observed,
         types ?: "-");
+    return ok;
+}
+
+static bool CNDSurfaceTraceMethodReturnsObject(Method method)
+{
+    char *returnType = method ? method_copyReturnType(method) : NULL;
+    const char *type = CNDSurfaceTraceSkipTypeQualifiers(returnType);
+    bool valid = type && *type == '@';
+    free(returnType);
+    return valid;
+}
+
+static bool CNDSurfaceTraceMethodArgumentIsObject(Method method,
+                                                   unsigned index)
+{
+    char *argumentType = method ? method_copyArgumentType(method, index)
+                                : NULL;
+    const char *type = CNDSurfaceTraceSkipTypeQualifiers(argumentType);
+    bool valid = type && *type == '@';
+    free(argumentType);
+    return valid;
+}
+
+static bool CNDSurfaceTraceMethodArgumentContains(Method method,
+                                                   unsigned index,
+                                                   const char *token)
+{
+    char *argumentType = method ? method_copyArgumentType(method, index)
+                                : NULL;
+    bool valid = argumentType && token && strstr(argumentType, token);
+    free(argumentType);
+    return valid;
+}
+
+static bool CNDSurfaceTraceHookFolderClassMethod(
+    const char *selectorName, IMP replacement, IMP *originalOut,
+    bool renderer)
+{
+    const char *className = "SBFolderIconImageCache";
+    Class cls = objc_getClass(className);
+    Class metaclass = cls ? object_getClass(cls) : Nil;
+    SEL selector = sel_registerName(selectorName);
+    Method method = cls ? class_getClassMethod(cls, selector) : NULL;
+    unsigned expectedArguments = renderer ? 7U : 4U;
+    bool abiOK = method && metaclass &&
+        method_getNumberOfArguments(method) == expectedArguments &&
+        CNDSurfaceTraceMethodReturnsObject(method) &&
+        CNDSurfaceTraceMethodArgumentContains(method, 2U, "CGSize") &&
+        CNDSurfaceTraceMethodArgumentIsObject(method, 3U);
+    if (abiOK && renderer) {
+        abiOK = CNDSurfaceTraceMethodArgumentContains(
+                    method, 4U, "SBIconImageInfo") &&
+            CNDSurfaceTraceMethodArgumentIsObject(method, 5U) &&
+            CNDSurfaceTraceMethodArgumentContains(method, 6U, "^Q");
+    }
+    const char *types = method ? method_getTypeEncoding(method) : NULL;
+    if (!abiOK) {
+        CNDSurfaceTraceLog(
+            "[CND_SURFACE] class-hook class=%s selector=%s ok=0 "
+            "reason=abi arguments=%u expected=%u types=%s\n",
+            className, selectorName,
+            method ? method_getNumberOfArguments(method) : 0U,
+            expectedArguments, types ?: "-");
+        return false;
+    }
+    IMP original = method_getImplementation(method);
+    if (!original) return false;
+    if (!class_addMethod(metaclass, selector, replacement, types)) {
+        method_setImplementation(method, replacement);
+    }
+    IMP observed = class_getMethodImplementation(metaclass, selector);
+    if (originalOut) *originalOut = original;
+    bool ok = observed == replacement;
+    CNDSurfaceTraceLog(
+        "[CND_SURFACE] class-hook class=%s selector=%s ok=%d "
+        "original=%p replacement=%p observed=%p types=%s\n",
+        className, selectorName, ok ? 1 : 0, original, replacement,
+        observed, types ?: "-");
     return ok;
 }
 
@@ -1513,6 +1798,15 @@ static void CNDSurfaceTraceStart(void)
             "SBFolderIconImageCache", "gridCellImageForIcon:imageAppearance:",
             (IMP)CNDSurfaceTraceFolderGridImage,
             (IMP *)&gCNDOriginalFolderGridImage);
+        ok &= CNDSurfaceTraceHookFolderClassMethod(
+            "gridCellImageOfSize:forIcon:iconImageInfo:imageAppearance:"
+            "imageAttributes:",
+            (IMP)CNDSurfaceTraceFolderGridRenderer,
+            (IMP *)&gCNDOriginalFolderGridRenderer, true);
+        ok &= CNDSurfaceTraceHookFolderClassMethod(
+            "gridCellImageOfSize:forIconImage:",
+            (IMP)CNDSurfaceTraceFolderGridCompositor,
+            (IMP *)&gCNDOriginalFolderGridCompositor, false);
         optionalHooks += CNDSurfaceTraceHook(
             "SBFolderIcon", "reloadIconImage",
             (IMP)CNDSurfaceTraceFolderIconReloadImage,

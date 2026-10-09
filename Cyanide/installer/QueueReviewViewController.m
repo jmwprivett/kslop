@@ -6,11 +6,13 @@
 #import "QueueReviewViewController.h"
 #import "PackageQueue.h"
 #import "PackageCatalog.h"
+#import "CNDQueuedActionCatalog.h"
 #import "InstallProgressViewController.h"
 #import "../LogTextView.h"
 
 typedef NS_ENUM(NSInteger, QueueReviewSection) {
-    QueueReviewSectionInstall = 0,
+    QueueReviewSectionStandalone = 0,
+    QueueReviewSectionInstall,
     QueueReviewSectionUninstall,
     QueueReviewSectionReApply,
     QueueReviewSectionCount,
@@ -43,7 +45,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 
     self.emptyLabel = [[UILabel alloc] init];
     self.emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.emptyLabel.text = @"No pending changes\nQueue packages from the Installer tab";
+    self.emptyLabel.text = @"No pending changes\nQueue packages or system actions to begin";
     self.emptyLabel.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightMedium];
     self.emptyLabel.textColor = UIColor.tertiaryLabelColor;
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
@@ -132,15 +134,19 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 - (void)refreshUI
 {
     [self.tableView reloadData];
-    [self updateHomeBarWarningHeader];
+    [self updateSharedRespringHeader];
     NSInteger count = [PackageQueue sharedQueue].pendingCount;
     self.emptyLabel.hidden = (count > 0);
     self.tableView.hidden = (count == 0);
     self.confirmButton.enabled = (count > 0);
-    self.clearButton.enabled = (count > 0);
+    CNDQueuedTransaction *transaction =
+        [PackageQueue sharedQueue].durableTransaction;
+    self.clearButton.enabled = [PackageQueue sharedQueue].canClear;
 
     NSString *confirmTitle;
-    if (count == 1) {
+    if (transaction.preRespringSpringBoardPID > 1) {
+        confirmTitle = @"Continue After Respring";
+    } else if (count == 1) {
         confirmTitle = @"Confirm 1 Change";
     } else if (count > 1) {
         confirmTitle = [NSString stringWithFormat:@"Confirm %ld Changes", (long)count];
@@ -152,24 +158,21 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     self.confirmButton.configuration = cfg;
 }
 
-- (BOOL)packageRequiresExclusiveRespringEdit:(Package *)pkg
+- (BOOL)queueRequiresSharedRespring
 {
-    return pkg.kind == PackageInstallKindHideHomeBar ||
-           pkg.kind == PackageInstallKindFontChanger;
+    CNDQueuedTransaction *transaction =
+        [PackageQueue sharedQueue].durableTransaction;
+    if (!transaction) return NO;
+    if (transaction.preRespringSpringBoardPID > 1 ||
+        transaction.state == CNDQueuedTransactionStateAwaitingRespring ||
+        CNDQueuedActionsRequireRespring(transaction.actions)) return YES;
+    for (CNDQueuedAction *action in transaction.actions) {
+        if (action.phase != CNDQueuedActionPhaseAutomatic) return YES;
+    }
+    return NO;
 }
 
-- (Package *)queuedExclusiveRespringEditPackage
-{
-    for (Package *pkg in [PackageQueue sharedQueue].queuedInstalls) {
-        if ([self packageRequiresExclusiveRespringEdit:pkg]) return pkg;
-    }
-    for (Package *pkg in [PackageQueue sharedQueue].queuedUninstalls) {
-        if ([self packageRequiresExclusiveRespringEdit:pkg]) return pkg;
-    }
-    return nil;
-}
-
-- (UIView *)exclusiveWarningHeaderView
+- (UIView *)sharedRespringHeaderView
 {
     CGFloat width = self.tableView.bounds.size.width;
     if (width <= 0.0) width = self.view.bounds.size.width;
@@ -180,30 +183,28 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 
     UIView *card = [[UIView alloc] init];
     card.translatesAutoresizingMaskIntoConstraints = NO;
-    card.backgroundColor = [UIColor.systemOrangeColor colorWithAlphaComponent:0.14];
+    card.backgroundColor = [UIColor.systemIndigoColor colorWithAlphaComponent:0.12];
     card.layer.cornerRadius = 16.0;
     card.layer.borderWidth = 1.0;
-    card.layer.borderColor = [UIColor.systemOrangeColor colorWithAlphaComponent:0.28].CGColor;
+    card.layer.borderColor = [UIColor.systemIndigoColor colorWithAlphaComponent:0.25].CGColor;
     [container addSubview:card];
 
-    UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"exclamationmark.triangle.fill"]];
+    UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath.circle.fill"]];
     icon.translatesAutoresizingMaskIntoConstraints = NO;
-    icon.tintColor = UIColor.systemOrangeColor;
+    icon.tintColor = UIColor.systemIndigoColor;
     icon.contentMode = UIViewContentModeScaleAspectFit;
     [card addSubview:icon];
 
     UILabel *title = [[UILabel alloc] init];
     title.translatesAutoresizingMaskIntoConstraints = NO;
-    Package *exclusive = [self queuedExclusiveRespringEditPackage];
-    NSString *name = exclusive.name ?: @"This system edit";
-    title.text = [NSString stringWithFormat:@"%@ must run alone", name];
+    title.text = @"One shared respring";
     title.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightBold];
     title.textColor = UIColor.labelColor;
     [card addSubview:title];
 
     UILabel *body = [[UILabel alloc] init];
     body.translatesAutoresizingMaskIntoConstraints = NO;
-    body.text = [NSString stringWithFormat:@"%@ edits system files and then needs a respring. Confirm only this item, respring, then queue your other tweaks.", name];
+    body.text = @"Persistent icon and system-file changes run first. Cyanide then resprings once and resumes the remaining presentation actions from the saved queue.";
     body.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightRegular];
     body.textColor = UIColor.secondaryLabelColor;
     body.numberOfLines = 0;
@@ -237,13 +238,13 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     return container;
 }
 
-- (void)updateHomeBarWarningHeader
+- (void)updateSharedRespringHeader
 {
-    if (![self queueIncludesExclusiveRespringEdit]) {
+    if (![self queueRequiresSharedRespring]) {
         self.tableView.tableHeaderView = nil;
         return;
     }
-    self.tableView.tableHeaderView = [self exclusiveWarningHeaderView];
+    self.tableView.tableHeaderView = [self sharedRespringHeaderView];
 }
 
 - (void)queueChanged:(NSNotification *)note
@@ -260,7 +261,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 
 - (NSArray<Package *> *)reApplyPackages
 {
-    if ([self queueIncludesExclusiveRespringEdit]) return @[];
+    if ([self queueRequiresSharedRespring]) return @[];
 
     PackageQueue *q = [PackageQueue sharedQueue];
     NSMutableArray<Package *> *out = [NSMutableArray array];
@@ -276,6 +277,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 {
     PackageQueue *q = [PackageQueue sharedQueue];
     switch ((QueueReviewSection)section) {
+        case QueueReviewSectionStandalone: return @[];
         case QueueReviewSectionInstall:   return q.queuedInstalls;
         case QueueReviewSectionUninstall: return q.queuedUninstalls;
         case QueueReviewSectionReApply:   return [self reApplyPackages];
@@ -284,18 +286,22 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     return @[];
 }
 
-- (BOOL)queueIncludesExclusiveRespringEdit
-{
-    return [self queuedExclusiveRespringEditPackage] != nil;
-}
-
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
+    if ((QueueReviewSection)section == QueueReviewSectionStandalone) {
+        return (NSInteger)[PackageQueue sharedQueue].queuedStandaloneActions.count;
+    }
     return (NSInteger)[self packagesForSection:section].count;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
+    if ((QueueReviewSection)section == QueueReviewSectionStandalone) {
+        NSInteger count = (NSInteger)[PackageQueue sharedQueue].queuedStandaloneActions.count;
+        return count > 0
+            ? [NSString stringWithFormat:@"System Actions  ·  %ld", (long)count]
+            : nil;
+    }
     NSArray<Package *> *list = [self packagesForSection:section];
     if (list.count == 0) return nil;
     PackageInstallKind commonKind = list.firstObject.kind;
@@ -308,6 +314,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     }
     NSString *label;
     switch ((QueueReviewSection)section) {
+        case QueueReviewSectionStandalone: return nil;
         case QueueReviewSectionInstall:
             if (allSameKind && commonKind == PackageInstallKindOTA) {
                 label = @"Disable";
@@ -317,7 +324,9 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                 label = @"Silence";
             } else if (allSameKind && commonKind == PackageInstallKindHideHomeBar) {
                 label = @"Hide";
-            } else if (allSameKind && commonKind == PackageInstallKindFontChanger) {
+            } else if (allSameKind && (commonKind == PackageInstallKindFontChanger ||
+                                       commonKind == PackageInstallKindControlCenterTheming ||
+                                       commonKind == PackageInstallKindLockscreenGlyphs)) {
                 label = @"Apply";
             } else {
                 label = @"Activate";
@@ -332,7 +341,9 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                 label = @"Restore";
             } else if (allSameKind && commonKind == PackageInstallKindHideHomeBar) {
                 label = @"Restore";
-            } else if (allSameKind && commonKind == PackageInstallKindFontChanger) {
+            } else if (allSameKind && (commonKind == PackageInstallKindFontChanger ||
+                                       commonKind == PackageInstallKindControlCenterTheming ||
+                                       commonKind == PackageInstallKindLockscreenGlyphs)) {
                 label = @"Restore";
             } else {
                 label = @"Deactivate";
@@ -347,9 +358,13 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section
 {
     switch ((QueueReviewSection)section) {
+        case QueueReviewSectionStandalone:
+            return [PackageQueue sharedQueue].queuedStandaloneActions.count > 0
+                ? @"SnowBoard Apply/Restore, Transparency Fix, SpringBoard Fixes, and Spotlight Fixes are independent durable queue actions. Conflicting desired states replace one another."
+                : nil;
         case QueueReviewSectionInstall:
-            if (![self queueIncludesExclusiveRespringEdit]) return nil;
-            return @"This system-file edit must run by itself and needs a respring before other tweaks are applied.";
+            if (![self queueRequiresSharedRespring]) return nil;
+            return @"System-file changes run before the queue's single shared respring.";
         case QueueReviewSectionReApply:
             if ([self reApplyPackages].count == 0) return nil;
             return @"These are already installed, not new pending changes. Confirming re-runs the chain so RemoteCall-backed tweaks come back after a force-quit. To stop one from running, deactivate it from the Installer tab, or use Reset All Packages in Settings → Quick Actions.";
@@ -363,6 +378,65 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"QueueRow"];
     if (!cell) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"QueueRow"];
+    }
+    if ((QueueReviewSection)indexPath.section == QueueReviewSectionStandalone) {
+        NSArray<CNDQueuedAction *> *actions =
+            [PackageQueue sharedQueue].queuedStandaloneActions;
+        if (indexPath.row >= (NSInteger)actions.count) return cell;
+        CNDQueuedAction *action = actions[indexPath.row];
+        if ([action.kind isEqualToString:CNDQueuedActionKindSnowBoardRemix]) {
+            BOOL apply = [action.operation isEqualToString:
+                CNDQueuedActionOperationApplyTheme];
+            cell.textLabel.text = apply
+                ? @"Apply SnowBoard Theme" : @"Restore All Icons";
+            cell.detailTextLabel.text = apply
+                ? @"Persistent icon publication before respring"
+                : @"Persistent stock restoration before respring";
+            cell.imageView.image = [UIImage systemImageNamed:
+                apply ? @"square.stack.3d.up.fill" : @"arrow.uturn.backward.circle.fill"];
+            cell.detailTextLabel.textColor = apply
+                ? UIColor.systemGreenColor : UIColor.systemRedColor;
+        } else if ([action.kind isEqualToString:
+                       CNDQueuedActionKindTransparencyFix]) {
+            BOOL apply = [action.operation isEqualToString:
+                CNDQueuedActionOperationApplyTransparencyFix];
+            cell.textLabel.text = apply
+                ? @"Apply Transparency Fix"
+                : @"Restore Transparency Fix";
+            cell.detailTextLabel.text = apply
+                ? @"Adaptive · guarded per-boot shared-cache redirect"
+                : @"Adaptive · restore original shared-cache entry";
+            cell.imageView.image = [UIImage systemImageNamed:
+                apply ? @"circle.lefthalf.filled" : @"arrow.uturn.backward.circle.fill"];
+            cell.detailTextLabel.textColor = apply
+                ? UIColor.systemGreenColor : UIColor.systemRedColor;
+        } else if ([action.kind isEqualToString:
+                       CNDQueuedActionKindSpringBoardFixes]) {
+            BOOL transparency = [action.parameters[
+                CNDQueuedActionParameterTransparencyEnabled] boolValue];
+            cell.textLabel.text = @"SpringBoard Fixes";
+            cell.detailTextLabel.text = transparency
+                ? @"Adaptive · transparency + Clock/Calendar repair"
+                : @"Invalid snapshot · transparency disabled";
+            cell.imageView.image = [UIImage systemImageNamed:@"iphone"];
+            cell.detailTextLabel.textColor = UIColor.systemIndigoColor;
+        } else {
+            BOOL transparency = [action.parameters[
+                CNDQueuedActionParameterTransparencyEnabled] boolValue];
+            cell.textLabel.text = @"Spotlight Fixes";
+            cell.detailTextLabel.text = transparency
+                ? @"Adaptive · assertion + presentation repair"
+                : @"Adaptive · Spotlight lifetime assertion";
+            cell.imageView.image = [UIImage systemImageNamed:@"magnifyingglass"];
+            cell.detailTextLabel.textColor = UIColor.systemIndigoColor;
+        }
+        cell.textLabel.font = [UIFont systemFontOfSize:17.0 weight:UIFontWeightSemibold];
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:12.0];
+        cell.imageView.tintColor = self.view.tintColor;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.accessoryView = nil;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        return cell;
     }
     NSArray<Package *> *packages = [self packagesForSection:indexPath.section];
     if (indexPath.row >= (NSInteger)packages.count) {
@@ -385,6 +459,8 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 
     QueueReviewSection s = (QueueReviewSection)indexPath.section;
     switch (s) {
+        case QueueReviewSectionStandalone:
+            break;
         case QueueReviewSectionInstall:
             switch (pkg.kind) {
                 case PackageInstallKindOTA:
@@ -400,11 +476,19 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                     cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
                     break;
                 case PackageInstallKindHideHomeBar:
-                    cell.detailTextLabel.text = @"Runs alone; respring required";
+                    cell.detailTextLabel.text = @"Before shared respring";
                     cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
                     break;
                 case PackageInstallKindFontChanger:
-                    cell.detailTextLabel.text = @"Pending font apply; respring required";
+                    cell.detailTextLabel.text = @"Pending font apply before respring";
+                    cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
+                    break;
+                case PackageInstallKindControlCenterTheming:
+                    cell.detailTextLabel.text = @"Pending CC apply before respring";
+                    cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
+                    break;
+                case PackageInstallKindLockscreenGlyphs:
+                    cell.detailTextLabel.text = @"Pending glyph apply before respring";
                     cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
                     break;
                 default:
@@ -428,11 +512,19 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
                 case PackageInstallKindHideHomeBar:
-                    cell.detailTextLabel.text = @"Pending respring restore";
+                    cell.detailTextLabel.text = @"Pending restore before respring";
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
                 case PackageInstallKindFontChanger:
-                    cell.detailTextLabel.text = @"Pending font restore; respring required";
+                    cell.detailTextLabel.text = @"Pending font restore before respring";
+                    cell.detailTextLabel.textColor = UIColor.systemGreenColor;
+                    break;
+                case PackageInstallKindControlCenterTheming:
+                    cell.detailTextLabel.text = @"Pending CC restore before respring";
+                    cell.detailTextLabel.textColor = UIColor.systemGreenColor;
+                    break;
+                case PackageInstallKindLockscreenGlyphs:
+                    cell.detailTextLabel.text = @"Pending glyph restore before respring";
                     cell.detailTextLabel.textColor = UIColor.systemGreenColor;
                     break;
                 default:
@@ -463,10 +555,33 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
     trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 {
+    CNDQueuedTransaction *transaction =
+        [PackageQueue sharedQueue].durableTransaction;
+    if (transaction &&
+        transaction.state != CNDQueuedTransactionStateCollecting) return nil;
     // Swipe-to-remove only applies to the pending queue rows. "Will Re-Apply"
     // is informational — to drop one, the user uninstalls it from the
     // Installer tab or runs Reset All Packages.
     QueueReviewSection s = (QueueReviewSection)indexPath.section;
+    if (s == QueueReviewSectionStandalone) {
+        NSArray<CNDQueuedAction *> *actions =
+            [PackageQueue sharedQueue].queuedStandaloneActions;
+        if (indexPath.row >= (NSInteger)actions.count) return nil;
+        CNDQueuedAction *queuedAction = actions[indexPath.row];
+        NSString *conflictKey = CNDQueuedActionConflictKey(queuedAction);
+        UIContextualAction *remove = [UIContextualAction
+            contextualActionWithStyle:UIContextualActionStyleDestructive
+                                title:@"Remove"
+                              handler:^(UIContextualAction *action,
+                                        __kindof UIView *sourceView,
+                                        void (^completionHandler)(BOOL)) {
+            (void)action; (void)sourceView;
+            BOOL removed = [[PackageQueue sharedQueue]
+                removeStandaloneActionForConflictKey:conflictKey];
+            completionHandler(removed);
+        }];
+        return [UISwipeActionsConfiguration configurationWithActions:@[remove]];
+    }
     if (s != QueueReviewSectionInstall && s != QueueReviewSectionUninstall) return nil;
 
     NSArray<Package *> *packages = [self packagesForSection:indexPath.section];
@@ -488,42 +603,9 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 {
     if ([PackageQueue sharedQueue].pendingCount == 0) return;
     NSInteger count = [PackageQueue sharedQueue].pendingCount;
-    Package *exclusivePackage = nil;
-    BOOL exclusiveRestore = NO;
-    for (Package *pkg in [PackageQueue sharedQueue].queuedInstalls) {
-        if ([self packageRequiresExclusiveRespringEdit:pkg]) {
-            exclusivePackage = pkg;
-            break;
-        }
-    }
-    if (!exclusivePackage) {
-        for (Package *pkg in [PackageQueue sharedQueue].queuedUninstalls) {
-            if ([self packageRequiresExclusiveRespringEdit:pkg]) {
-                exclusivePackage = pkg;
-                exclusiveRestore = YES;
-                break;
-            }
-        }
-    }
-    if (exclusivePackage && count > 1) {
-        UIAlertController *ac = [UIAlertController
-            alertControllerWithTitle:[NSString stringWithFormat:@"Run %@ Alone", exclusivePackage.name]
-                             message:[NSString stringWithFormat:@"%@ edits system files and needs a respring after it applies. Remove the other pending changes, run it by itself, then apply other tweaks after the respring.", exclusivePackage.name]
-                      preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"OK"
-                                               style:UIAlertActionStyleDefault
-                                             handler:nil]];
-        [self presentViewController:ac animated:YES completion:nil];
-        return;
-    }
 
     InstallProgressViewController *vc = [[InstallProgressViewController alloc] init];
-    vc.promptsForHideHomeBarRespring = exclusivePackage.kind == PackageInstallKindHideHomeBar;
-    vc.promptsForSystemEditRespring = exclusivePackage.kind == PackageInstallKindFontChanger;
-    vc.systemEditRespringTitle = exclusiveRestore ? @"Respring to Restore Fonts?" : @"Respring to Apply Fonts?";
-    vc.systemEditRespringMessage = exclusiveRestore
-        ? @"The stock font backups were restored, but SpringBoard needs to restart before the font cache refreshes."
-        : @"The font change was written, but SpringBoard needs to restart before the font cache refreshes.";
+    vc.expectsPackageQueueCompletion = YES;
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationAutomatic;
     [self presentViewController:nav animated:YES completion:^{
@@ -535,8 +617,15 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 - (void)didTapClear
 {
     if ([PackageQueue sharedQueue].pendingCount == 0) return;
-        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Clear Queue?"
-                                                                message:@"Discard all pending activation / deactivation changes."
+    CNDQueuedTransaction *transaction =
+        [PackageQueue sharedQueue].durableTransaction;
+    BOOL executionStarted = transaction &&
+        transaction.state != CNDQueuedTransactionStateCollecting;
+    NSString *message = executionStarted
+        ? @"Discard the remaining saved plan? Changes that already completed will not be undone."
+        : @"Discard all pending package and system changes.";
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Clear Queue?"
+                                                                message:message
                                                          preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [ac addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_) {

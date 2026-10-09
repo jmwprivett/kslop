@@ -1642,7 +1642,21 @@ static bool CNDRefreshProbeTargetIconReload(id manager, id model,
     if (refreshImageCache) {
         id imageCache = CNDRefreshProbeNoArgument(manager, "iconImageCache");
         SEL update = sel_registerName("updateImageForIcon:");
-        if (imageCache && [imageCache respondsToSelector:update]) {
+        Method updateMethod = imageCache
+            ? class_getInstanceMethod([imageCache class], update) : NULL;
+        const char *updateTypes = updateMethod
+            ? method_getTypeEncoding(updateMethod) : NULL;
+        CNDRefreshProbeLog(
+            "[CND_REFRESH] target cache-refresh-method cache=%p/%s "
+            "owner=%s types=%s main=%d\n",
+            imageCache,
+            imageCache ? class_getName([imageCache class]) : "-",
+            updateMethod
+                ? class_getName(CNDRefreshProbeMethodOwner(
+                    [imageCache class], update)) : "-",
+            updateTypes ?: "-", [NSThread isMainThread] ? 1 : 0);
+        if (imageCache && [imageCache respondsToSelector:update] &&
+            updateTypes && !strcmp(updateTypes, "v24@0:8@16")) {
             ((void (*)(id, SEL, id))objc_msgSend)(imageCache, update, icon);
             cacheRefreshInvoked = true;
         }

@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Exact-build, observation-only pmap translation and shared physical-byte proof",
+  "mode": "observation-only",
+  "runtimeVerified": true,
+  "mutationCounts": {
+    "kernelObservationStage": 0,
+    "targetProcesses": 0
+  },
+  "target": {
+    "productVersion": "26.0",
+    "productBuildVersion": "23A341",
+    "productType": "iPhone17,2",
+    "deviceClass": "d94ap",
+    "architecture": "arm64e"
+  },
+  "kernel": {
+    "sourceIPSW": "iPhone17,2_26.0_23A341_Restore.ipsw",
+    "fileName": "kernelcache.release.iPhone17,2",
+    "uuid": "76BB58BF-911D-07E4-D681-DCE7F2DDA3CE",
+    "sha256": "7e66ddbb70b626c4502c3036620b59829b744c54712a74ca50f4a0c004c89f8c",
+    "version": "Darwin Kernel Version 25.0.0: xnu-12377.2.8~1/RELEASE_ARM64_T8140",
+    "unslidBase": "0xfffffff007004000",
+    "binaryDerivation": "XPF against the exact extracted 23A341 kernelcache",
+    "layoutReference": "Apple xnu-12377.1.9 arm64 SPTM pmap sources; every consumed live field is guarded against the exact expected value"
+  },
+  "symbols": {
+    "gVirtBase": "0xfffffff007c38c68",
+    "gPhysBase": "0xfffffff007c69dc0",
+    "gPhysSize": "0xfffffff007c69dc8",
+    "physmapRangeState": "0xfffffff007cace28",
+    "physmapRangeCountPointer": "0xfffffff007cace30",
+    "physmapRangeRecordsPointer": "0xfffffff007cace38",
+    "cpuTTEP": "0xfffffff00b2a3660",
+    "vmPageArrayBeginningAddress": "0xfffffff007c14590",
+    "vmPageArrayEndingAddress": "0xfffffff007c14588",
+    "vmFirstPhysicalPageNumber": "0xfffffff007c14580",
+    "vmFirstPhysicalAddress": "0xfffffff007c38c40",
+    "vmLastPhysicalAddress": "0xfffffff007c38c48"
+  },
+  "structureOffsets": {
+    "vmMapPmap": "0x40",
+    "pmapTTE": "0x0",
+    "pmapTTEP": "0x8",
+    "pmapMinimum": "0x10",
+    "pmapMaximum": "0x18",
+    "pmapPageTableAttributes": "0x20",
+    "pageTableAttributesLevelInfo": "0x0",
+    "pageTableAttributesRootLevel": "0x40",
+    "pageTableAttributesMaximumLevel": "0x48",
+    "pageTableAttributesPageSize": "0x58",
+    "pageTableAttributesPageShift": "0x60",
+    "pageTableAttributesGeometryID": "0x68",
+    "pageTableAttributesValidAddressMask": "0x70",
+    "pageTableLevelInfoSize": "0x38",
+    "physmapRangeRecordSize": "0x18",
+    "physmapRangeMaximumAcceptedCount": 64,
+    "physmapRangeLengthEncoding": "uint32 pageCount << 14"
+  },
+  "geometry": {
+    "pageSize": "0x4000",
+    "pageShift": 14,
+    "subpageRootAlignment": "0x80",
+    "rootLevel": 1,
+    "maximumLevel": 3,
+    "validUserAddressMask": "0x7fffffffff",
+    "translationTableAddressMask": "0x0000fffffffff000",
+    "levels": {
+      "1": {
+        "size": "0x1000000000",
+        "offsetMask": "0xfffffffff",
+        "shift": 36,
+        "indexMask": "0x7ff000000000",
+        "validMask": "0x1",
+        "typeMask": "0x2",
+        "blockType": "0x0"
+      },
+      "2": {
+        "size": "0x2000000",
+        "offsetMask": "0x1ffffff",
+        "shift": 25,
+        "indexMask": "0xffe000000",
+        "validMask": "0x1",
+        "typeMask": "0x2",
+        "blockType": "0x0"
+      },
+      "3": {
+        "size": "0x4000",
+        "offsetMask": "0x3fff",
+        "shift": 14,
+        "indexMask": "0x1ffc000",
+        "validMask": "0x3",
+        "typeMask": "0x2",
+        "blockType": "0x2"
+      }
+    }
+  },
+  "guard": {
+    "subcacheFileOffset": "0x44aaef0",
+    "guardFileOffset": "0x44aae5c",
+    "length": 188,
+    "instructionOffset": 148,
+    "originalInstructionWord": "0x1a9f17f4",
+    "sha256": "542063d6c8ea82afbe734ace1895ba0f2b7ab15160c6053176604644741f20d5"
+  },
+  "successRequirements": [
+    "exact product, build, live kernel base, and kernel UUID",
+    "exact live page-table geometry",
+    "stable SpringBoard and Spotlight pmap translations",
+    "identical target physical address and 16 KiB physical frame",
+    "exact original instruction word and 188-byte guard SHA-256",
+    "identical translations when repeated after the physical byte read"
+  ],
+  "runtimeProof": {
+    "device": "iPinky Max",
+    "observedAt": "2026-10-07T18:34:16-04:00",
+    "reportSchemaVersion": 2,
+    "verdict": "confirmed-shared-physical-frame-and-bytes",
+    "kernelRuntimeBase": "0xfffffff03fd00000",
+    "kernelSlide": "0x38cfc000",
+    "dynamicPhysmapRangeCount": 16,
+    "targetRuntimeAddress": "0x1bfadeef0",
+    "physicalAddress": "0x000001009aceeef0",
+    "physicalFrame": "0x000001009acec000",
+    "frameKernelVirtualAddress": "0xfffffff0d4510000",
+    "springBoardPID": 13013,
+    "springBoardRootPhysical": "0x000001010ee84700",
+    "springBoardPmap": "0xffffffe67610df00",
+    "spotlightPID": 13034,
+    "spotlightRootPhysical": "0x000001010ee87c80",
+    "spotlightPmap": "0xffffffe676127a80",
+    "sharedLeafTable": "0xfffffff05e408000",
+    "sharedLeafEntryAddress": "0xfffffff05e40b5b8",
+    "sharedLeafEntryValue": "0x002001009acec6c3",
+    "instructionWord": "0x1a9f17f4",
+    "guardSHA256": "542063d6c8ea82afbe734ace1895ba0f2b7ab15160c6053176604644741f20d5",
+    "postReadTranslationStable": true,
+    "kernelObservationStageMutationCount": 0,
+    "targetProcessMutationCount": 0
+  }
+}

@@ -19,6 +19,9 @@
 @property (nonatomic, assign) BOOL completed;
 @property (nonatomic, assign) BOOL didPromptForHideHomeBarRespring;
 @property (nonatomic, assign) BOOL didPromptForSystemEditRespring;
+@property (nonatomic, assign) NSUInteger respringCountdownGeneration;
+@property (nonatomic, assign) BOOL respringCountdownActive;
+@property (nonatomic, assign) BOOL respringRetryAvailable;
 @end
 
 @implementation InstallProgressViewController
@@ -123,9 +126,18 @@
                                                             action:@selector(didTapDone)];
     self.navigationItem.rightBarButtonItem = self.hideOrDoneButton;
 
+    NSString *completionNotification = self.expectsPackageQueueCompletion
+        ? PackageQueueExecutionDidCompleteNotification
+        : kSettingsActionsDidCompleteNotification;
+    id completionObject = self.expectsPackageQueueCompletion
+        ? [PackageQueue sharedQueue] : nil;
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(didReceiveCompleteNotification:)
-                                                 name:kSettingsActionsDidCompleteNotification
+                                                 name:completionNotification
+                                               object:completionObject];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(didReceiveReadyForRespringNotification:)
+                                                 name:PackageQueueReadyForRespringNotification
                                                object:nil];
 }
 
@@ -141,7 +153,7 @@
     [self.spinner stopAnimating];
     self.spinner.hidden = YES;
     NSNumber *successValue = note.userInfo[kSettingsActionsDidCompleteSuccessKey];
-    BOOL success = successValue ? successValue.boolValue : YES;
+    BOOL success = successValue != nil ? successValue.boolValue : YES;
     NSString *message = note.userInfo[kSettingsActionsDidCompleteMessageKey];
     self.statusLabel.text = message.length
         ? message
@@ -160,6 +172,61 @@
     if (success && self.promptsForSystemEditRespring) {
         [self scheduleSystemEditRespringPrompt];
     }
+}
+
+- (void)didReceiveReadyForRespringNotification:(NSNotification *)note
+{
+    (void)note;
+    if (self.completed || self.respringCountdownActive) return;
+    self.respringCountdownActive = YES;
+    self.modalInPresentation = YES;
+    self.hideOrDoneButton.enabled = NO;
+    [self.spinner startAnimating];
+    NSUInteger generation = ++self.respringCountdownGeneration;
+    [self runRespringCountdownValue:3 generation:generation];
+}
+
+- (void)runRespringCountdownValue:(NSInteger)value
+                        generation:(NSUInteger)generation
+{
+    if (!self.respringCountdownActive ||
+        generation != self.respringCountdownGeneration) return;
+    if (value <= 0) {
+        self.statusLabel.text = @"Respringing now…";
+        __weak typeof(self) weakSelf = self;
+        settings_begin_system_edit_respring_with_completion(
+            self, ^(BOOL started, NSString *message) {
+                __strong typeof(weakSelf) self = weakSelf;
+                if (!self || started) return;
+                self.respringCountdownActive = NO;
+                self.respringRetryAvailable = YES;
+                self.respringCountdownGeneration++;
+                self.modalInPresentation = NO;
+                self.hideOrDoneButton.enabled = YES;
+                [self.spinner stopAnimating];
+                self.spinner.hidden = YES;
+                self.title = @"Respring Pending";
+                self.statusLabel.text = message.length
+                    ? message
+                    : @"Respring did not start. Tap Retry to continue the saved queue.";
+                self.statusLabel.textColor =
+                    [UIColor colorWithRed:1.0 green:0.55 blue:0.25 alpha:1.0];
+                self.hideOrDoneButton.title = @"Retry";
+            });
+        return;
+    }
+    self.title = @"Respring Required";
+    self.statusLabel.text = [NSString stringWithFormat:
+        @"Pre-respring changes saved. Respringing in %ld…", (long)value];
+    self.statusLabel.font =
+        [UIFont systemFontOfSize:13.5 weight:UIFontWeightSemibold];
+    self.statusLabel.textColor =
+        [UIColor colorWithRed:0.55 green:0.65 blue:1.0 alpha:1.0];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                 (int64_t)(NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [self runRespringCountdownValue:value - 1 generation:generation];
+    });
 }
 
 - (void)scheduleHideHomeBarRespringPrompt
@@ -219,6 +286,17 @@
 
 - (void)didTapDone
 {
+    if (self.respringRetryAvailable && !self.respringCountdownActive) {
+        self.respringRetryAvailable = NO;
+        self.respringCountdownActive = YES;
+        self.modalInPresentation = YES;
+        self.hideOrDoneButton.enabled = NO;
+        [self.spinner startAnimating];
+        self.spinner.hidden = NO;
+        NSUInteger generation = ++self.respringCountdownGeneration;
+        [self runRespringCountdownValue:3 generation:generation];
+        return;
+    }
     UIViewController *presenter = self.presentingViewController;
     UINavigationController *nav = [presenter isKindOfClass:UINavigationController.class]
         ? (UINavigationController *)presenter

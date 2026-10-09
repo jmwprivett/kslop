@@ -23,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PROVIDER_SOURCE = REPO_ROOT / "scripts/lab/cnd_provide_tfp0.c"
 PROBE_SOURCE = REPO_ROOT / "scripts/lab/cnd_lab_krw_probe.c"
 PROTOCOL_DIR = REPO_ROOT / "Cyanide/kexploit"
+TFP0_ENTITLEMENTS = REPO_ROOT / "scripts/lab/cnd_tfp0_entitlements.plist"
 BUILD_DIR = REPO_ROOT / "build/lab-vphone-krw"
 MARKER_PATH = "/var/tmp/cyanide-enable-libkrw-lab"
 LOG_PATH = "/var/tmp/cnd-provide-tfp0.log"
@@ -33,7 +34,45 @@ APP_HOME_PATTERN = re.compile(
 )
 
 
-def build_binary(source: Path, output_name: str) -> Path:
+def canonical_kernel_address(value: str) -> str:
+    if not re.fullmatch(r"0x[0-9A-Fa-f]{16}", value):
+        raise LabError("kernel address must be a canonical 16-digit hex address")
+    address = int(value, 16)
+    if address & 0x3fff or \
+            address & 0xffff000000000000 != 0xffff000000000000:
+        raise LabError(
+            "kernel address must be a canonical 16K-aligned kernel address"
+        )
+    return f"0x{address:016x}"
+
+
+def debugger_kernel_address(port: int) -> tuple[str, str]:
+    if port < 6000 or port > 65535:
+        raise LabError("kernel debug port must be between 6000 and 65535")
+    result = run([
+        "xcrun", "lldb", "--batch",
+        "-o", "platform select remote-ios",
+        "-o", f"gdb-remote 127.0.0.1:{port}",
+        "-o", "register read pc",
+        "-o", "process detach",
+    ])
+    report = (result.stdout + result.stderr).decode("utf-8", "replace")
+    addresses = re.findall(r"^Load Address:\s*(0x[0-9A-Fa-f]{16})\s*$",
+                           report, re.MULTILINE)
+    uuids = re.findall(
+        r"^Kernel UUID:\s*([0-9A-Fa-f-]{36})\s*$",
+        report, re.MULTILINE,
+    )
+    if len(addresses) != 1 or len(uuids) != 1 or \
+            "Process 1 detached" not in report:
+        raise LabError(
+            "kernel debugger did not return one load address/UUID and detach"
+        )
+    return canonical_kernel_address(addresses[0]), uuids[0].upper()
+
+
+def build_binary(source: Path, output_name: str,
+                 entitlements: Path | None = None) -> Path:
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     output = BUILD_DIR / output_name
     # The VM's jailbreak libkrw dylibs are arm64, not arm64e. Inspection
@@ -44,13 +83,17 @@ def build_binary(source: Path, output_name: str) -> Path:
         "-Wall", "-Wextra", "-Werror", "-I", str(PROTOCOL_DIR),
         str(source), "-o", str(output),
     ])
-    run(["codesign", "-s", "-", "--force", str(output)])
+    sign = ["codesign", "-s", "-", "--force"]
+    if entitlements is not None:
+        sign.extend(["--entitlements", str(entitlements)])
+    sign.append(str(output))
+    run(sign)
     return output
 
 
 def build() -> tuple[Path, Path]:
     return (
-        build_binary(PROVIDER_SOURCE, "cnd_provide_tfp0"),
+        build_binary(PROVIDER_SOURCE, "cnd_provide_tfp0", TFP0_ENTITLEMENTS),
         build_binary(PROBE_SOURCE, "cnd_lab_krw_probe"),
     )
 
@@ -120,12 +163,20 @@ def copy_binary(ssh: SSH, local: Path, stem: str) -> str:
 
 
 def run_probe(ssh: SSH, probe: str, socket_path: str,
-              process: str = "SpringBoard") -> str:
+              process: str = "SpringBoard", kcall_smoke: bool = False) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,30}", process):
         raise LabError("probe process must be one exact short process name")
     return ssh.command(
         f"{shlex.quote(probe)} {shlex.quote(socket_path)} "
-        f"{shlex.quote(process)}"
+        f"{shlex.quote(process)}" +
+        (" --kcall-smoke" if kcall_smoke else "")
+    ).strip()
+
+
+def run_kcall_smoke(ssh: SSH, probe: str, socket_path: str) -> str:
+    return ssh.command(
+        f"{shlex.quote(probe)} {shlex.quote(socket_path)} "
+        "SpringBoard --kcall-smoke-only"
     ).strip()
 
 
@@ -137,7 +188,12 @@ def stop_exact_provider(ssh: SSH, socket_path: str) -> None:
         if len(processes) != 1 or marker.get("socket") != socket_path:
             raise LabError("refusing to stop an unverified lab provider")
         pid, command = processes[0]
-        expected_suffix = f" auto {socket_path}"
+        provider_argument = marker.get("argument", "auto")
+        if provider_argument != "auto" and not re.fullmatch(
+            r"0x[0-9a-f]{16}", provider_argument
+        ):
+            raise LabError("lab provider marker argument is malformed")
+        expected_suffix = f" {provider_argument} {socket_path}"
         if not command.endswith(expected_suffix):
             raise LabError("lab provider marker/process identity mismatch")
         if marker.get("version") == "1":
@@ -170,10 +226,12 @@ def stop_exact_provider(ssh: SSH, socket_path: str) -> None:
         ssh.command(f"/iosbinpack64/bin/rm -f {shlex.quote(MARKER_PATH)}")
 
 
-def start_provider(ssh: SSH, provider: str, socket_path: str) -> int:
+def start_provider(ssh: SSH, provider: str, socket_path: str,
+                   provider_argument: str) -> int:
     ssh.command(f"/iosbinpack64/bin/rm -f {shlex.quote(LOG_PATH)}")
     output = ssh.command(
-        f"/var/jb/usr/bin/nohup {shlex.quote(provider)} auto "
+        f"/var/jb/usr/bin/nohup {shlex.quote(provider)} "
+        f"{shlex.quote(provider_argument)} "
         f"{shlex.quote(socket_path)} >{shlex.quote(LOG_PATH)} "
         "2>&1 </dev/null & echo $!"
     ).strip()
@@ -202,6 +260,15 @@ def main() -> int:
     parser.add_argument("--known-hosts", type=Path,
                         default=DEFAULT_KNOWN_HOSTS)
     parser.add_argument("--password-env", default="CND_VPHONE_ROOT_PASSWORD")
+    kernel_source = parser.add_mutually_exclusive_group()
+    kernel_source.add_argument(
+        "--kernel-address", default=None,
+        help="live 16K-aligned kernel address obtained from the VM debug stub",
+    )
+    kernel_source.add_argument(
+        "--kernel-debug-port", type=int, default=None,
+        help="attach to this local VM debug port, capture its live load address, and detach",
+    )
     args = parser.parse_args()
 
     if args.action == "build":
@@ -225,12 +292,25 @@ def main() -> int:
         )
         return 0
 
+    provider_argument = "auto"
+    if args.kernel_address is not None:
+        provider_argument = canonical_kernel_address(args.kernel_address)
+    elif args.kernel_debug_port is not None:
+        provider_argument, kernel_uuid = debugger_kernel_address(
+            args.kernel_debug_port)
+        print(
+            f"debugger kernelUUID={kernel_uuid} "
+            f"loadAddress={provider_argument}",
+            flush=True,
+        )
+
     provider_local, probe_local = build()
     provider_remote = copy_binary(
         ssh, provider_local, "cnd-provide-tfp0")
     probe_remote = copy_binary(ssh, probe_local, "cnd-lab-krw-probe")
     processes = provider_processes(ssh)
     if args.action == "enable" and processes:
+        print(run_kcall_smoke(ssh, probe_remote, socket_path))
         print(run_probe(ssh, probe_remote, socket_path))
         print(run_probe(
             ssh, probe_remote, socket_path, "iconservicesagent"
@@ -240,7 +320,9 @@ def main() -> int:
     if processes or ssh.file_kind(socket_path) == "socket" or \
             ssh.file_kind(MARKER_PATH) == "file":
         stop_exact_provider(ssh, socket_path)
-    provider_pid = start_provider(ssh, provider_remote, socket_path)
+    provider_pid = start_provider(
+        ssh, provider_remote, socket_path, provider_argument)
+    print(run_kcall_smoke(ssh, probe_remote, socket_path))
     print(run_probe(ssh, probe_remote, socket_path))
     print(run_probe(ssh, probe_remote, socket_path, "iconservicesagent"))
     print(

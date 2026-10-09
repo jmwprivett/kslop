@@ -2,6 +2,45 @@
 
 Run this build, sign, and install workflow from the repository root on a Mac paired with your device. It installs the signed `.app` directly; no IPA packaging is required.
 
+## Build, then install
+
+For the checked-in iPinky Max configuration, first build and sign a fresh
+artifact:
+
+```sh
+./scripts/build-device.sh
+```
+
+The build script always compiles the current working tree into a new
+timestamped `build/DirectDeviceUpdate-*` directory, embeds the provisioning
+profile, signs the nested code and app, and strictly verifies both signatures.
+It does not reuse an older `.app` or package an IPA. When it succeeds, it records
+the exact artifact as the latest verified device build. Then run:
+
+```sh
+./scripts/install-device.sh
+```
+
+The install script does not build, modify, or re-sign the artifact. It validates
+the latest successful artifact recorded by the build script, including its
+bundle, provisioning profile, architectures, library link, and signatures. It
+then gracefully stops an existing Cyanide process, installs the app with
+CoreDevice, verifies device registration, and leaves the app closed. Installing
+this way updates the app bundle without intentionally clearing its data
+container.
+
+The pinned device, identity, profile, and entitlements can be overridden with
+the `CYANIDE_DEVICE_ID`, `CYANIDE_SIGNING_IDENTITY`, `CYANIDE_PROFILE`, and
+`CYANIDE_ENTITLEMENTS` environment variables. Run `./scripts/build-device.sh
+--help` and `./scripts/install-device.sh --help` for the variables accepted by
+each phase.
+
+`libxpf.dylib` still needs a development signature even though this path does
+not use Sideloadly. Cyanide currently links `@loader_path/libxpf.dylib`, and
+iOS requires embedded executable code to be signed before its containing app.
+The ad-hoc Sideloadly compatibility pre-sign in `scripts/build.sh` is separate
+and is not used here.
+
 ## Prerequisites
 
 - Xcode and its command-line tools, with the iPhoneOS SDK available.
@@ -18,7 +57,7 @@ security find-identity -v -p codesigning
 
 Use the CoreDevice ID and signing identity reported by those commands in the placeholders below.
 
-## Build, sign, verify, and install
+## Manual build, sign, verify, and install
 
 Run the following in one shell. Choose a new, explicit output directory for each update instead of deleting or reusing existing signed builds. `mkdir` deliberately fails if this example directory already exists; change `UPDATE_DIR` before rerunning.
 

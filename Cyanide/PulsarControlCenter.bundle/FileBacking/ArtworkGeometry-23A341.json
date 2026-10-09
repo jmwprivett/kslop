@@ -1,0 +1,282 @@
+{
+  "alphaThreshold": 24,
+  "measurement": "local-CAPackage-vector-path-and-PNG-alpha-bounds-through-layer-transforms",
+  "productBuildVersion": "23A341",
+  "routes": [
+    {
+      "kind": "display",
+      "nativeContentBounds": [
+        11.049999999999999,
+        11.049999999999997,
+        25.9,
+        25.900000000000006
+      ],
+      "nativeDocumentBounds": [
+        0,
+        0,
+        48,
+        48
+      ],
+      "nativeMainSHA256": "dfef3cddcf0ddfc23cb48266569774c918b447f1541498b7de70b44f4b810aa8",
+      "nativeStateMeasured": "mid",
+      "packagePath": "/System/Library/ControlCenter/Bundles/DisplayModule.bundle/Brightness.ca",
+      "sourceContentBounds": [
+        -3.4776612651596737,
+        -25.760000000000005,
+        30.59766126515968,
+        30.738835281802544
+      ],
+      "sourceImageSHA256": {},
+      "sourceMainSHA256": "4df4622d23ccd72cd03d7ece5cdec9626a41bf38dc10d66809fbe9bd93c6f19a",
+      "sourceStatesMeasured": [
+        "base"
+      ]
+    },
+    {
+      "kind": "sound",
+      "nativeContentBounds": [
+        7.908431054480708,
+        11.40249929048295,
+        32.66205606195829,
+        24.79499994668863
+      ],
+      "nativeDocumentBounds": [
+        0,
+        0,
+        48,
+        48
+      ],
+      "nativeMainSHA256": "4834cc9b2fb8b3aff33f09d1f414ad9698ced2b2840c3e11144cd518c0982737",
+      "nativeStateMeasured": "full",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/Volume.ca",
+      "sourceContentBounds": [
+        -3.823063458353201,
+        -10.340000762939004,
+        27.390064221292203,
+        27.132000000000005
+      ],
+      "sourceImageSHA256": {},
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourceStatesMeasured": [
+        "base"
+      ]
+    },
+    {
+      "kind": "sound",
+      "nativeContentBounds": [
+        7.329514409439003,
+        11.40249929048295,
+        32.66205606195829,
+        24.79499994668863
+      ],
+      "nativeDocumentBounds": [
+        0,
+        0,
+        48,
+        48
+      ],
+      "nativeMainSHA256": "73b775e492c86cd6abd535825088a9ea0c7d8515e185ba54bc9b2c426cffa070",
+      "nativeStateMeasured": "full",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeRTL.ca",
+      "sourceContentBounds": [
+        -3.823063458353201,
+        -10.340000762939004,
+        27.390064221292203,
+        27.132000000000005
+      ],
+      "sourceImageSHA256": {},
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourceStatesMeasured": [
+        "base"
+      ]
+    },
+    {
+      "kind": "sound",
+      "nativeContentBounds": [
+        6.240879540000002,
+        11.269462453095876,
+        35.38818356,
+        25.05447728305573
+      ],
+      "nativeDocumentBounds": [
+        0,
+        0,
+        48,
+        48
+      ],
+      "nativeMainSHA256": "324ad2ea3cb399796b8b81cbf75eb1d474a0a938b96ff404bf0a09da705f0204",
+      "nativeStateMeasured": "full",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeSemibold.ca",
+      "sourceContentBounds": [
+        -3.823063458353201,
+        -10.340000762939004,
+        27.390064221292203,
+        27.132000000000005
+      ],
+      "sourceImageSHA256": {},
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourceStatesMeasured": [
+        "base"
+      ]
+    },
+    {
+      "kind": "sound",
+      "nativeContentBounds": [
+        6.3709369,
+        11.269462453095876,
+        35.38818356,
+        25.05447728305573
+      ],
+      "nativeDocumentBounds": [
+        0,
+        0,
+        48,
+        48
+      ],
+      "nativeMainSHA256": "2f8b3f1228df8b003609f2c3e8609bb219eeaa7e4d08514f9ff260266b34dc24",
+      "nativeStateMeasured": "full",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeSemiboldRTL.ca",
+      "sourceContentBounds": [
+        -3.823063458353201,
+        -10.340000762939004,
+        27.390064221292203,
+        27.132000000000005
+      ],
+      "sourceImageSHA256": {},
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourceStatesMeasured": [
+        "base"
+      ]
+    },
+    {
+      "kind": "sound",
+      "nativeContentBounds": [
+        7.788115371846494,
+        13.622820232703653,
+        32.945260631746464,
+        20.74524495089199
+      ],
+      "nativeDocumentBounds": [
+        0,
+        0,
+        48,
+        48
+      ],
+      "nativeMainSHA256": "eb0dabbecac098e3ad3c403fc46bdc71daf92628a873aa2ab953ba966f39247b",
+      "nativeStateMeasured": "full",
+      "packagePath": "/System/Library/PrivateFrameworks/MediaControls.framework/VolumeBold.ca",
+      "sourceContentBounds": [
+        -3.823063458353201,
+        -10.340000762939004,
+        27.390064221292203,
+        27.132000000000005
+      ],
+      "sourceImageSHA256": {},
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5",
+      "sourceStatesMeasured": [
+        "base"
+      ]
+    },
+    {
+      "kind": "focusSleep",
+      "nativeContentBounds": [
+        11.37949224,
+        15.59794926,
+        25.24101552,
+        19.199999999999996
+      ],
+      "nativeDocumentBounds": [
+        0,
+        0,
+        48,
+        48
+      ],
+      "nativeMainSHA256": "39216f2ea5b472603be57c37bf98b709a49fd7dff3894a35a2d4995486c9623b",
+      "nativeStateMeasured": "OFF",
+      "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/sleep_cg_02.ca",
+      "sourceContentBounds": [
+        -36.90909090909091,
+        -34.54545454545455,
+        36.18181818181818,
+        29.090909090909093
+      ],
+      "sourceImageSHA256": {
+        "selected.png": "da33efb19fce11708b8ffa48646a07aa991846a3e457e0e716f931e423b322f7",
+        "standard.png": "f6aae19e40abe6363fe2cc6cf1eb7853939974ab70bb9ab12b3d9ce718e9130b"
+      },
+      "sourceMainSHA256": "304eebb992e1cf5e266e2bd3997881fb0b9e0fc5cc08e1eb0db101af8d8c08fd",
+      "sourceStatesMeasured": [
+        "OFF",
+        "ON"
+      ]
+    },
+    {
+      "kind": "focusPersonal",
+      "nativeContentBounds": [
+        15.757573267999998,
+        15.708596675999999,
+        16.484853464,
+        17.545989231999997
+      ],
+      "nativeDocumentBounds": [
+        0,
+        0,
+        48,
+        48
+      ],
+      "nativeMainSHA256": "5e92005b0126d2342c01c4675ffec7f1547f680d04c159d7f06f9c21d4ec6692",
+      "nativeStateMeasured": "OFF",
+      "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/personal_cg_02.ca",
+      "sourceContentBounds": [
+        -33.63636363636364,
+        -36.90909090909091,
+        28.909090909090914,
+        36.18181818181818
+      ],
+      "sourceImageSHA256": {
+        "selected.png": "f1d2ef5d88c9967721d3a111c21e76e99cf3c0a531fbb37d5f50ab1152937cc7",
+        "standard.png": "a96436e50d4e2e08f8effeb6ec0a8694b9d5abba873efcb4da02fc714a9b63c9"
+      },
+      "sourceMainSHA256": "304eebb992e1cf5e266e2bd3997881fb0b9e0fc5cc08e1eb0db101af8d8c08fd",
+      "sourceStatesMeasured": [
+        "OFF",
+        "ON"
+      ]
+    },
+    {
+      "kind": "focusWork",
+      "nativeContentBounds": [
+        16.0326,
+        12.993500000000418,
+        15.934800000000001,
+        21.987000000000002
+      ],
+      "nativeDocumentBounds": [
+        0,
+        0,
+        48,
+        48
+      ],
+      "nativeMainSHA256": "3c2816bbe38f4e0c5f9d455903e34582f5ea4dff7dcc1945c9bcb012d826e1d4",
+      "nativeStateMeasured": "OFF",
+      "packagePath": "/System/Library/PrivateFrameworks/FocusUI.framework/work_cg_02.ca",
+      "sourceContentBounds": [
+        -36.72727272727273,
+        -35.09090909090909,
+        36.0,
+        33.45454545454545
+      ],
+      "sourceImageSHA256": {
+        "selected.png": "9f5384a6a5740a4c1c97306164a1c4044d93bacfd618114ff8c9e740159073df",
+        "standard.png": "1ff426b54876c7ec7ad0d9ead3e7d0daf74579002a13e54293ce3a11ec0446af"
+      },
+      "sourceMainSHA256": "304eebb992e1cf5e266e2bd3997881fb0b9e0fc5cc08e1eb0db101af8d8c08fd",
+      "sourceStatesMeasured": [
+        "OFF",
+        "ON"
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "usesLiveViews": false
+}

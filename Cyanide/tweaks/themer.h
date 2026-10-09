@@ -49,6 +49,26 @@ void themer_set_springboard_iconservices_refresh_bundle_identifiers(
 // RemoteCall session open. No icon bytes or model objects are replaced.
 bool themer_refresh_springboard_iconservices_cache_in_session(void);
 
+// Read-only App Library category-miniature pipeline diagnostic. Resolves the
+// live library controller's exact list-layout geometry and appearance, then
+// captures a themed UIImage immediately before and after Apple's
+// +gridCellImageOfSize:forIconImage: compositor. It issues no purge, reload,
+// relayout, update, process-lifecycle, or shared-cache mutation. The caller
+// must already own one SpringBoard RemoteCall session.
+NSDictionary<NSString *, id> *
+themer_inspect_springboard_app_library_miniature_pipeline_in_session(void);
+
+// Focused App Library category-miniature repair. Purges only the retained
+// folder/category image caches, advances the configured themed applications'
+// canonical and live-leaf SBApplicationIcon generations, rebuilds folder
+// composites, and asks the bounded App Library category controllers to
+// reload/enqueue. It does not reset the manager, touch list/search rows,
+// relayout SpringBoard, install Objective-C redirects, mutate shared-cache
+// data, or change process lifecycle. The caller must already own one exact
+// PID-bound SpringBoard RemoteCall session.
+NSDictionary<NSString *, id> *
+themer_refresh_springboard_app_library_miniatures_in_session(void);
+
 // Read-only snapshot of SpringBoard's current icon identities for the supplied
 // journaled bundles. Reports canonical and live leaf SBApplicationIcon
 // pointers/generations plus materialized app-switcher display-item icon

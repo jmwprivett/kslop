@@ -32,6 +32,26 @@ FOUNDATION_EXPORT NSString * const CNDSnowBoardRemixStatusesDidRefreshNotificati
 + (NSDictionary<NSString *, id> *)restoreBundleIdentifier:
     (NSString *)bundleIdentifier;
 
+/// Applies or restores the per-boot shared-cache Transparency Fix. This is a
+/// synchronous queue primitive and must run off the main thread. It performs
+/// the guarded redirect/restore and exact readback only; it never kills,
+/// restarts, or reopens either consumer after the write.
++ (NSDictionary<NSString *, id> *)setTransparencyFixEnabled:(BOOL)enabled;
+
+/// Physical-device diagnostic that publishes only the two measured Share-sheet
+/// records for com.apple.Sharing.AirDrop. It requires the exact selected-theme
+/// asset, forces a fresh stock-to-theme cycle when an active AirDrop journal is
+/// already present, refreshes only SharingUIService, and leaves a normal
+/// durable recovery journal for the separate restore action below.
++ (NSDictionary<NSString *, id> *)applyIsolatedAirDropTest;
+/// Read-only persistent audit for the two journaled AirDrop records. It checks
+/// indexed/store hashes and the native source-registry association without
+/// refreshing SpringBoard or SharingUIService.
++ (NSDictionary<NSString *, id> *)auditIsolatedAirDropTest;
+/// Restores only the journaled AirDrop records and refreshes SharingUIService.
+/// It does not run the broad SpringBoard presentation restore.
++ (NSDictionary<NSString *, id> *)restoreIsolatedAirDropTest;
+
 /// Reconciles the process-wide transparent presentation mappings with the
 /// durable IconServices journals and the user's presentation toggle. This
 /// never launches the exploit. If KRW is not already available it reports a
@@ -42,6 +62,11 @@ FOUNDATION_EXPORT NSString * const CNDSnowBoardRemixStatusesDidRefreshNotificati
 /// bounded Clock/Calendar face-source redirects. No one-shot view paint is
 /// used; the redirects remain active for the current SpringBoard process.
 + (NSDictionary<NSString *, id> *)applySpringBoardTweaks;
+/// Presents Spotlight through one identity-bound SpringBoard RemoteCall using
+/// the global `-[SpringBoard _toggleSearch]` path, settles the new Spotlight
+/// identity, and installs its SpringBoard-owned lifetime assertion before that
+/// same launch session closes.
++ (NSDictionary<NSString *, id> *)presentSpotlight;
 /// Independent Spotlight transparency and Clock/Calendar source repair for
 /// the current Spotlight process.
 + (NSDictionary<NSString *, id> *)repairSpotlightPresentation;

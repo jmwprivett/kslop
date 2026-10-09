@@ -104,7 +104,11 @@ class RemixUpdateRebaseTests(unittest.TestCase):
             start,
         )
         repair = self.remix[start:end]
-        self.assertIn("CNDRemixApplyIconServicesTheme(progress, cancellation)", repair)
+        self.assertIn(
+            "CNDRemixApplyIconServicesTheme(\n"
+            "            nil, YES, NO, progress, cancellation)",
+            repair,
+        )
         self.assertIn('@"operationMode"] = @"update-repair"', repair)
         self.assertNotIn("CNDIconServicesPublisherBeginBatch(", repair)
         self.assertNotIn("CNDIconServicesPublisherPublishVariantInBatch(", repair)

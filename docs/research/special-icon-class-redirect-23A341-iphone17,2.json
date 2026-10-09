@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Offline derivation of a shared SBHIconModel Clock/Calendar special-class dispatch redirect; no writer included",
+  "runtimeVerified": false,
+  "os": {
+    "productVersion": "26.0",
+    "productBuildVersion": "23A341",
+    "productType": "iPhone17,2",
+    "architecture": "arm64e",
+    "identitySource": "local IPSW; device not queried"
+  },
+  "cache": {
+    "main": {
+      "fileName": "dyld_shared_cache_arm64e",
+      "uuid": "DC5F2F67-1FC8-3905-873B-35D17D1A44E8",
+      "sha256": "a54a614e3a24f6a26cea9c3d0f46cd7776635c98ae6bcbdb0f609ddf8a78ab92",
+      "sharedRegionStart": "0x180000000"
+    },
+    "textSubcache": {
+      "fileName": "dyld_shared_cache_arm64e.19",
+      "uuid": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+      "sha256": "b5b23dff0de2aa23a24e0d600e5dc6368986bad71e1cae6d7b0176913d70be96",
+      "codeDirectory": {
+        "sha256": "acd0de9b9ea6cc0f66011973c6889dcf93757779388b85917eff8f37584c704e",
+        "cdHash20": "acd0de9b9ea6cc0f66011973c6889dcf93757779",
+        "hashType": 2,
+        "pageSize": 16384,
+        "verifiedCodePages": 6753
+      }
+    },
+    "readOnlySubcache": {
+      "fileName": "dyld_shared_cache_arm64e.34.dyldreadonly",
+      "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58",
+      "sha256": "932d004fd1b7c92aaeb4d9d4fc32188b0df17eadb8155888180ba84e088b87b2",
+      "codeDirectory": {
+        "sha256": "522e90d6cd7a7fd1f4de1589ddb693d6c970266604a15969a6cad806b7e09474",
+        "cdHash20": "522e90d6cd7a7fd1f4de1589ddb693d6c9702666",
+        "hashType": 2,
+        "pageSize": 16384,
+        "verifiedCodePages": 7971
+      }
+    }
+  },
+  "class": {
+    "name": "SBHIconModel",
+    "unslidVMAddress": "0x1eda01028",
+    "isa": "0x1eda02670",
+    "superclass": "0x1ed609a98",
+    "initialCacheBuckets": "0x1800d6040",
+    "preoptimizedCache": "0x1ffc32e78",
+    "classRO": "0x1eebe3740",
+    "baseMethods": "0x1be1eee28",
+    "metaclass": "0x1eda02670",
+    "metaclassRO": "0x1f3fe2e20",
+    "classMethods": "0x1be1da830"
+  },
+  "specialSelection": {
+    "helperUnslidVMAddress": "0x1be19da24",
+    "helperByteLength": 280,
+    "helperSHA256": "96a4efb57027fed323e3b7f1b38bfa0618e0b17461720974f8fa07ee65f2dcef",
+    "hardCodedBundleIdentifiers": [
+      "com.apple.mobiletimer",
+      "com.apple.mobilecal"
+    ],
+    "ordinaryTail": "+[SBHIconModel applicationIconClass]",
+    "conclusion": "The exact-build helper has only the Clock and Calendar special cases; all other identifiers take the ordinary applicationIconClass tail."
+  },
+  "targetMethod": {
+    "selector": "iconClassForApplicationWithBundleIdentifier:",
+    "types": "#24@0:8@16",
+    "unslidVMAddress": "0x1be19db3c",
+    "byteLength": 116,
+    "sha256": "98a530e208e6e6d2953e23709857aa560dc03a54a48a1cc81e68e719457731dd",
+    "methodListUnslidVMAddress": "0x1be1eee28",
+    "methodListHeader": {
+      "entsizeAndFlags": "0xc000000f",
+      "count": 178,
+      "entrySize": 12,
+      "relativeEntries": true,
+      "directSelectors": true
+    },
+    "entryIndex": 101,
+    "entryUnslidVMAddress": "0x1be1ef2ec",
+    "entrySubcacheFileOffset": "0x45972ec",
+    "entryBytesHex": "2d1089001867040048e8faff",
+    "selectorBaseUnslidVMAddress": "0x1fac21900",
+    "selectorOffset": "0x89102d",
+    "selectorUnslidVMAddress": "0x1fb4b292d",
+    "impFieldUnslidVMAddress": "0x1be1ef2f4",
+    "impFieldRawWord": "0xfffae848",
+    "mapping": {
+      "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+      "initProt": 5,
+      "maxProt": 5
+    },
+    "guard": {
+      "unslidVMAddress": "0x1be1ef2ec",
+      "byteLength": 32,
+      "bytesHex": "2d1089001867040048e8faff0018890075470400dc59fbff00ac8900c8650400",
+      "sha256": "acea5ab6a319392b3d2790ecb483dbae5df81e38bb15252e6311c0f4bdf18f0f"
+    }
+  },
+  "preoptimizedDispatchEntry": {
+    "cacheHeaderUnslidVMAddress": "0x1ffc32e78",
+    "cacheHeader": {
+      "fallbackClassOffset": "0xffffffffffc08a70",
+      "shift": 10,
+      "mask": 255,
+      "capacity": 256,
+      "occupied": 178,
+      "hasInlines": false
+    },
+    "slot": 68,
+    "entryUnslidVMAddress": "0x1ffc330a8",
+    "frameUnslidVMAddress": "0x1ffc30000",
+    "entryOffsetWithin16KFrame": "0x30a8",
+    "entrySubcacheFileOffset": "0x78df0a8",
+    "encoding": {
+      "kind": "preopt_cache_entry_t packed bitfields; no pointer or PAC bits stored",
+      "selectorOffsetBits": 26,
+      "signedRawIMPOffsetBits": 38,
+      "decodeFormula": "IMP = class - (signedRawIMPOffset << 2)"
+    },
+    "originalValue": "0x22440b400be18d3b",
+    "originalLowWord": "0xbe18d3b",
+    "originalBytesLE": "3b8de10b400b4422",
+    "selectorOffset": "0x89102d",
+    "signedRawIMPOffset": "0xbe18d3b",
+    "decodedOriginalIMPUnslidVMAddress": "0x1be19db3c",
+    "mapping": {
+      "subcacheUUID": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58",
+      "name": "__LINKEDIT",
+      "flags": 32,
+      "readOnlyData": true,
+      "initProt": 1,
+      "maxProt": 1
+    },
+    "guard": {
+      "unslidVMAddress": "0x1ffc330a8",
+      "byteLength": 32,
+      "originalBytesHex": "3b8de10b400b44228f90ec0b80054503d370e10b000046229c70e10b00204720",
+      "originalSHA256": "e495c955bec6fd68c5dfd23b4a7e181ec006832a2aa5ba389dd40a912232f9e8",
+      "redirectedBytesHex": "908de10b400b44228f90ec0b80054503d370e10b000046229c70e10b00204720",
+      "redirectedSHA256": "12352496ebeb23bc626ef83d0ca035996f2aed16cde68bbb123576235c711486"
+    }
+  },
+  "replacementMethod": {
+    "class": "SBHIconModel",
+    "kind": "class method",
+    "selector": "applicationIconClass",
+    "types": "#16@0:8",
+    "machineCallCompatibility": {
+      "compatible": true,
+      "reason": "The replacement ignores self, _cmd, and the target's extra x2 identifier argument and returns one Class in x0.",
+      "exactObjectiveCTypeEncodingMatch": false
+    },
+    "semantics": "returns the ordinary SBApplicationIcon class",
+    "unslidVMAddress": "0x1be19d9e8",
+    "byteLength": 60,
+    "bytesHex": "7f2303d5fd7bbfa9fd030091a1ed169021801f91c20615f042000991000080d2b074f497fd7bc1a8ff2303d5d0071eca5000f0b6208e38d4346c9214",
+    "sha256": "2bb6895d47b1d48b7439992c7c767582a5caabbdf16f1fa27a3561342a6f4e34",
+    "methodListUnslidVMAddress": "0x1be1da830",
+    "methodListHeader": {
+      "entsizeAndFlags": "0xc000000f",
+      "count": 6,
+      "entrySize": 12,
+      "relativeEntries": true,
+      "directSelectors": true
+    },
+    "entryIndex": 3,
+    "entryUnslidVMAddress": "0x1be1da85c",
+    "entryBytesHex": "008c8600828405008431fcff",
+    "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+    "appleSignedCodePageVerified": true,
+    "sameSubcacheAsOriginalIMP": true,
+    "signedRawIMPOffset": "0xbe18d90",
+    "redirectedEntryValue": "0x22440b400be18d90",
+    "redirectedLowWord": "0xbe18d90",
+    "redirectedEntryBytesLE": "908de10b400b4422"
+  },
+  "writeShape": {
+    "semanticWriteCount": 1,
+    "widthBits": 32,
+    "originalLowWord": "0xbe18d3b",
+    "redirectedLowWord": "0xbe18d90",
+    "upperWordUnchanged": true
+  },
+  "runtimeBoundary": {
+    "status": "offline-derived-runtime-unverified",
+    "priorConfirmedReadOnlyEntry": "0x1ffc27458",
+    "priorConfirmed16KPage": "0x1ffc24000",
+    "target16KPage": "0x1ffc30000",
+    "samePageAsPriorPermissionProof": false,
+    "requiredNextStep": "Run an identical-bytes-only permission and shared-frame proof against this exact .34 page before a semantic write.",
+    "objectLifecycleCaveat": "The dispatch redirect changes future class selection; it does not reclassify Clock/Calendar icon objects that already exist in a consumer process.",
+    "staticRouteHypothesis": "After the redirect is installed and consumers rebuild their models, ordinary persistent mobiletimer/mobilecal IconServices records should supply static themed icons without per-PID source bridges. This remains a runtime test, not an offline proof."
+  }
+}

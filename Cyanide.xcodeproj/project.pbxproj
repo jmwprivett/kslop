@@ -55,6 +55,8 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				tweaks/CNDCCThemingCanary.m,
+				tweaks/CNDCCThemingProbe.m,
 				tweaks/CNDPulsarControlCenterArtwork.inc,
 				tweaks/private/NotificationIslandActivityAttributes.swift,
 				tweaks/private/NotificationIslandLiveActivityBridge.swift,

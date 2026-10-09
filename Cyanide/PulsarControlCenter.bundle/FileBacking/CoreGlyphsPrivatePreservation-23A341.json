@@ -1,0 +1,4317 @@
+{
+  "allTargetVectorAndCachedImageVariantsReplaced": true,
+  "allUnrelatedBlocksByteIdentical": true,
+  "artworkContourTolerance": 0.75,
+  "artworkMaskMaximumDimension": 160,
+  "assetutilValidated": true,
+  "blockOffsetsRepacked": true,
+  "connectivityArtworkSizingScope": "global-native-symbol-identity-compact-and-expanded-shared",
+  "connectivityControlArtworkScale": {
+    "airdrop": 1.6,
+    "bluetooth": 1.6,
+    "satellite": 2.15,
+    "vpn": 1.27
+  },
+  "connectivityOpticalSizingValidation": {
+    "hostRenderedEveryNativeConnectivityRendition": true,
+    "hostRenderedEveryRequestedNativeRendition": true,
+    "nativeRenditionCount": 77,
+    "nativeSymbolImagesUseInkCroppedExtents": true,
+    "renditions": [
+      {
+        "aspectRoundingErrorPixels": 0.178571,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          40,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "airdrop",
+        "nativeBlock": 5078,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.981255,
+        "pixelCanvas": [
+          40,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth.slash",
+        "nativeBlock": 4113,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          61
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 4771,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.946838,
+        "pixelCanvas": [
+          61,
+          61
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.172185,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2",
+        "nativeBlock": 4789,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.931774,
+        "pixelCanvas": [
+          61,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth",
+        "nativeBlock": 5500,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          36,
+          36
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 4135,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955716,
+        "pixelCanvas": [
+          36,
+          36
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.157895,
+        "glyphSize": 1,
+        "glyphWeight": 1,
+        "inkAlphaBounds": [
+          0,
+          0,
+          60,
+          57
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 4109,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.95992,
+        "pixelCanvas": [
+          60,
+          57
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.178571,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          40,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "airdrop",
+        "nativeBlock": 8167,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.981255,
+        "pixelCanvas": [
+          40,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth.slash",
+        "nativeBlock": 7254,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          61
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 7866,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.946838,
+        "pixelCanvas": [
+          61,
+          61
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.172185,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2",
+        "nativeBlock": 7820,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.931774,
+        "pixelCanvas": [
+          61,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth",
+        "nativeBlock": 8595,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          36,
+          36
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 7121,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955716,
+        "pixelCanvas": [
+          36,
+          36
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.157895,
+        "glyphSize": 1,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          60,
+          57
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 7207,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.95992,
+        "pixelCanvas": [
+          60,
+          57
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.178571,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          40,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "airdrop",
+        "nativeBlock": 13047,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.981255,
+        "pixelCanvas": [
+          40,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.178571,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          15,
+          17
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "airdrop",
+        "nativeBlock": 13057,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.918478,
+        "pixelCanvas": [
+          15,
+          17
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth.slash",
+        "nativeBlock": 11218,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.229885,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          10,
+          17
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "bluetooth.slash",
+        "nativeBlock": 11226,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.828283,
+        "pixelCanvas": [
+          10,
+          17
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          61
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 12439,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.946838,
+        "pixelCanvas": [
+          61,
+          61
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          23,
+          23
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 12457,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.922601,
+        "pixelCanvas": [
+          23,
+          23
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.172185,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2",
+        "nativeBlock": 12455,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.931774,
+        "pixelCanvas": [
+          61,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.066225,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          23,
+          22
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "satellite.wave.2",
+        "nativeBlock": 12453,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.888889,
+        "pixelCanvas": [
+          23,
+          22
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth",
+        "nativeBlock": 13897,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.229885,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          10,
+          17
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "bluetooth",
+        "nativeBlock": 13895,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.828283,
+        "pixelCanvas": [
+          10,
+          17
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          36,
+          36
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 11156,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955716,
+        "pixelCanvas": [
+          36,
+          36
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          14,
+          14
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 11164,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.866242,
+        "pixelCanvas": [
+          14,
+          14
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.157895,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          60,
+          57
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 11081,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.95992,
+        "pixelCanvas": [
+          60,
+          57
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.210526,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          23,
+          22
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 11113,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.831967,
+        "pixelCanvas": [
+          23,
+          22
+        ],
+        "pointSize": 15,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.035714,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          17,
+          20
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "airdrop",
+        "nativeBlock": 17441,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.920168,
+        "pixelCanvas": [
+          17,
+          20
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.08046,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          11,
+          19
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "bluetooth.slash",
+        "nativeBlock": 16530,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.915966,
+        "pixelCanvas": [
+          11,
+          19
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          26
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 17148,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.915254,
+        "pixelCanvas": [
+          26,
+          26
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.205298,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          25
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "satellite.wave.2",
+        "nativeBlock": 17146,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.86645,
+        "pixelCanvas": [
+          26,
+          25
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.08046,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          11,
+          19
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "bluetooth",
+        "nativeBlock": 17859,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.915966,
+        "pixelCanvas": [
+          11,
+          19
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          15,
+          16
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 16451,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.880435,
+        "pixelCanvas": [
+          16,
+          16
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.631579,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          26,
+          25
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 16485,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.888889,
+        "pixelCanvas": [
+          26,
+          25
+        ],
+        "pointSize": 17,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.535714,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          20,
+          23
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "airdrop",
+        "nativeBlock": 20512,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.919162,
+        "pixelCanvas": [
+          20,
+          23
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.218391,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          13,
+          23
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "bluetooth.slash",
+        "nativeBlock": 19615,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.855422,
+        "pixelCanvas": [
+          13,
+          23
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          30,
+          31
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 20245,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.916071,
+        "pixelCanvas": [
+          31,
+          31
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.390728,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          30,
+          29
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "satellite.wave.2",
+        "nativeBlock": 20243,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.906404,
+        "pixelCanvas": [
+          31,
+          29
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.218391,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          13,
+          23
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "bluetooth",
+        "nativeBlock": 20963,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.855422,
+        "pixelCanvas": [
+          13,
+          23
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          18,
+          18
+        ],
+        "minimumSilhouetteSimilarity": 0.6,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 19593,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.905882,
+        "pixelCanvas": [
+          18,
+          18
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.578947,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          30,
+          29
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 19578,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.910448,
+        "pixelCanvas": [
+          30,
+          29
+        ],
+        "pointSize": 20,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.178571,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          40,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "airdrop",
+        "nativeBlock": 23629,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.981255,
+        "pixelCanvas": [
+          40,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth.slash",
+        "nativeBlock": 22720,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          61
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 23338,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.946838,
+        "pixelCanvas": [
+          61,
+          61
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.172185,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2",
+        "nativeBlock": 23336,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.931774,
+        "pixelCanvas": [
+          61,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth",
+        "nativeBlock": 24062,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          36,
+          36
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 22675,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955716,
+        "pixelCanvas": [
+          36,
+          36
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.157895,
+        "glyphSize": 2,
+        "glyphWeight": 5,
+        "inkAlphaBounds": [
+          0,
+          0,
+          60,
+          57
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 22663,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.95992,
+        "pixelCanvas": [
+          60,
+          57
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.178571,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          40,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "airdrop",
+        "nativeBlock": 26722,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.981255,
+        "pixelCanvas": [
+          40,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth.slash",
+        "nativeBlock": 25817,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          61
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 26423,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.946838,
+        "pixelCanvas": [
+          61,
+          61
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.172185,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          61,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2",
+        "nativeBlock": 26431,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.931774,
+        "pixelCanvas": [
+          61,
+          58
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.137931,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          26,
+          45
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth",
+        "nativeBlock": 27130,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.864907,
+        "pixelCanvas": [
+          26,
+          45
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          36,
+          36
+        ],
+        "minimumSilhouetteSimilarity": 0.7,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 25778,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.955716,
+        "pixelCanvas": [
+          36,
+          36
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.157895,
+        "glyphSize": 1,
+        "glyphWeight": 9,
+        "inkAlphaBounds": [
+          0,
+          0,
+          60,
+          57
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 25754,
+        "nativeLayout": 1017,
+        "normalizedSilhouetteIntersectionOverUnion": 0.95992,
+        "pixelCanvas": [
+          60,
+          57
+        ],
+        "pointSize": 40,
+        "scale": 1
+      },
+      {
+        "aspectRoundingErrorPixels": 0.535714,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          45,
+          51
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "airdrop",
+        "nativeBlock": 39959,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.956825,
+        "pixelCanvas": [
+          45,
+          51
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.264368,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          29,
+          50
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth.slash",
+        "nativeBlock": 39042,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.938992,
+        "pixelCanvas": [
+          29,
+          50
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          68,
+          68
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 39661,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.978051,
+        "pixelCanvas": [
+          68,
+          68
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.152318,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          68,
+          65
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "satellite.wave.2",
+        "nativeBlock": 39653,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.961216,
+        "pixelCanvas": [
+          68,
+          65
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.264368,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          29,
+          50
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth",
+        "nativeBlock": 40383,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.938992,
+        "pixelCanvas": [
+          29,
+          50
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          40,
+          41
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 39000,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.959201,
+        "pixelCanvas": [
+          41,
+          41
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.421053,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          68,
+          64
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 38994,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.944328,
+        "pixelCanvas": [
+          68,
+          64
+        ],
+        "pointSize": 15,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.107143,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          51,
+          58
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "airdrop",
+        "nativeBlock": 43058,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.99035,
+        "pixelCanvas": [
+          51,
+          58
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.241379,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          33,
+          57
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth.slash",
+        "nativeBlock": 42143,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.895687,
+        "pixelCanvas": [
+          33,
+          57
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          77,
+          77
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 42756,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.983314,
+        "pixelCanvas": [
+          77,
+          77
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.430464,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          77,
+          74
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "satellite.wave.2",
+        "nativeBlock": 42754,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.974626,
+        "pixelCanvas": [
+          77,
+          74
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.241379,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          33,
+          57
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "bluetooth",
+        "nativeBlock": 43478,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.895687,
+        "pixelCanvas": [
+          33,
+          57
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          46,
+          46
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 42111,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.954806,
+        "pixelCanvas": [
+          46,
+          46
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.052632,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          77,
+          73
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 42037,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.937398,
+        "pixelCanvas": [
+          77,
+          73
+        ],
+        "pointSize": 17,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.714286,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          60,
+          68
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "airdrop",
+        "nativeBlock": 46043,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.964388,
+        "pixelCanvas": [
+          60,
+          68
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.505747,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          38,
+          67
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "bluetooth.slash",
+        "nativeBlock": 45228,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.970747,
+        "pixelCanvas": [
+          39,
+          67
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          91,
+          91
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "satellite.slash.fill",
+        "nativeBlock": 45855,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.964249,
+        "pixelCanvas": [
+          91,
+          91
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.781457,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          1,
+          91,
+          87
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "satellite.wave.2",
+        "nativeBlock": 45853,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.958221,
+        "pixelCanvas": [
+          91,
+          87
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.505747,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          38,
+          67
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "bluetooth",
+        "nativeBlock": 46567,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.970747,
+        "pixelCanvas": [
+          39,
+          67
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.0,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          54,
+          54
+        ],
+        "minimumSilhouetteSimilarity": 0.84,
+        "name": "network.connected.to.line.below.fill",
+        "nativeBlock": 45200,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.961754,
+        "pixelCanvas": [
+          54,
+          54
+        ],
+        "pointSize": 20,
+        "scale": 3
+      },
+      {
+        "aspectRoundingErrorPixels": 0.263158,
+        "glyphSize": 2,
+        "glyphWeight": 4,
+        "inkAlphaBounds": [
+          0,
+          0,
+          90,
+          85
+        ],
+        "minimumSilhouetteSimilarity": 0.85,
+        "name": "satellite.wave.2.fill",
+        "nativeBlock": 45174,
+        "nativeLayout": 1003,
+        "normalizedSilhouetteIntersectionOverUnion": 0.980201,
+        "pixelCanvas": [
+          90,
+          85
+        ],
+        "pointSize": 20,
+        "scale": 3
+      }
+    ],
+    "templateLayouts": {
+      "airdrop": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 1.6,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 1.6,
+        "sourceAlphaPlanes": [
+          121,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1599.3333333333333,
+            1464.77,
+            1699.3333333333333,
+            1576.77
+          ],
+          "M": [
+            1599.3333333333333,
+            1034.77,
+            1699.3333333333333,
+            1146.77
+          ],
+          "S": [
+            1599.3333333333333,
+            604.77,
+            1699.3333333333333,
+            716.77
+          ]
+        }
+      },
+      "bluetooth": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 1.6,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 1.6,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1618.1818181818182,
+            1466.0427272727272,
+            1681.818181818182,
+            1576.77
+          ],
+          "M": [
+            1618.1818181818182,
+            1036.0427272727272,
+            1681.818181818182,
+            1146.77
+          ],
+          "S": [
+            1618.1818181818182,
+            606.0427272727272,
+            1681.818181818182,
+            716.77
+          ]
+        }
+      },
+      "bluetooth.slash": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 1.6,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 1.6,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1618.1818181818182,
+            1466.0427272727272,
+            1681.818181818182,
+            1576.77
+          ],
+          "M": [
+            1618.1818181818182,
+            1036.0427272727272,
+            1681.818181818182,
+            1146.77
+          ],
+          "S": [
+            1618.1818181818182,
+            606.0427272727272,
+            1681.818181818182,
+            716.77
+          ]
+        }
+      },
+      "network.connected.to.line.below.fill": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 1.27,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 1.27,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1605.55,
+            1476.32,
+            1694.45,
+            1565.22
+          ],
+          "M": [
+            1605.55,
+            1046.32,
+            1694.45,
+            1135.22
+          ],
+          "S": [
+            1605.55,
+            616.3199999999999,
+            1694.45,
+            705.22
+          ]
+        }
+      },
+      "satellite.slash.fill": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 2.15,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 2.15,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1574.75,
+            1445.52,
+            1725.25,
+            1596.02
+          ],
+          "M": [
+            1574.75,
+            1015.52,
+            1725.25,
+            1166.02
+          ],
+          "S": [
+            1574.75,
+            585.52,
+            1725.25,
+            736.02
+          ]
+        }
+      },
+      "satellite.wave.2": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 2.15,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 2.15,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1574.75,
+            1449.0084105960266,
+            1725.25,
+            1592.5315894039734
+          ],
+          "M": [
+            1574.75,
+            1019.0084105960265,
+            1725.25,
+            1162.5315894039734
+          ],
+          "S": [
+            1574.75,
+            589.0084105960265,
+            1725.25,
+            732.5315894039735
+          ]
+        }
+      },
+      "satellite.wave.2.fill": {
+        "completeAuthoredAlphaInsideSymbolMargins": true,
+        "effectiveScale": 2.15,
+        "nativeCaplineAndBaselineGuidesChanged": false,
+        "requestedScale": 2.15,
+        "sourceAlphaPlanes": [
+          122,
+          255
+        ],
+        "templateAlphaBounds": {
+          "L": [
+            1574.75,
+            1449.4546405228757,
+            1724.266339869281,
+            1591.1016993464052
+          ],
+          "M": [
+            1574.75,
+            1019.4546405228758,
+            1724.266339869281,
+            1161.1016993464052
+          ],
+          "S": [
+            1574.75,
+            589.4546405228758,
+            1724.266339869281,
+            731.1016993464052
+          ]
+        }
+      }
+    }
+  },
+  "donorCoreUIVersion": 970,
+  "donorSHA256": "b47b3d4f5849a52f432cd2acfe893462605e9c397e8e51bb1b1e29b5d46855f6",
+  "exactNativeFileLengthPreserved": true,
+  "flashlightContourMethod": "bilinear-subpixel-opacity-plane-trace",
+  "flashlightContourSupersampling": 8,
+  "flashlightContourTolerance": 0.08,
+  "highFidelityContourMethod": "bilinear-subpixel-opacity-plane-trace",
+  "highFidelityContourSupersampling": 8,
+  "highFidelityContourSymbolNames": [
+    "airdrop",
+    "bluetooth",
+    "bluetooth.slash"
+  ],
+  "highFidelityContourTolerance": 0.08,
+  "lookupKeysAndTreesPreserved": true,
+  "method": "native-BOM-existing-CSI-slot-graft",
+  "nativeAuthoringRuntimeBuild": "23A343",
+  "nativeButtonGeometryChanged": false,
+  "nativeCoreUIVersion": 970,
+  "nativeHeaderPreserved": true,
+  "nativeStorageVersion": 17,
+  "nativeSymbolCaplineAndBaselineGuidesChanged": false,
+  "payloadLength": 24963464,
+  "payloadSHA256": "1143cee3a9ab005bccdc8510a775b5dc8093935e4e5babe737150f5b4de9142b",
+  "productBuildVersion": "23A341",
+  "schemaVersion": 1,
+  "sourceAlphaPlanes": {
+    "airdrop": [
+      121,
+      255
+    ],
+    "bluetooth": [
+      122,
+      255
+    ],
+    "bluetooth.slash": [
+      122,
+      255
+    ],
+    "calculator.fill": [
+      122,
+      255
+    ],
+    "network.connected.to.line.below.fill": [
+      122,
+      255
+    ],
+    "satellite.slash.fill": [
+      122,
+      255
+    ],
+    "satellite.wave.2": [
+      122,
+      255
+    ],
+    "satellite.wave.2.fill": [
+      122,
+      255
+    ]
+  },
+  "sourceArtworkSHA256": {
+    "airdrop": "b050b3e6a91633886b7c4fc0adecf6a4388bc79fdab856b51b8b2f6f2fdda472",
+    "bluetooth": "3a7e53d3614179eee49d92ba4fa30a097a80346273d25e18cdc393dba4e304b6",
+    "bluetooth.slash": "3a7e53d3614179eee49d92ba4fa30a097a80346273d25e18cdc393dba4e304b6",
+    "calculator.fill": "f9b2592a568f2776c1184a600dd9ef120e0022bc63372706dc2e89270160a447",
+    "network.connected.to.line.below.fill": "2c19e5b2e62cc0925fc4f86a2dbadf777c436f0208afbc074009d2b37e7a1860",
+    "satellite.slash.fill": "365451829726c0f26e70df31eaacc82ada038ff39ac2dc4f478882ea86d14be2",
+    "satellite.wave.2": "5dea1639f5ebcc4eb8e2ca3b3c0204ffc31dab9d718b13fb489e2bf9b63f6410",
+    "satellite.wave.2.fill": "4c0d02d695a1f9116d6652bbe6fa7d18732e4003d041be87c36fffa8986a9a01"
+  },
+  "standaloneCachedImages": true,
+  "stockLength": 24963464,
+  "stockSHA256": "413d22dbd800236f46e32004ce9e8b1ed65bcdbbcd34f8094c04c07a04840365",
+  "symbolArtworkScale": {
+    "airdrop": 1.6,
+    "bluetooth": 1.6,
+    "bluetooth.slash": 1.6,
+    "calculator.fill": 1.0,
+    "network.connected.to.line.below.fill": 1.27,
+    "satellite.slash.fill": 2.15,
+    "satellite.wave.2": 2.15,
+    "satellite.wave.2.fill": 2.15
+  },
+  "symbolOpacityEncoding": "native-monochrome-multicolor-hierarchical-CSS-annotations",
+  "targetPath": "/System/Library/PrivateFrameworks/SFSymbols.framework/CoreGlyphsPrivate.bundle/Assets.car",
+  "targetRenditionCount": 88,
+  "targetRenditions": [
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 3627,
+      "donorBlock": 78,
+      "name": "calculator.fill",
+      "nativeLayout": 1017,
+      "originalLength": 947,
+      "payloadLayout": 1017,
+      "payloadLength": 1962
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 5078,
+      "donorBlock": 104,
+      "name": "airdrop",
+      "nativeLayout": 1017,
+      "originalLength": 1779,
+      "payloadLayout": 1017,
+      "payloadLength": 3200
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 4113,
+      "donorBlock": 90,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1322,
+      "payloadLayout": 1017,
+      "payloadLength": 2425
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 4771,
+      "donorBlock": 98,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1561,
+      "payloadLayout": 1017,
+      "payloadLength": 3154
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 4789,
+      "donorBlock": 102,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1017,
+      "originalLength": 1842,
+      "payloadLayout": 1017,
+      "payloadLength": 3364
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 5500,
+      "donorBlock": 110,
+      "name": "bluetooth",
+      "nativeLayout": 1017,
+      "originalLength": 950,
+      "payloadLayout": 1017,
+      "payloadLength": 2425
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 4135,
+      "donorBlock": 92,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1017,
+      "originalLength": 2017,
+      "payloadLayout": 1017,
+      "payloadLength": 3071
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 4109,
+      "donorBlock": 88,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1706,
+      "payloadLayout": 1017,
+      "payloadLength": 3676
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 6711,
+      "donorBlock": 488,
+      "name": "calculator.fill",
+      "nativeLayout": 1017,
+      "originalLength": 938,
+      "payloadLayout": 1017,
+      "payloadLength": 1962
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 8167,
+      "donorBlock": 520,
+      "name": "airdrop",
+      "nativeLayout": 1017,
+      "originalLength": 1775,
+      "payloadLayout": 1017,
+      "payloadLength": 3200
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 7254,
+      "donorBlock": 506,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1350,
+      "payloadLayout": 1017,
+      "payloadLength": 2425
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 7866,
+      "donorBlock": 514,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1584,
+      "payloadLayout": 1017,
+      "payloadLength": 3154
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 7820,
+      "donorBlock": 512,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1017,
+      "originalLength": 1866,
+      "payloadLayout": 1017,
+      "payloadLength": 3364
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 8595,
+      "donorBlock": 526,
+      "name": "bluetooth",
+      "nativeLayout": 1017,
+      "originalLength": 985,
+      "payloadLayout": 1017,
+      "payloadLength": 2425
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 7121,
+      "donorBlock": 498,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1017,
+      "originalLength": 2036,
+      "payloadLayout": 1017,
+      "payloadLength": 3071
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 7207,
+      "donorBlock": 484,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1723,
+      "payloadLayout": 1017,
+      "payloadLength": 3676
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 10142,
+      "donorBlock": 540,
+      "name": "calculator.fill",
+      "nativeLayout": 1017,
+      "originalLength": 981,
+      "payloadLayout": 1017,
+      "payloadLength": 2000
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 10140,
+      "donorBlock": 538,
+      "name": "calculator.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 462
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 13047,
+      "donorBlock": 586,
+      "name": "airdrop",
+      "nativeLayout": 1017,
+      "originalLength": 1823,
+      "payloadLayout": 1017,
+      "payloadLength": 3236
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 13057,
+      "donorBlock": 604,
+      "name": "airdrop",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 584
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 11218,
+      "donorBlock": 568,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1400,
+      "payloadLayout": 1017,
+      "payloadLength": 2445
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 11226,
+      "donorBlock": 558,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 508
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 12439,
+      "donorBlock": 578,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1613,
+      "payloadLayout": 1017,
+      "payloadLength": 3158
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 12457,
+      "donorBlock": 478,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 783
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 12455,
+      "donorBlock": 592,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1017,
+      "originalLength": 1908,
+      "payloadLayout": 1017,
+      "payloadLength": 3278
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 12453,
+      "donorBlock": 590,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 712
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 13897,
+      "donorBlock": 584,
+      "name": "bluetooth",
+      "nativeLayout": 1017,
+      "originalLength": 1027,
+      "payloadLayout": 1017,
+      "payloadLength": 2445
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 13895,
+      "donorBlock": 616,
+      "name": "bluetooth",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 508
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 11156,
+      "donorBlock": 560,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1017,
+      "originalLength": 2120,
+      "payloadLayout": 1017,
+      "payloadLength": 3091
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 11164,
+      "donorBlock": 570,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 540
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 11081,
+      "donorBlock": 556,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1762,
+      "payloadLayout": 1017,
+      "payloadLength": 3670
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 11113,
+      "donorBlock": 554,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 714
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 15998,
+      "donorBlock": 620,
+      "name": "calculator.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 482
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 17441,
+      "donorBlock": 652,
+      "name": "airdrop",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 652
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 16530,
+      "donorBlock": 640,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 528
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 17148,
+      "donorBlock": 648,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 879
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 17146,
+      "donorBlock": 646,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 804
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 17859,
+      "donorBlock": 656,
+      "name": "bluetooth",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 528
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 16451,
+      "donorBlock": 642,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 580
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 16485,
+      "donorBlock": 632,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 796
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 19078,
+      "donorBlock": 668,
+      "name": "calculator.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 20512,
+      "donorBlock": 700,
+      "name": "airdrop",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 759
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 19615,
+      "donorBlock": 680,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 594
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 20245,
+      "donorBlock": 694,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1038
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 20243,
+      "donorBlock": 698,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 941
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 20963,
+      "donorBlock": 706,
+      "name": "bluetooth",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 594
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 19593,
+      "donorBlock": 682,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 639
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 19578,
+      "donorBlock": 678,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 936
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 22177,
+      "donorBlock": 792,
+      "name": "calculator.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1660,
+      "payloadLayout": 1017,
+      "payloadLength": 1976
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 23629,
+      "donorBlock": 830,
+      "name": "airdrop",
+      "nativeLayout": 1017,
+      "originalLength": 1949,
+      "payloadLayout": 1017,
+      "payloadLength": 3212
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 22720,
+      "donorBlock": 824,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1841,
+      "payloadLayout": 1017,
+      "payloadLength": 2421
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 23338,
+      "donorBlock": 826,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1017,
+      "originalLength": 2441,
+      "payloadLayout": 1017,
+      "payloadLength": 3134
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 23336,
+      "donorBlock": 816,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1017,
+      "originalLength": 2355,
+      "payloadLayout": 1017,
+      "payloadLength": 3254
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 24062,
+      "donorBlock": 788,
+      "name": "bluetooth",
+      "nativeLayout": 1017,
+      "originalLength": 1290,
+      "payloadLayout": 1017,
+      "payloadLength": 2421
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 22675,
+      "donorBlock": 820,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1017,
+      "originalLength": 2671,
+      "payloadLayout": 1017,
+      "payloadLength": 3067
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 22663,
+      "donorBlock": 812,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 2197,
+      "payloadLayout": 1017,
+      "payloadLength": 3646
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 25253,
+      "donorBlock": 1316,
+      "name": "calculator.fill",
+      "nativeLayout": 1017,
+      "originalLength": 936,
+      "payloadLayout": 1017,
+      "payloadLength": 1962
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 26722,
+      "donorBlock": 1348,
+      "name": "airdrop",
+      "nativeLayout": 1017,
+      "originalLength": 1781,
+      "payloadLayout": 1017,
+      "payloadLength": 3200
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 25817,
+      "donorBlock": 1334,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1017,
+      "originalLength": 1348,
+      "payloadLayout": 1017,
+      "payloadLength": 2425
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 26423,
+      "donorBlock": 1342,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1605,
+      "payloadLayout": 1017,
+      "payloadLength": 3154
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 26431,
+      "donorBlock": 1340,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1017,
+      "originalLength": 1854,
+      "payloadLayout": 1017,
+      "payloadLength": 3364
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 27130,
+      "donorBlock": 1354,
+      "name": "bluetooth",
+      "nativeLayout": 1017,
+      "originalLength": 970,
+      "payloadLayout": 1017,
+      "payloadLength": 2425
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 25778,
+      "donorBlock": 1326,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1017,
+      "originalLength": 2031,
+      "payloadLayout": 1017,
+      "payloadLength": 3071
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 25754,
+      "donorBlock": 1312,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1766,
+      "payloadLayout": 1017,
+      "payloadLength": 3676
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 38509,
+      "donorBlock": 1582,
+      "name": "calculator.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 924
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 39959,
+      "donorBlock": 1512,
+      "name": "airdrop",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1423
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 39042,
+      "donorBlock": 1603,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1049
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 39661,
+      "donorBlock": 1609,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1967
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 39653,
+      "donorBlock": 1607,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1872
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 40383,
+      "donorBlock": 1629,
+      "name": "bluetooth",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1049
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 39000,
+      "donorBlock": 1605,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1221
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 38994,
+      "donorBlock": 1597,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1882
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 41576,
+      "donorBlock": 1621,
+      "name": "calculator.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1028
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 43058,
+      "donorBlock": 1659,
+      "name": "airdrop",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1708
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 42143,
+      "donorBlock": 1653,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1178
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 42756,
+      "donorBlock": 1655,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2221
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 42754,
+      "donorBlock": 1645,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2089
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 43478,
+      "donorBlock": 1617,
+      "name": "bluetooth",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1178
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 42111,
+      "donorBlock": 1649,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1334
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 42037,
+      "donorBlock": 1641,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2099
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 8223,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 44687,
+      "donorBlock": 1673,
+      "name": "calculator.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1126
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 43576,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 46043,
+      "donorBlock": 1711,
+      "name": "airdrop",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1834
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 21074,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 45228,
+      "donorBlock": 1669,
+      "name": "bluetooth.slash",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1336
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36228,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 45855,
+      "donorBlock": 1697,
+      "name": "satellite.slash.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2602
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 36231,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 45853,
+      "donorBlock": 1705,
+      "name": "satellite.wave.2",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2428
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 53914,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 46567,
+      "donorBlock": 1715,
+      "name": "bluetooth",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1336
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 20160,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 45200,
+      "donorBlock": 1691,
+      "name": "network.connected.to.line.below.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1567
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 19658,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 45174,
+      "donorBlock": 1687,
+      "name": "satellite.wave.2.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 2471
+    }
+  ],
+  "themedSymbolNames": [
+    "airdrop",
+    "bluetooth",
+    "bluetooth.slash",
+    "calculator.fill",
+    "network.connected.to.line.below.fill",
+    "satellite.slash.fill",
+    "satellite.wave.2",
+    "satellite.wave.2.fill"
+  ],
+  "unrelatedBlockCount": 44740,
+  "unrelatedBlocksSHA256": "410ea660550152b4fb9b4c0d652b7fab7b681b5dd3922b88648a73021334a276"
+}

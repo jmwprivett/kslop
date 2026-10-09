@@ -127,6 +127,29 @@ static bool CNDInspectUnsignedGetter(id object, const char *name,
     }
 }
 
+static int CNDInspectBoolGetter(id object, const char *name)
+{
+    if (!object || !name || !name[0]) return -1;
+    SEL selector = sel_registerName(name);
+    Method method = CNDInspectZeroArgumentMethod(object, selector);
+    if (!method) return -1;
+    char *returnType = method_copyReturnType(method);
+    const char *unqualified = CNDInspectSkipTypeQualifiers(returnType);
+    bool boolReturn = unqualified &&
+        (*unqualified == 'B' || *unqualified == 'c');
+    free(returnType);
+    if (!boolReturn) return -1;
+    @try {
+        return ((BOOL (*)(id, SEL))objc_msgSend)(object, selector) ? 1 : 0;
+    } @catch (NSException *exception) {
+        CNDInspectLog("[CND_INSPECT] bool-getter-exception object=%p/%s "
+                      "selector=%s exception=%s\n",
+                      CNDInspectPointer(object), CNDInspectClassName(object),
+                      name, exception.name.UTF8String ?: "-");
+        return -1;
+    }
+}
+
 static id CNDInspectObjectArgumentGetter(id object, const char *name,
                                          id argument)
 {
@@ -784,6 +807,25 @@ static bool CNDInspectRunOnce(void)
                   CNDInspectPointer(carrier), CNDInspectClassName(carrier),
                   carrierSource[0] ? carrierSource : "view-fallback",
                   NSThread.isMainThread);
+
+    id effectiveAppearance = CNDInspectObjectGetter(
+        carrier, "effectiveIconImageAppearance");
+    NSProcessInfo *processInfo = NSProcessInfo.processInfo;
+    CNDInspectLog("[CND_INSPECT] presentation-state "
+                  "prefersFlat=%d effectivelyFlat=%d square=%d "
+                  "appearance=%p/%s hasGlass=%d shouldLayer=%d "
+                  "displayingLayer=%d lowPower=%d thermal=%ld\n",
+                  CNDInspectBoolGetter(carrier, "prefersFlatImageLayers"),
+                  CNDInspectBoolGetter(
+                      carrier, "effectivelyPrefersFlatImageLayers"),
+                  CNDInspectBoolGetter(carrier, "showsSquareCorners"),
+                  CNDInspectPointer(effectiveAppearance),
+                  CNDInspectClassName(effectiveAppearance),
+                  CNDInspectBoolGetter(effectiveAppearance, "hasGlass"),
+                  CNDInspectBoolGetter(carrier, "shouldDisplayImageLayer"),
+                  CNDInspectBoolGetter(carrier, "isDisplayingImageLayer"),
+                  processInfo.isLowPowerModeEnabled,
+                  (long)processInfo.thermalState);
 
     id displayedImage = nil;
     NSString *visiblePixelHash = nil;

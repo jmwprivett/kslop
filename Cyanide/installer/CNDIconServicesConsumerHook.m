@@ -214,6 +214,7 @@ static int cnd_consumer_remote_errno(void)
  * range. The target maps these signed vnode pages RX; only the adjacent
  * context page remains anonymous RW. */
 static bool cnd_consumer_resolve_payload_vnode(
+    const char *sectionName,
     const uint8_t *payload, size_t payloadLength, uint64_t pageSize,
     size_t contextOffset, NSString **pathOut, uint64_t *sliceOffsetOut,
     uint64_t *fileOffsetOut, NSString **failureOut)
@@ -222,7 +223,8 @@ static bool cnd_consumer_resolve_payload_vnode(
     if (sliceOffsetOut) *sliceOffsetOut = 0;
     if (fileOffsetOut) *fileOffsetOut = 0;
     if (failureOut) *failureOut = nil;
-    if (!payload || !payloadLength || !pageSize || !contextOffset ||
+    if (!sectionName || !sectionName[0] || strlen(sectionName) > 16 ||
+        !payload || !payloadLength || !pageSize || !contextOffset ||
         !pathOut || !sliceOffsetOut || !fileOffsetOut ||
         (uintptr_t)payload % pageSize || contextOffset % pageSize ||
         contextOffset >= payloadLength) {
@@ -261,7 +263,7 @@ static bool cnd_consumer_resolve_payload_vnode(
                     for (uint32_t sectionIndex = 0;
                          sectionIndex < segment->nsects; sectionIndex++) {
                         if (strncmp(sections[sectionIndex].sectname,
-                                    "__cndhook", 16) == 0 &&
+                                    sectionName, 16) == 0 &&
                             strncmp(sections[sectionIndex].segname,
                                     "__TEXT", 16) == 0) {
                             payloadSection = &sections[sectionIndex];
@@ -369,8 +371,9 @@ static bool cnd_consumer_resolve_payload_vnode(
 }
 
 static bool cnd_consumer_map_physical_payload(
+    const char *sectionName,
     const uint8_t *payload, size_t payloadLength, uint64_t pageSize,
-    size_t contextOffset, CNDIconServicesConsumerPayloadContext *context,
+    size_t contextOffset, const void *context, size_t contextLength,
     uint64_t *remoteBaseOut, uint64_t *mappingLengthOut,
     bool *libraryValidationAcceptedOut,
     bool *libraryValidationPolicyFallbackUsedOut,
@@ -386,7 +389,9 @@ static bool cnd_consumer_map_physical_payload(
         *libraryValidationPolicyFallbackUsedOut = false;
     }
     if (libraryValidationErrnoOut) *libraryValidationErrnoOut = 0;
-    if (!payload || !payloadLength || !pageSize || !context ||
+    if (!sectionName || !payload || !payloadLength || !pageSize || !context ||
+        contextOffset >= payloadLength || contextLength == 0 ||
+        contextLength > payloadLength - contextOffset ||
         !remoteBaseOut || !mappingLengthOut ||
         (uintptr_t)payload % pageSize || contextOffset % pageSize ||
         contextOffset >= payloadLength) {
@@ -401,7 +406,7 @@ static bool cnd_consumer_map_physical_payload(
     NSString *failure = nil;
     uint64_t sliceOffset = 0, fileOffset = 0;
     if (!cnd_consumer_resolve_payload_vnode(
-            payload, payloadLength, pageSize, contextOffset,
+            sectionName, payload, payloadLength, pageSize, contextOffset,
             &path, &sliceOffset, &fileOffset, &failure)) {
         if (diagnostic && diagnosticLength) {
             snprintf(diagnostic, diagnosticLength, "%s",
@@ -523,12 +528,11 @@ static bool cnd_consumer_map_physical_payload(
         *libraryValidationErrnoOut = validationError;
     }
 
-    context->remoteBase = remoteBase;
     uint64_t contextAddress = remoteBase + contextOffset;
     bool contextWritten = codeMappingLive &&
         cnd_consumer_prefault_remote_write_range(
-            contextAddress, sizeof(*context)) &&
-        remote_write(contextAddress, context, sizeof(*context));
+            contextAddress, contextLength) &&
+        remote_write(contextAddress, context, contextLength);
     // Do not pull file-backed executable pages through the physical-device
     // shmem mapper. Merely mapping the signed vnode does not guarantee those
     // pages are resident; walking that VM object from Cyanide was observed to
@@ -536,12 +540,12 @@ static bool cnd_consumer_map_physical_payload(
     // mapping is instead established by exact local Mach-O offsets, target
     // F_CHECK_LV, an exact target mmap result, and the target-side execution
     // probe immediately following this helper.
-    CNDIconServicesConsumerPayloadContext observed = {0};
+    NSMutableData *observed = [NSMutableData dataWithLength:contextLength];
     bool contextRead = contextWritten && remote_read(
-        contextAddress, &observed, sizeof(observed));
+        contextAddress, observed.mutableBytes, observed.length);
     bool exact = codeMappingLive && contextWritten &&
         contextRead && remote_call_current_success() &&
-        memcmp(&observed, context, sizeof(observed)) == 0;
+        memcmp(observed.bytes, context, contextLength) == 0;
     if (!exact && allocationLive && remote_call_current_success()) {
         (void)r_dlsym_call(
             R_TIMEOUT, "munmap", remoteBase, mappingLength,
@@ -566,6 +570,24 @@ static bool cnd_consumer_map_physical_payload(
     *remoteBaseOut = remoteBase;
     *mappingLengthOut = mappingLength;
     return true;
+}
+
+BOOL CNDSignedRemotePayloadMapCurrentSession(
+    const char *sectionName,
+    const uint8_t *payload, size_t payloadLength, uint64_t pageSize,
+    size_t contextOffset, const void *context, size_t contextLength,
+    uint64_t *remoteBaseOut, uint64_t *mappingLengthOut,
+    bool *libraryValidationAcceptedOut,
+    bool *libraryValidationPolicyFallbackUsedOut,
+    int *libraryValidationErrnoOut,
+    char *diagnostic, size_t diagnosticLength)
+{
+    return cnd_consumer_map_physical_payload(
+        sectionName, payload, payloadLength, pageSize, contextOffset,
+        context, contextLength, remoteBaseOut, mappingLengthOut,
+        libraryValidationAcceptedOut,
+        libraryValidationPolicyFallbackUsedOut,
+        libraryValidationErrnoOut, diagnostic, diagnosticLength);
 }
 
 static bool cnd_consumer_prepare_method(CNDConsumerHookMethod *method)
@@ -960,15 +982,23 @@ CNDIconServicesConsumerHookInstallInCurrentSession(
     uint64_t remoteBase = 0;
     if (!remote_call_uses_lab_backend()) {
         char mappingDiagnostic[192] = {0};
-        if (!cnd_consumer_map_physical_payload(
-                localPayload, payloadLength, pageSize, contextOffset,
-                &context, &remoteBase, &mappingLength,
+        context.remoteBase = 0; // Patched after the target base is selected.
+        if (!CNDSignedRemotePayloadMapCurrentSession(
+                "__cndhook", localPayload, payloadLength, pageSize,
+                contextOffset, &context, sizeof(context),
+                &remoteBase, &mappingLength,
                 &report.libraryValidationAccepted,
                 &report.libraryValidationPolicyFallbackUsed,
                 &report.libraryValidationErrno,
                 mappingDiagnostic, sizeof(mappingDiagnostic))) {
             cnd_consumer_reason(&report, mappingDiagnostic[0]
                 ? mappingDiagnostic : "consumer-vnode-map-failed");
+            break;
+        }
+        context.remoteBase = remoteBase;
+        if (!remote_write(remoteBase + contextOffset,
+                          &context, sizeof(context))) {
+            cnd_consumer_reason(&report, "payload-context-base-patch-failed");
             break;
         }
         report.mappingAddress = remoteBase;
@@ -1509,8 +1539,12 @@ cnd_consumer_install_physical_flat_image_redirect(
                         failure ?: @"The signed-IMP transaction failed.",
                         rollbackVerified ? @"verified" : @"did not verify"];
                 }
-                /* Refresh ordinary consumers before the separately requested
-                 * dynamic-icon work. Initial Apply uses the cache-only route. */
+                /* Complete SpringBoard's ordinary cache/consumer rebuild
+                 * before repairing the process-local dynamic sources.  The
+                 * Calendar source-cache experiment proved that its provider
+                 * reload must be terminal: a later broad icon reload can
+                 * replace the repaired model/provider and put stock Calendar
+                 * pixels back on the mounted icon. */
                 if (isSpringBoard && refreshSpringBoardCaches &&
                     readbackVerified && remote_call_current_success()) {
                     springBoardRefreshAttempted = YES;
@@ -1522,7 +1556,9 @@ cnd_consumer_install_physical_flat_image_redirect(
                  * Both changes remain process-local and use this one already
                  * open consumer session. Calendar uses the same session to
                  * replace only SBCalendarIconImageProvider's exact
-                 * preparedISIcon source on its concrete provider object. */
+                 * preparedISIcon source on its bounded active provider set.
+                 * No broad cache reset, generic icon reload, or relayout may
+                 * follow Calendar's terminal provider callback. */
                 if (updateStaticDynamicIcons &&
                     readbackVerified && remote_call_current_success()) {
                     staticIconsAttempted = YES;
@@ -1574,11 +1610,13 @@ cnd_consumer_install_physical_flat_image_redirect(
     BOOL presentationVerified = identityBound && abiValidated && installed &&
         readbackVerified && remoteOK && closed && !teardownDeferred &&
         finalIdentityStable;
-    BOOL ok = presentationVerified &&
-        (!refreshSpringBoardCaches ||
-            (springBoardRefreshAttempted && springBoardRefreshVerified)) &&
-        (!updateStaticDynamicIcons ||
-            (staticIconsAttempted && staticIconsVerified));
+    BOOL cacheRefreshRequirementVerified = !refreshSpringBoardCaches ||
+        (springBoardRefreshAttempted && springBoardRefreshVerified);
+    BOOL staticIconRequirementVerified = !updateStaticDynamicIcons ||
+        (staticIconsAttempted && staticIconsVerified);
+    BOOL auxiliaryWorkVerified = cacheRefreshRequirementVerified &&
+        staticIconRequirementVerified;
+    BOOL ok = presentationVerified && auxiliaryWorkVerified;
     NSTimeInterval elapsed =
         (NSProcessInfo.processInfo.systemUptime - started) * 1000.0;
 
@@ -1616,7 +1654,46 @@ cnd_consumer_install_physical_flat_image_redirect(
         }];
     }
 
-    log_user("[SBR_FLAT_IMP] target=%s pid=%d ok=%s redirects=%lu/%lu "
+    NSString *resultStage = nil;
+    NSString *resultMessage = nil;
+    if (ok) {
+        resultStage = installPresentationRedirects
+            ? @"presentation-ready" : @"cache-refresh-ready";
+        resultMessage = !installPresentationRedirects
+            ? @"SpringBoard's bounded icon cache purge and visible-consumer refresh completed without installing presentation redirects."
+            : (allAlreadyInstalled
+                ? @"Every required stock flat-image presentation redirect was already active for this process."
+                : (isSpringBoard
+                    ? @"The stock flat-image presentation branch and app-switcher UIImage route are active through ABI-matched Apple-signed IMP redirects."
+                    : @"The stock flat-image presentation branch is active through an ABI-matched Apple-signed IMP redirect."));
+    } else if (presentationVerified && !cacheRefreshRequirementVerified) {
+        resultStage = @"presentation-ready-cache-refresh-failed";
+        resultMessage = @"The presentation redirect verified, but SpringBoard's requested cache and visible-consumer refresh did not verify.";
+    } else if (presentationVerified && !staticIconRequirementVerified) {
+        resultStage = @"presentation-ready-dynamic-icons-failed";
+        NSDictionary *calendarResult =
+            [staticIconsResult[@"calendarProviderSource"]
+                isKindOfClass:NSDictionary.class]
+                ? staticIconsResult[@"calendarProviderSource"] : @{};
+        NSString *calendarStage =
+            [calendarResult[@"stage"] isKindOfClass:NSString.class]
+                ? calendarResult[@"stage"] : nil;
+        BOOL calendarFailed =
+            [staticIconsResult[@"calendarRequested"] boolValue] &&
+            ![staticIconsResult[@"calendarProviderSourceVerified"] boolValue];
+        resultMessage = calendarFailed
+            ? [NSString stringWithFormat:
+                @"The Spotlight presentation redirect verified, but Calendar's Spotlight provider source did not (%@). Open Spotlight, then retry.",
+                calendarStage ?: @"calendar-provider-source-verify"]
+            : @"The Spotlight presentation redirect verified, but the requested Clock/Calendar source update did not verify.";
+    } else {
+        resultStage = installPresentationRedirects
+            ? @"presentation-install" : @"cache-refresh";
+        resultMessage = failure ?:
+            @"The stock flat-image presentation redirect did not verify.";
+    }
+
+    log_user("[SBR_FLAT_IMP] target=%s pid=%d ok=%s presentation=%s auxiliary=%s redirects=%lu/%lu "
              "switcher=%s existing=%s original=%#llx replacement=%#llx "
              "observed=%#llx "
              "rollback=%s/%s home-refresh=%s/%s static-icons=%s/%s "
@@ -1624,6 +1701,8 @@ cnd_consumer_install_physical_flat_image_redirect(
              "time=%.3fms\n",
              processName.UTF8String ?: "", expectedPID,
              ok ? "yes" : "no",
+             presentationVerified ? "verified" : "failed",
+             auxiliaryWorkVerified ? "verified" : "failed",
              (unsigned long)verifiedRedirectCount,
              (unsigned long)redirectCount,
              isSpringBoard
@@ -1647,20 +1726,8 @@ cnd_consumer_install_physical_flat_image_redirect(
 
     return @{
         @"ok": @(ok),
-        @"stage": ok
-            ? (installPresentationRedirects
-                ? @"presentation-ready" : @"cache-refresh-ready")
-            : (installPresentationRedirects
-                ? @"presentation-install" : @"cache-refresh"),
-        @"message": ok
-            ? (!installPresentationRedirects
-                ? @"SpringBoard's bounded icon cache purge and visible-consumer refresh completed without installing presentation redirects."
-                : (allAlreadyInstalled
-                    ? @"Every required stock flat-image presentation redirect was already active for this process."
-                    : (isSpringBoard
-                        ? @"The stock flat-image presentation branch and app-switcher UIImage route are active through ABI-matched Apple-signed IMP redirects."
-                        : @"The stock flat-image presentation branch is active through an ABI-matched Apple-signed IMP redirect.")))
-            : (failure ?: @"The stock flat-image presentation redirect did not verify."),
+        @"stage": resultStage,
+        @"message": resultMessage,
         @"process": processName ?: @"",
         @"pid": @(sessionPID),
         @"expectedPID": @(expectedPID),
@@ -1695,6 +1762,8 @@ cnd_consumer_install_physical_flat_image_redirect(
             verifiedRedirectCount == redirectCount),
         @"redirects": redirectReports,
         @"methodsReadbackVerified": @(readbackVerified),
+        @"presentationVerified": @(presentationVerified),
+        @"auxiliaryWorkVerified": @(auxiliaryWorkVerified),
         @"transparencyVerified": @(
             installPresentationRedirects && presentationVerified),
         @"rollbackAttempted": @(rollbackAttempted),
@@ -2849,6 +2918,883 @@ CNDIconServicesConsumerHookRefreshSpringBoardForPID(pid_t pid)
     return cnd_consumer_install_physical_flat_image_redirect(
         @"SpringBoard", pid, expectedProc, expectedTask, @{},
         NO, YES, NO);
+}
+
+NSDictionary<NSString *, id> *
+CNDIconServicesConsumerHookRefreshAppLibraryMiniaturesForPID(pid_t pid)
+{
+    if (pid <= 1) {
+        return @{
+            @"ok": @NO, @"stage": @"process-identity",
+            @"message": @"A valid SpringBoard PID is required.",
+            @"process": @"SpringBoard",
+            @"expectedPID": @(pid),
+            @"remoteCallUsed": @NO,
+            @"processLifecycleMutationCount": @0,
+            @"sharedCacheWriteCount": @0,
+        };
+    }
+    if (!kexploit_krw_ready()) {
+        return @{
+            @"ok": @NO, @"stage": @"krw-unavailable",
+            @"message": @"Validated kernel read/write is required to open the bounded SpringBoard session.",
+            @"process": @"SpringBoard",
+            @"expectedPID": @(pid),
+            @"remoteCallUsed": @NO,
+            @"processLifecycleMutationCount": @0,
+            @"sharedCacheWriteCount": @0,
+        };
+    }
+
+    BOOL usesLabRemoteCall = remote_call_lab_backend_opted_in();
+    uint64_t expectedProc = 0;
+    uint64_t expectedTask = 0;
+    BOOL initialIdentityValid = NO;
+    if (usesLabRemoteCall) {
+        pid_t livePID = 0;
+        initialIdentityValid =
+            cnd_lab_resolve_process_pid("SpringBoard", &livePID) == 0 &&
+            livePID == pid;
+    } else {
+        expectedProc = proc_find(pid);
+        expectedTask = expectedProc ? proc_task(expectedProc) : 0;
+        const char *kernelName = expectedProc
+            ? proc_get_p_name(expectedProc) : NULL;
+        initialIdentityValid = is_kaddr_valid(expectedProc) &&
+            is_kaddr_valid(expectedTask) && kernelName &&
+            strcmp(kernelName, "SpringBoard") == 0;
+    }
+    if (!initialIdentityValid) {
+        return @{
+            @"ok": @NO, @"stage": @"process-identity",
+            @"message": @"The exact SpringBoard PID is no longer live.",
+            @"process": @"SpringBoard",
+            @"expectedPID": @(pid),
+            @"remoteCallUsed": @NO,
+            @"processLifecycleMutationCount": @0,
+            @"sharedCacheWriteCount": @0,
+        };
+    }
+
+    if (!usesLabRemoteCall) g_RC_targetProcOverride = expectedProc;
+    RemoteCallSession *session = [[RemoteCallSession alloc]
+        initWithProcess:@"SpringBoard"
+        useMigFilterBypass:NO
+        firstExceptionTimeoutMS:10000];
+    g_RC_targetProcOverride = 0;
+    if (!session) {
+        return @{
+            @"ok": @NO, @"stage": @"springboard-session",
+            @"message": @"SpringBoard could not open the bounded App Library miniature-refresh session.",
+            @"process": @"SpringBoard",
+            @"expectedPID": @(pid),
+            @"remoteCallUsed": @YES,
+            @"processLifecycleMutationCount": @0,
+            @"sharedCacheWriteCount": @0,
+        };
+    }
+
+    BOOL identityBound = usesLabRemoteCall
+        ? session.pid == pid
+        : (session.pid == pid && session.taskAddr == expectedTask &&
+           proc_find(pid) == expectedProc &&
+           proc_task(expectedProc) == expectedTask);
+    __block NSDictionary<NSString *, id> *refresh = nil;
+    __block BOOL remoteOK = NO;
+    NSString *exceptionText = nil;
+    if (identityBound) {
+        @try {
+            remote_call_with_session(session, ^{
+                refresh =
+                    themer_refresh_springboard_app_library_miniatures_in_session();
+                remoteOK = remote_call_current_success();
+            });
+        } @catch (NSException *exception) {
+            exceptionText = [NSString stringWithFormat:@"%@:%@",
+                exception.name ?: @"exception",
+                exception.reason ?: @"unknown"];
+            remoteOK = NO;
+        }
+    }
+
+    if ([session hasLocalState] && ![session hasInFlightSyntheticCall]) {
+        (void)[session destroyRemoteCall];
+    }
+    BOOL teardownDeferred = NO;
+    if ([session hasInFlightSyntheticCall]) {
+        teardownDeferred = [session deferTeardownForInFlightSyntheticCall];
+    }
+    BOOL closed = ![session hasLocalState];
+    BOOL finalIdentityStable = NO;
+    if (usesLabRemoteCall) {
+        pid_t livePID = 0;
+        finalIdentityStable =
+            cnd_lab_resolve_process_pid("SpringBoard", &livePID) == 0 &&
+            livePID == pid;
+    } else {
+        finalIdentityStable = proc_find(pid) == expectedProc &&
+            proc_task(expectedProc) == expectedTask;
+    }
+
+    BOOL ok = identityBound && remoteOK && [refresh[@"ok"] boolValue] &&
+        closed && !teardownDeferred && finalIdentityStable;
+    NSMutableDictionary<NSString *, id> *result =
+        [NSMutableDictionary dictionaryWithDictionary:refresh ?: @{}];
+    result[@"ok"] = @(ok);
+    result[@"stage"] = ok ? @"app-library-miniatures-refreshed" :
+        (refresh[@"stage"] ?: @"app-library-miniature-refresh");
+    result[@"message"] = ok
+        ? (refresh[@"message"] ?:
+            @"The targeted App Library miniature refresh completed.")
+        : (refresh[@"message"] ?:
+            @"The targeted App Library miniature refresh did not complete safely.");
+    result[@"process"] = @"SpringBoard";
+    result[@"expectedPID"] = @(pid);
+    result[@"identityBound"] = @(identityBound);
+    result[@"finalIdentityStable"] = @(finalIdentityStable);
+    result[@"remoteOK"] = @(remoteOK);
+    result[@"closed"] = @(closed);
+    result[@"teardownDeferred"] = @(teardownDeferred);
+    result[@"exception"] = exceptionText ?: @"";
+    result[@"remoteCallUsed"] = @YES;
+    result[@"managerResetIssued"] = refresh[@"managerResetIssued"] ?: @NO;
+    result[@"appLibraryListReloadIssued"] =
+        refresh[@"appLibraryListReloadIssued"] ?: @NO;
+    result[@"relayoutIssued"] = refresh[@"relayoutIssued"] ?: @NO;
+    result[@"objectiveCMethodMutationCount"] =
+        refresh[@"objectiveCMethodMutationCount"] ?: @0;
+    result[@"processLifecycleMutationCount"] = @0;
+    result[@"sharedCacheWriteCount"] = @0;
+    return result;
+}
+
+static BOOL cnd_consumer_remote_method_has_exact_types_for_class(
+    uint64_t classObject,
+    const char *selectorName,
+    BOOL classMethod,
+    const char *expectedTypes)
+{
+    if (!classObject || !selectorName || !expectedTypes ||
+        !remote_call_current_success()) return NO;
+    uint64_t selector = r_sel(selectorName);
+    const char *lookup = classMethod
+        ? "class_getClassMethod" : "class_getInstanceMethod";
+    uint64_t method = selector ? r_dlsym_call(
+        R_TIMEOUT, lookup, classObject, selector,
+        0, 0, 0, 0, 0, 0) : 0;
+    uint64_t types = method ? r_dlsym_call(
+        R_TIMEOUT, "method_getTypeEncoding", method,
+        0, 0, 0, 0, 0, 0, 0) : 0;
+    char actualTypes[96] = {0};
+    return types &&
+        r_read_cstring(types, actualTypes, sizeof(actualTypes)) &&
+        strcmp(actualTypes, expectedTypes) == 0 &&
+        remote_call_current_success();
+}
+
+typedef struct {
+    BOOL abiValidated;
+    BOOL acquired;
+    BOOL retained;
+    BOOL previousInvalidated;
+    BOOL previousPreservedUntilReplacement;
+    BOOL remoteOK;
+    uint64_t assertionPointer;
+    uint64_t observedState;
+    uint64_t errorObject;
+} CNDConsumerSpotlightAssertionReport;
+
+static BOOL cnd_consumer_wait_for_stable_spotlight_identity(
+    BOOL usesLabRemoteCall,
+    pid_t *pidOut,
+    uint64_t *procOut,
+    NSUInteger *stableSamplesOut)
+{
+    if (pidOut) *pidOut = 0;
+    if (procOut) *procOut = 0;
+    if (stableSamplesOut) *stableSamplesOut = 0;
+
+    pid_t candidatePID = 0;
+    uint64_t candidateProc = 0;
+    NSUInteger stableSamples = 0;
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 5.0;
+    while (NSProcessInfo.processInfo.systemUptime < deadline) {
+        pid_t observedPID = 0;
+        uint64_t observedProc = 0;
+        if (usesLabRemoteCall) {
+            (void)cnd_lab_resolve_process_pid("Spotlight", &observedPID);
+        } else {
+            observedProc = proc_find_by_name("Spotlight");
+            if (is_kaddr_valid(observedProc) &&
+                strcmp(proc_get_p_name(observedProc) ?: "", "Spotlight") == 0) {
+                observedPID = (pid_t)kread32(
+                    observedProc + off_proc_p_pid);
+            }
+        }
+
+        BOOL sameIdentity = observedPID > 1 &&
+            observedPID == candidatePID &&
+            (usesLabRemoteCall || observedProc == candidateProc);
+        if (sameIdentity) {
+            stableSamples++;
+        } else {
+            candidatePID = observedPID;
+            candidateProc = observedProc;
+            stableSamples = observedPID > 1 ? 1 : 0;
+        }
+        if (stableSamples >= 2) {
+            if (pidOut) *pidOut = candidatePID;
+            if (procOut) *procOut = candidateProc;
+            if (stableSamplesOut) *stableSamplesOut = stableSamples;
+            return YES;
+        }
+        usleep(100000);
+    }
+    if (stableSamplesOut) *stableSamplesOut = stableSamples;
+    return NO;
+}
+
+static void cnd_consumer_acquire_spotlight_assertion_in_current_session(
+    pid_t spotlightPID,
+    CNDConsumerSpotlightAssertionReport *report)
+{
+    if (!report) return;
+    memset(report, 0, sizeof(*report));
+
+    int previousFloor = remote_call_set_stable_timeout_floor_ms(30000);
+    @try {
+        BOOL frameworkReady = cnd_consumer_load_remote_framework(
+            "/System/Library/PrivateFrameworks/"
+            "RunningBoardServices.framework/RunningBoardServices");
+        uint64_t assertionClass = frameworkReady
+            ? r_class("RBSAssertion") : 0;
+        uint64_t targetClass = frameworkReady ? r_class("RBSTarget") : 0;
+        uint64_t resistanceClass = frameworkReady
+            ? r_class("RBSResistTerminationGrant") : 0;
+        uint64_t jetsamPriorityClass = frameworkReady
+            ? r_class("RBSJetsamPriorityGrant") : 0;
+        report->abiValidated = assertionClass && targetClass &&
+            resistanceClass && jetsamPriorityClass &&
+            cnd_consumer_remote_method_has_exact_types_for_class(
+                assertionClass, "initWithExplanation:target:attributes:",
+                NO, "@40@0:8@16@24@32") &&
+            cnd_consumer_remote_method_has_exact_types_for_class(
+                assertionClass, "acquireWithError:",
+                NO, "B24@0:8o^@16") &&
+            cnd_consumer_remote_method_has_exact_types_for_class(
+                assertionClass, "invalidateSyncWithError:",
+                NO, "B24@0:8o^@16") &&
+            cnd_consumer_remote_method_has_exact_types_for_class(
+                assertionClass, "isValid", NO, "B16@0:8") &&
+            cnd_consumer_remote_method_has_exact_types_for_class(
+                assertionClass, "state", NO, "Q16@0:8") &&
+            cnd_consumer_remote_method_has_exact_types_for_class(
+                targetClass, "targetWithPid:", YES, "@20@0:8i16") &&
+            cnd_consumer_remote_method_has_exact_types_for_class(
+                resistanceClass, "grantWithResistance:",
+                YES, "@20@0:8C16") &&
+            cnd_consumer_remote_method_has_exact_types_for_class(
+                jetsamPriorityClass, "grantWithBackgroundPriority",
+                YES, "@16@0:8");
+        if (!report->abiValidated || !remote_call_current_success()) return;
+
+        uint64_t processInfoClass = r_class("NSProcessInfo");
+        uint64_t arrayClass = r_class("NSArray");
+        uint64_t processInfo = processInfoClass
+            ? r_msg2(processInfoClass, "processInfo", 0, 0, 0, 0) : 0;
+        uint64_t associationKey = r_sel(
+            "cnd_spotlight_noninteractive_assertion");
+        uint64_t getAssociated =
+            cnd_consumer_remote_symbol("objc_getAssociatedObject");
+        uint64_t setAssociated =
+            cnd_consumer_remote_symbol("objc_setAssociatedObject");
+        uint64_t errorSlot = r_dlsym_call(
+            R_TIMEOUT, "calloc", 1, sizeof(uint64_t),
+            0, 0, 0, 0, 0, 0);
+        if (!processInfo || !arrayClass || !associationKey ||
+            !getAssociated || !setAssociated || !errorSlot) return;
+
+        uint64_t existing = r_dlsym_call(
+            R_TIMEOUT, "objc_getAssociatedObject", processInfo, associationKey,
+            0, 0, 0, 0, 0, 0);
+        report->previousInvalidated = existing == 0;
+        BOOL existingTemporarilyRetained = existing == 0;
+        if (existing) {
+            existingTemporarilyRetained =
+                r_msg2(existing, "retain", 0, 0, 0, 0) == existing;
+        }
+        report->previousPreservedUntilReplacement =
+            existingTemporarilyRetained;
+        if (!existingTemporarilyRetained || !remote_call_current_success()) {
+            if (remote_call_current_success()) r_free(errorSlot);
+            return;
+        }
+        (void)r_dlsym_call(
+            R_TIMEOUT, "memset", errorSlot, 0, sizeof(uint64_t),
+            0, 0, 0, 0, 0);
+
+        uint64_t target = r_msg2(
+            targetClass, "targetWithPid:",
+            (uint64_t)(uint32_t)spotlightPID, 0, 0, 0);
+        uint64_t resistance = r_msg2(
+            resistanceClass, "grantWithResistance:", 30U, 0, 0, 0);
+        uint64_t backgroundPriority = r_msg2(
+            jetsamPriorityClass, "grantWithBackgroundPriority", 0, 0, 0, 0);
+        uint64_t attributes = resistance && backgroundPriority
+            ? r_msg2(arrayClass, "arrayWithObject:", resistance, 0, 0, 0) : 0;
+        attributes = attributes
+            ? r_msg2(attributes, "arrayByAddingObject:",
+                     backgroundPriority, 0, 0, 0) : 0;
+        uint64_t explanation = r_nsstr_retained(
+            "Cyanide Spotlight noninteractive background-priority "
+            "lifetime assertion");
+        uint64_t allocation = assertionClass
+            ? r_msg2(assertionClass, "alloc", 0, 0, 0, 0) : 0;
+        uint64_t assertion = allocation && explanation && target && attributes
+            ? r_msg2(allocation, "initWithExplanation:target:attributes:",
+                     explanation, target, attributes, 0) : 0;
+        report->assertionPointer = assertion;
+        if (assertion && remote_call_current_success()) {
+            report->acquired = (r_msg2(
+                assertion, "acquireWithError:", errorSlot, 0, 0, 0) & 1U) != 0;
+            BOOL valid = report->acquired &&
+                ((r_msg2(assertion, "isValid", 0, 0, 0, 0) & 1U) != 0);
+            report->observedState = valid
+                ? r_msg2(assertion, "state", 0, 0, 0, 0) : 0;
+            if (valid && report->observedState == 1U &&
+                remote_call_current_success()) {
+                (void)r_dlsym_call(
+                    R_TIMEOUT, "objc_setAssociatedObject",
+                    processInfo, associationKey, assertion, 1,
+                    0, 0, 0, 0);
+                uint64_t observed = remote_call_current_success()
+                    ? r_dlsym_call(
+                        R_TIMEOUT, "objc_getAssociatedObject",
+                        processInfo, associationKey,
+                        0, 0, 0, 0, 0, 0) : 0;
+                report->retained = observed == assertion &&
+                    ((r_msg2(observed, "isValid", 0, 0, 0, 0) & 1U) != 0) &&
+                    r_msg2(observed, "state", 0, 0, 0, 0) == 1U;
+            }
+            if (report->retained && existing &&
+                remote_call_current_success()) {
+                (void)r_dlsym_call(
+                    R_TIMEOUT, "memset", errorSlot, 0, sizeof(uint64_t),
+                    0, 0, 0, 0, 0);
+                report->previousInvalidated = (r_msg2(
+                    existing, "invalidateSyncWithError:",
+                    errorSlot, 0, 0, 0) & 1U) != 0;
+            }
+            if (!report->retained && remote_call_current_success()) {
+                /* The association may have changed even when readback failed.
+                 * Restore the retained predecessor (or clear the slot) before
+                 * retiring the failed candidate. */
+                (void)r_dlsym_call(
+                    R_TIMEOUT, "objc_setAssociatedObject",
+                    processInfo, associationKey, existing, 1,
+                    0, 0, 0, 0);
+                (void)r_msg2(
+                    assertion, "invalidateSyncWithError:",
+                    errorSlot, 0, 0, 0);
+            }
+            if (remote_call_current_success()) {
+                (void)remote_read(
+                    errorSlot, &report->errorObject,
+                    sizeof(report->errorObject));
+                (void)r_msg2(assertion, "release", 0, 0, 0, 0);
+            }
+        }
+        if (existing && existingTemporarilyRetained &&
+            remote_call_current_success()) {
+            (void)r_msg2(existing, "release", 0, 0, 0, 0);
+        }
+        if (explanation && remote_call_current_success()) {
+            (void)r_msg2(explanation, "release", 0, 0, 0, 0);
+        }
+        if (remote_call_current_success()) r_free(errorSlot);
+        report->remoteOK = remote_call_current_success();
+    } @finally {
+        (void)remote_call_set_stable_timeout_floor_ms(previousFloor);
+    }
+}
+
+NSDictionary<NSString *, id> *
+CNDIconServicesConsumerHookPresentSpotlight(void)
+{
+    if (!kexploit_krw_ready()) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"krw-unavailable",
+            @"message": @"Kernel read/write is required to present Spotlight and bind its lifetime assertion.",
+            @"remoteCallUsed": @NO,
+        };
+    }
+
+    BOOL usesLabRemoteCall = remote_call_lab_backend_opted_in();
+    pid_t springBoardPID = 0;
+    uint64_t springBoardProc = 0;
+    uint64_t springBoardTask = 0;
+    if (usesLabRemoteCall) {
+        (void)cnd_lab_resolve_process_pid(
+            "SpringBoard", &springBoardPID);
+    } else {
+        springBoardProc = proc_find_by_name("SpringBoard");
+        springBoardPID = is_kaddr_valid(springBoardProc)
+            ? (pid_t)kread32(springBoardProc + off_proc_p_pid) : 0;
+        springBoardTask = is_kaddr_valid(springBoardProc)
+            ? proc_task(springBoardProc) : 0;
+    }
+    if (springBoardPID <= 1 ||
+        (!usesLabRemoteCall &&
+         (!is_kaddr_valid(springBoardProc) ||
+          !is_kaddr_valid(springBoardTask) ||
+          strcmp(proc_get_p_name(springBoardProc) ?: "",
+                 "SpringBoard") != 0))) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"process-identity",
+            @"message": @"The exact SpringBoard process identity is unavailable.",
+            @"springBoardPID": @(springBoardPID),
+            @"remoteCallUsed": @NO,
+        };
+    }
+
+    if (!usesLabRemoteCall) g_RC_targetProcOverride = springBoardProc;
+    RemoteCallSession *session = [[RemoteCallSession alloc]
+        initWithProcess:@"SpringBoard"
+        useMigFilterBypass:NO
+        firstExceptionTimeoutMS:10000];
+    g_RC_targetProcOverride = 0;
+    if (!session) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"springboard-session",
+            @"message": @"SpringBoard could not open the bounded Spotlight presentation and assertion session.",
+            @"springBoardPID": @(springBoardPID),
+            @"remoteCallUsed": @YES,
+        };
+    }
+
+    BOOL identityBound = usesLabRemoteCall
+        ? session.pid == springBoardPID
+        : (session.pid == springBoardPID &&
+           session.taskAddr == springBoardTask &&
+           proc_find(springBoardPID) == springBoardProc &&
+           proc_task(springBoardProc) == springBoardTask);
+    __block BOOL abiValidated = NO;
+    __block BOOL applicationResolved = NO;
+    __block BOOL mainThreadDispatchCompleted = NO;
+    __block BOOL spotlightIdentitySettled = NO;
+    __block BOOL remoteOK = NO;
+    __block uint64_t applicationObject = 0;
+    __block pid_t spotlightPID = 0;
+    __block uint64_t spotlightProc = 0;
+    __block NSUInteger stableSpotlightSamples = 0;
+    __block CNDConsumerSpotlightAssertionReport assertionReport = {0};
+    NSString *exceptionText = nil;
+
+    if (identityBound) {
+        @try {
+            remote_call_with_session(session, ^{
+                uint64_t springBoardClass = r_class("SpringBoard");
+                uint64_t applicationClass = r_class("UIApplication");
+                abiValidated = springBoardClass && applicationClass &&
+                    cnd_consumer_remote_method_has_exact_types_for_class(
+                        springBoardClass, "_toggleSearch", NO,
+                        "v16@0:8") &&
+                    cnd_consumer_remote_method_has_exact_types_for_class(
+                        applicationClass, "sharedApplication", YES,
+                        "@16@0:8");
+                if (!abiValidated || !remote_call_current_success()) return;
+
+                applicationObject = r_msg2(
+                    applicationClass, "sharedApplication", 0, 0, 0, 0);
+                uint64_t observedClass = applicationObject
+                    ? r_dlsym_call(
+                        R_TIMEOUT, "object_getClass", applicationObject,
+                        0, 0, 0, 0, 0, 0, 0)
+                    : 0;
+                applicationResolved = r_is_objc_ptr(applicationObject) &&
+                    observedClass == springBoardClass &&
+                    r_responds(applicationObject, "_toggleSearch");
+                if (!applicationResolved ||
+                    !remote_call_current_success()) return;
+
+                uint64_t toggleSelector = r_sel("_toggleSearch");
+                uint64_t performSelector = r_sel(
+                    "performSelectorOnMainThread:withObject:waitUntilDone:");
+                uint64_t failuresBefore =
+                    remote_call_current_io_failure_count();
+                if (toggleSelector && performSelector &&
+                    remote_call_current_success()) {
+                    /* Use NSObject's synchronous main-thread trampoline
+                     * directly. Unlike r_msg2_main's VM optimization, this
+                     * also reaches SpringBoard's actual main thread when the
+                     * explicit vPhone mailbox backend is active. */
+                    (void)r_msg(applicationObject, performSelector,
+                                toggleSelector, 0, 1, 0);
+                    mainThreadDispatchCompleted =
+                        remote_call_current_success() &&
+                        remote_call_current_io_failure_count() ==
+                            failuresBefore;
+                }
+                if (!mainThreadDispatchCompleted ||
+                    !remote_call_current_success()) {
+                    remoteOK = remote_call_current_success();
+                    return;
+                }
+
+                /* _toggleSearch may return before Spotlight has published its
+                 * process. Keep this same SpringBoard session open for a
+                 * bounded identity settle, then acquire the assertion before
+                 * tearing the launch session down. */
+                spotlightIdentitySettled =
+                    cnd_consumer_wait_for_stable_spotlight_identity(
+                        usesLabRemoteCall, &spotlightPID, &spotlightProc,
+                        &stableSpotlightSamples);
+                if (!spotlightIdentitySettled) {
+                    remoteOK = remote_call_current_success();
+                    return;
+                }
+                cnd_consumer_acquire_spotlight_assertion_in_current_session(
+                    spotlightPID, &assertionReport);
+                remoteOK = remote_call_current_success() &&
+                    assertionReport.remoteOK;
+            });
+        } @catch (NSException *exception) {
+            exceptionText = [NSString stringWithFormat:@"%@:%@",
+                exception.name ?: @"exception",
+                exception.reason ?: @"unknown"];
+            remoteOK = NO;
+        }
+    }
+
+    if ([session hasLocalState] && ![session hasInFlightSyntheticCall]) {
+        (void)[session destroyRemoteCall];
+    }
+    BOOL teardownDeferred = NO;
+    if ([session hasInFlightSyntheticCall]) {
+        teardownDeferred = [session deferTeardownForInFlightSyntheticCall];
+    }
+    BOOL closed = ![session hasLocalState];
+
+    pid_t finalSpringBoardPID = 0;
+    pid_t finalSpotlightPID = 0;
+    BOOL finalSpringBoardIdentityStable = NO;
+    BOOL finalSpotlightIdentityStable = NO;
+    if (usesLabRemoteCall) {
+        (void)cnd_lab_resolve_process_pid(
+            "SpringBoard", &finalSpringBoardPID);
+        (void)cnd_lab_resolve_process_pid(
+            "Spotlight", &finalSpotlightPID);
+        finalSpringBoardIdentityStable =
+            finalSpringBoardPID == springBoardPID;
+        finalSpotlightIdentityStable = spotlightIdentitySettled &&
+            finalSpotlightPID == spotlightPID;
+    } else {
+        finalSpringBoardIdentityStable =
+            proc_find(springBoardPID) == springBoardProc &&
+            proc_task(springBoardProc) == springBoardTask;
+        finalSpotlightIdentityStable = spotlightIdentitySettled &&
+            proc_find(spotlightPID) == spotlightProc;
+        finalSpringBoardPID = finalSpringBoardIdentityStable
+            ? springBoardPID : 0;
+        finalSpotlightPID = finalSpotlightIdentityStable ? spotlightPID : 0;
+    }
+    BOOL finalIdentityStable = finalSpringBoardIdentityStable &&
+        finalSpotlightIdentityStable;
+    BOOL assertionOK = assertionReport.abiValidated &&
+        assertionReport.previousPreservedUntilReplacement &&
+        assertionReport.previousInvalidated && assertionReport.acquired &&
+        assertionReport.retained && assertionReport.observedState == 1U &&
+        assertionReport.remoteOK;
+    BOOL ok = identityBound && abiValidated && applicationResolved &&
+        mainThreadDispatchCompleted && spotlightIdentitySettled &&
+        assertionOK && remoteOK && closed && !teardownDeferred &&
+        finalIdentityStable;
+    NSString *message = ok
+        ? @"SpringBoard presented Spotlight and retained its verified lifetime assertion in one bounded session."
+        : (!identityBound || !finalSpringBoardIdentityStable
+            ? @"SpringBoard's process identity changed during Spotlight presentation."
+            : (!abiValidated
+                ? @"This SpringBoard build does not expose the expected global search presentation ABI."
+                : (!applicationResolved
+                    ? @"The exact SpringBoard application object could not be resolved."
+                    : (!mainThreadDispatchCompleted
+                        ? @"SpringBoard did not complete the Spotlight presentation request on its main thread."
+                        : (!spotlightIdentitySettled
+                            ? @"Spotlight opened, but its process identity did not stabilize while the launch session was active."
+                            : (!assertionReport.abiValidated
+                                ? @"This SpringBoard build does not expose the expected Spotlight lifetime assertion ABI."
+                                : (!assertionOK
+                                    ? @"SpringBoard could not retain and verify Spotlight's lifetime assertion in the launch session."
+                                    : (!finalSpotlightIdentityStable
+                                        ? @"Spotlight's process identity changed before the launch session completed."
+                                        : @"The bounded SpringBoard Spotlight presentation session did not close cleanly."))))))));
+    log_user("[SPOTLIGHT_LAUNCH_ASSERTION] sb=%d spotlight=%d "
+             "launch_abi=%d assertion_abi=%d app=%d main=%d settled=%d "
+             "samples=%lu acquired=%d retained=%d state=%llu remote=%d "
+             "closed=%d identity=%d ok=%d\n",
+             springBoardPID, spotlightPID,
+             abiValidated, assertionReport.abiValidated,
+             applicationResolved, mainThreadDispatchCompleted,
+             spotlightIdentitySettled,
+             (unsigned long)stableSpotlightSamples,
+             assertionReport.acquired, assertionReport.retained,
+             (unsigned long long)assertionReport.observedState,
+             remoteOK, closed,
+             finalIdentityStable, ok);
+    return @{
+        @"ok": @(ok),
+        @"stage": ok ? @"spotlight-presented-assertion-ready" :
+            @"spotlight-presentation-assertion",
+        @"message": message,
+        @"springBoardPID": @(springBoardPID),
+        @"spotlightPID": @(spotlightPID),
+        @"finalSpringBoardPID": @(finalSpringBoardPID),
+        @"finalSpotlightPID": @(finalSpotlightPID),
+        @"identityBound": @(identityBound),
+        @"finalIdentityStable": @(finalIdentityStable),
+        @"abiValidated": @(abiValidated),
+        @"assertionABIValidated": @(assertionReport.abiValidated),
+        @"applicationResolved": @(applicationResolved),
+        @"applicationObject": @(applicationObject),
+        @"mainThreadDispatchCompleted": @(mainThreadDispatchCompleted),
+        @"spotlightIdentitySettled": @(spotlightIdentitySettled),
+        @"stableSpotlightSamples": @(stableSpotlightSamples),
+        @"previousInvalidated": @(assertionReport.previousInvalidated),
+        @"previousPreservedUntilReplacement":
+            @(assertionReport.previousPreservedUntilReplacement),
+        @"acquired": @(assertionReport.acquired),
+        @"retained": @(assertionReport.retained),
+        @"state": @(assertionReport.observedState),
+        @"assertionPointer": @(assertionReport.assertionPointer),
+        @"errorObject": @(assertionReport.errorObject),
+        @"remoteOK": @(remoteOK),
+        @"closed": @(closed),
+        @"teardownDeferred": @(teardownDeferred),
+        @"exception": exceptionText ?: @"",
+        @"remoteCallUsed": @YES,
+    };
+}
+
+NSDictionary<NSString *, id> *
+CNDIconServicesConsumerHookRetireSharingUIService(void)
+{
+    static NSString * const processName = @"SharingUIService";
+    NSTimeInterval started = NSProcessInfo.processInfo.systemUptime;
+    if (!kexploit_krw_ready() && !remote_call_lab_backend_opted_in()) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"krw-unavailable",
+            @"message": @"Kernel read/write is required to refresh the live Share sheet image cache.",
+            @"process": processName,
+            @"remoteCallUsed": @NO,
+        };
+    }
+
+    BOOL usesLabRemoteCall = remote_call_lab_backend_opted_in();
+    pid_t expectedPID = 0;
+    uint64_t expectedProc = 0;
+    uint64_t expectedTask = 0;
+    if (usesLabRemoteCall) {
+        (void)cnd_lab_resolve_process_pid(
+            processName.UTF8String, &expectedPID);
+    } else {
+        expectedProc = proc_find_by_name(processName.UTF8String);
+        expectedPID = is_kaddr_valid(expectedProc)
+            ? (pid_t)kread32(expectedProc + off_proc_p_pid) : 0;
+        expectedTask = is_kaddr_valid(expectedProc)
+            ? proc_task(expectedProc) : 0;
+    }
+
+    if (expectedPID <= 1) {
+        log_user("[SBR_SHARE_CACHE] process=SharingUIService "
+                 "running=0 attempted=0 exited=1 replacement=0 ok=1\n");
+        return @{
+            @"ok": @YES,
+            @"stage": @"sharing-ui-not-running",
+            @"message": @"SharingUIService is not resident; its next launch will consume the verified persistent AirDrop record.",
+            @"process": processName,
+            @"processWasRunning": @NO,
+            @"terminationAttempted": @NO,
+            @"ownerExitProven": @YES,
+            @"remoteCallUsed": @NO,
+        };
+    }
+
+    const char *kernelName = !usesLabRemoteCall && expectedProc
+        ? proc_get_p_name(expectedProc) : NULL;
+    BOOL initialIdentityValid = usesLabRemoteCall ||
+        (is_kaddr_valid(expectedProc) && is_kaddr_valid(expectedTask) &&
+         kernelName && strcmp(kernelName, processName.UTF8String) == 0);
+    if (!initialIdentityValid) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"process-identity",
+            @"message": @"The exact SharingUIService process identity could not be validated.",
+            @"process": processName,
+            @"expectedPID": @(expectedPID),
+            @"processWasRunning": @YES,
+            @"terminationAttempted": @NO,
+            @"ownerExitProven": @NO,
+            @"remoteCallUsed": @NO,
+        };
+    }
+
+    if (!usesLabRemoteCall) g_RC_targetProcOverride = expectedProc;
+    RemoteCallSession *session = [[RemoteCallSession alloc]
+        initWithProcess:processName
+        useMigFilterBypass:NO
+        firstExceptionTimeoutMS:10000];
+    g_RC_targetProcOverride = 0;
+    if (!session) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"sharing-ui-session",
+            @"message": @"The live SharingUIService cache owner could not open its bounded refresh session.",
+            @"process": processName,
+            @"expectedPID": @(expectedPID),
+            @"processWasRunning": @YES,
+            @"terminationAttempted": @NO,
+            @"ownerExitProven": @NO,
+            @"remoteCallUsed": @YES,
+        };
+    }
+
+    BOOL identityBound = usesLabRemoteCall
+        ? session.pid == expectedPID
+        : (session.pid == expectedPID &&
+           session.taskAddr == expectedTask &&
+           proc_find(expectedPID) == expectedProc &&
+           proc_task(expectedProc) == expectedTask);
+    __block BOOL dispatched = NO;
+    RemoteCallTerminalDispatchReport dispatchReport = {0};
+    NSString *exceptionText = nil;
+    if (identityBound) {
+        @try {
+            if (usesLabRemoteCall) {
+                remote_call_with_session(session, ^{
+                    (void)r_dlsym_call(
+                        -1, "kill", (uint64_t)(uint32_t)expectedPID,
+                        (uint64_t)SIGKILL, 0, 0, 0, 0, 0, 0);
+                    dispatched = remote_call_current_success();
+                });
+            } else {
+                dispatched = [session
+                    dispatchSelfSIGKILLForExpectedPID:expectedPID
+                    proc:expectedProc
+                    task:expectedTask
+                    report:&dispatchReport] ==
+                        RemoteCallTerminalDispatchPossible;
+            }
+        } @catch (NSException *exception) {
+            exceptionText = [NSString stringWithFormat:@"%@:%@",
+                exception.name ?: @"exception",
+                exception.reason ?: @"unknown"];
+            dispatched = NO;
+        }
+    }
+
+    BOOL ownerExitProven = NO;
+    int consecutiveExitProofs = 0;
+    pid_t observedPID = expectedPID;
+    uint64_t observedProc = expectedProc;
+    uint64_t observedTask = expectedTask;
+    if (dispatched) {
+        /* A terminal RemoteCall has no return. Bound the independent exit
+         * proof to one second; the service normally turns over immediately.
+         * Two samples keep a single transient kernel read from becoming the
+         * authority for abandoning the terminal session. */
+        for (int attempt = 0; attempt < 20; attempt++) {
+            BOOL sample = NO;
+            if (usesLabRemoteCall) {
+                observedPID = 0;
+                int resolution = cnd_lab_resolve_process_pid(
+                    processName.UTF8String, &observedPID);
+                sample = resolution != 0 || observedPID != expectedPID;
+            } else {
+                observedProc = proc_find(expectedPID);
+                observedTask = is_kaddr_valid(observedProc)
+                    ? proc_task(observedProc) : 0;
+                sample = observedProc != expectedProc ||
+                    observedTask != expectedTask;
+            }
+            consecutiveExitProofs = sample
+                ? consecutiveExitProofs + 1 : 0;
+            if (consecutiveExitProofs >= 2) {
+                ownerExitProven = YES;
+                break;
+            }
+            usleep(50000);
+        }
+    }
+
+    BOOL closed = NO;
+    BOOL teardownDeferred = NO;
+    if (dispatched) {
+        /* No ordinary teardown is legal after a one-way self-kill. Once the
+         * exact owner is gone, abandon only Cyanide's local terminal-session
+         * state. If exit proof timed out, abandon still prevents an object
+         * destructor from issuing fresh calls into a possibly dying owner;
+         * the failed result remains visible and retryable. */
+        [session abandonRemoteCall];
+        closed = ![session hasLocalState];
+    } else {
+        if ([session hasLocalState] && ![session hasInFlightSyntheticCall]) {
+            (void)[session destroyRemoteCall];
+        }
+        if ([session hasInFlightSyntheticCall]) {
+            teardownDeferred =
+                [session deferTeardownForInFlightSyntheticCall];
+        }
+        closed = ![session hasLocalState];
+    }
+
+    pid_t replacementPID = 0;
+    if (usesLabRemoteCall) {
+        (void)cnd_lab_resolve_process_pid(
+            processName.UTF8String, &replacementPID);
+    } else {
+        uint64_t replacementProc = proc_find_by_name(
+            processName.UTF8String);
+        replacementPID = is_kaddr_valid(replacementProc)
+            ? (pid_t)kread32(replacementProc + off_proc_p_pid) : 0;
+    }
+    BOOL ok = identityBound && dispatched && ownerExitProven &&
+        closed && !teardownDeferred;
+    NSTimeInterval elapsed =
+        NSProcessInfo.processInfo.systemUptime - started;
+    log_user("[SBR_SHARE_CACHE] process=SharingUIService pid=%d "
+             "identity=%d attempted=1 dispatched=%d exited=%d "
+             "replacement=%d closed=%d deferred=%d ok=%d time=%.3fms\n",
+             expectedPID, identityBound, dispatched, ownerExitProven,
+             replacementPID, closed, teardownDeferred, ok,
+             elapsed * 1000.0);
+    return @{
+        @"ok": @(ok),
+        @"stage": ok ? @"sharing-ui-refreshed" : @"sharing-ui-refresh",
+        @"message": ok
+            ? @"The exact stale SharingUIService cache owner exited; a fresh Share sheet will consume the verified persistent AirDrop record."
+            : @"The bounded SharingUIService cache-owner refresh did not verify.",
+        @"process": processName,
+        @"processWasRunning": @YES,
+        @"expectedPID": @(expectedPID),
+        @"replacementPID": @(replacementPID),
+        @"identityBound": @(identityBound),
+        @"terminationAttempted": @YES,
+        @"terminationDispatched": @(dispatched),
+        @"ownerExitProven": @(ownerExitProven),
+        @"closed": @(closed),
+        @"teardownDeferred": @(teardownDeferred),
+        @"dispatchReason": usesLabRemoteCall
+            ? (dispatched ? @"lab-one-way-self-sigkill-dispatched"
+                          : @"lab-terminal-dispatch-failed")
+            : ([NSString stringWithUTF8String:dispatchReport.reason] ?: @""),
+        @"exception": exceptionText ?: @"",
+        @"remoteCallUsed": @YES,
+        @"elapsedMilliseconds": @(elapsed * 1000.0),
+    };
 }
 
 NSDictionary<NSString *, id> *

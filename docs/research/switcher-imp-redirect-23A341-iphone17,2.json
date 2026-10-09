@@ -1,0 +1,294 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Offline derivation of the matched app-switcher flat-image dispatch redirects; no writer included",
+  "runtimeVerified": false,
+  "os": {
+    "productVersion": "26.0",
+    "productBuildVersion": "23A341",
+    "productType": "iPhone17,2",
+    "deviceClass": "d94ap",
+    "architecture": "arm64e",
+    "identitySource": "local IPSW; device not queried"
+  },
+  "cache": {
+    "main": {
+      "fileName": "dyld_shared_cache_arm64e",
+      "uuid": "DC5F2F67-1FC8-3905-873B-35D17D1A44E8",
+      "sha256": "a54a614e3a24f6a26cea9c3d0f46cd7776635c98ae6bcbdb0f609ddf8a78ab92",
+      "sharedRegionStart": "0x180000000",
+      "codeDirectory": {
+        "sha256": "10faedfde7b44d0ff9c70d323c3601cee1b495d7ec06df115bd2faf700db8742",
+        "cdHash20": "10faedfde7b44d0ff9c70d323c3601cee1b495d7",
+        "hashType": 2,
+        "pageSize": 16384,
+        "verifiedCodePages": 36
+      },
+      "subcache": {
+        "fileName": "dyld_shared_cache_arm64e.19",
+        "uuid": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+        "sha256": "b5b23dff0de2aa23a24e0d600e5dc6368986bad71e1cae6d7b0176913d70be96",
+        "codeDirectory": {
+          "sha256": "acd0de9b9ea6cc0f66011973c6889dcf93757779388b85917eff8f37584c704e",
+          "cdHash20": "acd0de9b9ea6cc0f66011973c6889dcf93757779",
+          "hashType": 2,
+          "pageSize": 16384,
+          "verifiedCodePages": 6753
+        }
+      }
+    },
+    "readOnlySubcache": {
+      "fileName": "dyld_shared_cache_arm64e.34.dyldreadonly",
+      "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58",
+      "sha256": "932d004fd1b7c92aaeb4d9d4fc32188b0df17eadb8155888180ba84e088b87b2",
+      "codeDirectory": {
+        "sha256": "522e90d6cd7a7fd1f4de1589ddb693d6c970266604a15969a6cad806b7e09474",
+        "cdHash20": "522e90d6cd7a7fd1f4de1589ddb693d6c9702666",
+        "hashType": 2,
+        "pageSize": 16384,
+        "verifiedCodePages": 7971
+      }
+    },
+    "codeSubcache": {
+      "fileName": "dyld_shared_cache_arm64e.42",
+      "uuid": "A495BF0F-60DC-3D51-8419-191FB857CE31",
+      "sha256": "958996b7f89018ee370b8301eba0d45eee253bd2ddc13ea5319999b2d9ccf463",
+      "codeDirectory": {
+        "sha256": "6a7a6238bc3f83240e76742c69b782fc970172fb87a237683176c79c8cb952c5",
+        "cdHash20": "6a7a6238bc3f83240e76742c69b782fc970172fb",
+        "hashType": 2,
+        "pageSize": 16384,
+        "verifiedCodePages": 6885
+      }
+    }
+  },
+  "selectorBaseUnslidVMAddress": "0x1fac21900",
+  "encoding": {
+    "kind": "preopt_cache_entry_t packed 26-bit selector offset plus signed 38-bit class-relative IMP",
+    "selectorOffsetBits": 26,
+    "signedRawIMPOffsetBits": 38,
+    "decodeFormula": "IMP = class - (signedRawIMPOffset << 2)",
+    "storesPointerOrPAC": false
+  },
+  "transaction": {
+    "semanticWriteCount": 2,
+    "applyOrder": [
+      "switcher-flat-image-storage",
+      "switcher-flat-image-provider"
+    ],
+    "restoreOrder": [
+      "switcher-flat-image-provider",
+      "switcher-flat-image-storage"
+    ],
+    "intermediateStateIsTypeMismatched": true,
+    "requiresSwitcherQuiescence": true,
+    "distinct16KTargetPages": 2,
+    "requiresExactIdenticalBytesPermissionProofPerPage": true,
+    "reason": "The provider and storage selectors must agree on UIImage versus SBHIconLayerView; the two cache entries are on different .34 pages and cannot be changed by one low-word write."
+  },
+  "redirects": [
+    {
+      "label": "switcher-flat-image-storage",
+      "class": {
+        "name": "SBFluidSwitcherSpaceTitleItem",
+        "unslidVMAddress": "0x281549aa0",
+        "isa": "0x281538188",
+        "superclass": "0x1ed609a98",
+        "initialCacheBuckets": "0x1800d6040",
+        "preoptimizedCache": "0x1ffd55c78",
+        "classRO": "0x2832b82a0",
+        "baseMethods": "0x21e029ab0"
+      },
+      "methodListHeader": {
+        "entsizeAndFlags": "0xc000000f",
+        "count": 24,
+        "entrySize": 12,
+        "relativeEntries": true,
+        "directSelectors": true
+      },
+      "targetMethod": {
+        "selector": "setImageView:",
+        "types": "v24@0:8@16",
+        "entryIndex": 11,
+        "entryUnslidVMAddress": "0x21e029b3c",
+        "entrySubcacheFileOffset": "0x26a5b3c",
+        "entryBytesHex": "8088580041003a00e0a483ff",
+        "selectorOffset": "0x588880",
+        "selectorUnslidVMAddress": "0x1fb1aa180",
+        "decodedIMPUnslidVMAddress": "0x21d864024",
+        "impSubcacheUUID": "A495BF0F-60DC-3D51-8419-191FB857CE31",
+        "impSubcacheFileOffset": "0x1ee0024",
+        "impBytesHex": "e10302aa00c0009164251e14001c40f9"
+      },
+      "replacementMethod": {
+        "selector": "setImage:",
+        "types": "v24@0:8@16",
+        "entryIndex": 21,
+        "entryUnslidVMAddress": "0x21e029bb4",
+        "entrySubcacheFileOffset": "0x26a5bb4",
+        "entryBytesHex": "809ef100c9ff390054a483ff",
+        "selectorOffset": "0xf19e80",
+        "selectorUnslidVMAddress": "0x1fbb3b780",
+        "decodedIMPUnslidVMAddress": "0x21d864010",
+        "impSubcacheUUID": "A495BF0F-60DC-3D51-8419-191FB857CE31",
+        "impSubcacheFileOffset": "0x1ee0010",
+        "impBytesHex": "e10302aa00a0009169251e14001840f9"
+      },
+      "preoptimizedCacheHeader": {
+        "fallbackClassOffset": "0xffffffff6c0bfff8",
+        "shift": 10,
+        "mask": 31,
+        "capacity": 32,
+        "occupied": 24,
+        "hasInlines": false
+      },
+      "targetDispatchEntry": {
+        "slot": 2,
+        "unslidVMAddress": "0x1ffd55c98",
+        "frameUnslidVMAddress": "0x1ffd54000",
+        "offsetWithin16KFrame": "0x1c98",
+        "subcacheFileOffset": "0x7a01c98",
+        "originalValue": "0x1622200018f3969f",
+        "originalLowWord": "0x18f3969f",
+        "selectorOffset": "0x588880",
+        "signedRawIMPOffset": "0x18f3969f",
+        "decodedOriginalIMPUnslidVMAddress": "0x21d864024",
+        "mapping": {
+          "subcacheUUID": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58",
+          "name": "__LINKEDIT",
+          "flags": 32,
+          "readOnlyData": true,
+          "initProt": 1,
+          "maxProt": 1
+        },
+        "guard": {
+          "byteLength": 32,
+          "originalBytesHex": "9f96f31800202216c6c4fd188027631655c4fd18401004029c96f31880096528",
+          "originalSHA256": "b6a02bcbea6565262119430eaaaf00b4c83d8420d93192e477bafd9046c63c8d",
+          "redirectedBytesHex": "a496f31800202216c6c4fd188027631655c4fd18401004029c96f31880096528",
+          "redirectedSHA256": "871e669c50d5c12dc14d73637f49d0560e536a7bde7980fb4873ed7ca319488a"
+        }
+      },
+      "replacementEncoding": {
+        "sourceSelector": "setImage:",
+        "sourceIMPUnslidVMAddress": "0x21d864010",
+        "sourceDispatchSlot": 7,
+        "sourceDispatchEntryUnslidVMAddress": "0x1ffd55cc0",
+        "sourceDispatchValue": "0x3c67a00018f396a4",
+        "signedRawIMPOffset": "0x18f396a4",
+        "redirectedValue": "0x1622200018f396a4",
+        "redirectedLowWord": "0x18f396a4",
+        "lowWordOnly": true,
+        "sameSubcacheAsOriginalIMP": true,
+        "appleSignedCodePageVerified": true
+      }
+    },
+    {
+      "label": "switcher-flat-image-provider",
+      "class": {
+        "name": "SBFluidSwitcherSpaceTitleItemController",
+        "unslidVMAddress": "0x281549a78",
+        "isa": "0x281538160",
+        "superclass": "0x1ed609a98",
+        "initialCacheBuckets": "0x1800d6040",
+        "preoptimizedCache": "0x1ffd8b428",
+        "classRO": "0x283474e40",
+        "baseMethods": "0x21e029bd8"
+      },
+      "methodListHeader": {
+        "entsizeAndFlags": "0xc000000f",
+        "count": 26,
+        "entrySize": 12,
+        "relativeEntries": true,
+        "directSelectors": true
+      },
+      "targetMethod": {
+        "selector": "_iconViewForDisplayItem:",
+        "types": "@24@0:8@16",
+        "entryIndex": 11,
+        "entryUnslidVMAddress": "0x21e029c64",
+        "entrySubcacheFileOffset": "0x26a5c64",
+        "entryBytesHex": "44076a00ebfa3900607ce7ff",
+        "selectorOffset": "0x6a0744",
+        "selectorUnslidVMAddress": "0x1fb2c2044",
+        "decodedIMPUnslidVMAddress": "0x21dea18cc",
+        "impSubcacheUUID": "A495BF0F-60DC-3D51-8419-191FB857CE31",
+        "impSubcacheFileOffset": "0x251d8cc",
+        "impBytesHex": "7f2303d5eb2bba6de923016df85f02a9"
+      },
+      "replacementMethod": {
+        "selector": "_iconImageForDisplayItem:",
+        "types": "@24@0:8@16",
+        "entryIndex": 13,
+        "entryUnslidVMAddress": "0x21e029c7c",
+        "entrySubcacheFileOffset": "0x26a5c7c",
+        "entryBytesHex": "80028300d3fa3900407be7ff",
+        "selectorOffset": "0x830280",
+        "selectorUnslidVMAddress": "0x1fb451b80",
+        "decodedIMPUnslidVMAddress": "0x21dea17c4",
+        "impSubcacheUUID": "A495BF0F-60DC-3D51-8419-191FB857CE31",
+        "impSubcacheFileOffset": "0x251d7c4",
+        "impBytesHex": "7f2303d5f85fbca9f65701a9f44f02a9"
+      },
+      "preoptimizedCacheHeader": {
+        "fallbackClassOffset": "0xffffffff6c0c0020",
+        "shift": 16,
+        "mask": 31,
+        "capacity": 32,
+        "occupied": 26,
+        "hasInlines": false
+      },
+      "targetDispatchEntry": {
+        "slot": 10,
+        "unslidVMAddress": "0x1ffd8b488",
+        "frameUnslidVMAddress": "0x1ffd88000",
+        "offsetWithin16KFrame": "0x3488",
+        "subcacheFileOffset": "0x7a37488",
+        "originalValue": "0x1a81d10018daa06b",
+        "originalLowWord": "0x18daa06b",
+        "selectorOffset": "0x6a0744",
+        "signedRawIMPOffset": "0x18daa06b",
+        "decodedOriginalIMPUnslidVMAddress": "0x21dea18cc",
+        "mapping": {
+          "subcacheUUID": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58",
+          "name": "__LINKEDIT",
+          "flags": 32,
+          "readOnlyData": true,
+          "initProt": 1,
+          "maxProt": 1
+        },
+        "guard": {
+          "byteLength": 32,
+          "originalBytesHex": "6ba0da1800d1811a7da1da184027f002eba1da1800fc012bf3a0da1880cb412b",
+          "originalSHA256": "2ac25189bf7558fb561f96f691ccfa03a87321aefafa93eb6994db14c37bd04e",
+          "redirectedBytesHex": "ada0da1800d1811a7da1da184027f002eba1da1800fc012bf3a0da1880cb412b",
+          "redirectedSHA256": "eb3bd99b13461c8e1c8db8e84d22fdb54d600ff7a96bfeb16907e8f488041113"
+        }
+      },
+      "replacementEncoding": {
+        "sourceSelector": "_iconImageForDisplayItem:",
+        "sourceIMPUnslidVMAddress": "0x21dea17c4",
+        "sourceDispatchSlot": 3,
+        "sourceDispatchEntryUnslidVMAddress": "0x1ffd8b450",
+        "sourceDispatchValue": "0x20c0a00018daa0ad",
+        "signedRawIMPOffset": "0x18daa0ad",
+        "redirectedValue": "0x1a81d10018daa0ad",
+        "redirectedLowWord": "0x18daa0ad",
+        "lowWordOnly": true,
+        "sameSubcacheAsOriginalIMP": true,
+        "appleSignedCodePageVerified": true
+      }
+    }
+  ],
+  "appLibraryMiniatureFinding": {
+    "status": "separate-composite-route-no-dispatch-redirect-selected",
+    "consumer": "SBFolderIconImageCache",
+    "entryMethod": "gridCellImageForIcon:imageAppearance:",
+    "entryMethodUnslidVMAddress": "0x1bdfc4308",
+    "rendererMethod": "gridCellImageOfSize:forIcon:iconImageInfo:imageAppearance:imageAttributes:",
+    "rendererMethodUnslidVMAddress": "0x1bdfc40b0",
+    "imageRequest": "-[SBIcon iconImageWithInfo:traitCollection:options:] with options=1",
+    "compositor": "+[SBFolderIconImageCache gridCellImageOfSize:forIconImage:]",
+    "compositorUnslidVMAddress": "0x1bdfc41cc",
+    "conclusion": "The 27-point children are rasterized into a folder/category composite and do not consult SBIconImageView's flat-layer selector. Offline disassembly has not established one ABI-safe data-only redirect that removes the already-rendered plate."
+  }
+}

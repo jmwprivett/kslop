@@ -104,6 +104,26 @@ int main(void) {
         journal[@"variants"] = @[untouchedVariant()];
         journal[@"state"] = @"active";
         CHECK(!CNDRemixJournalProvesNoIconServicesMutation(journal));
+
+        NSMutableDictionary *prepared = [@{
+            @"state": @"prepared", @"publicationDispatchPossible": @NO,
+        } mutableCopy];
+        CHECK(CNDRemixVariantProvesNoIconServicesMutation(prepared));
+        journal[@"state"] = @"prepared";
+        journal[@"variants"] = @[prepared];
+        CHECK(CNDRemixJournalProvesNoIconServicesMutation(journal));
+        prepared[@"state"] = @"dispatch-possible";
+        prepared[@"publicationDispatchPossible"] = @YES;
+        CHECK(!CNDRemixJournalProvesNoIconServicesMutation(journal));
+        prepared[@"publication"] = untouchedReport();
+        CHECK(CNDRemixJournalProvesNoIconServicesMutation(journal));
+        prepared[@"restorationDispatchPossible"] = @YES;
+        CHECK(!CNDRemixJournalProvesNoIconServicesMutation(journal));
+        prepared[@"restoration"] = untouchedReport();
+        CHECK(CNDRemixJournalProvesNoIconServicesMutation(journal));
+        [prepared removeObjectForKey:@"publication"];
+        prepared[@"publicationDispatchPossible"] = @"0";
+        CHECK(!CNDRemixJournalProvesNoIconServicesMutation(journal));
     }
     return 0;
 }
@@ -161,10 +181,27 @@ class RemixRecoveryTests(unittest.TestCase):
 
     def test_failed_untouched_journal_removal_is_cleanup_not_dirty_data(self) -> None:
         early = self.restore[:self.restore.index("CNDIconServicesPublisherBeginBatch(")]
-        self.assertIn('BOOL ok = discardFailures == 0;', early)
+        self.assertIn('BOOL ok = YES;', early)
         self.assertIn('@"persistentDataClean": @YES', early)
         self.assertIn('@"persistentRecoveryOK": @(ok)', early)
+        self.assertIn('@"journalCleanupOK": @(discardFailures == 0)', early)
+        self.assertIn('NSUInteger failed = 0, plannedVariants = 0;', self.restore)
         self.assertIn("persistentClean = discardedUnmutated + discardFailures;", self.restore)
+
+    def test_restore_checkpoints_only_the_descriptor_about_to_mutate(self) -> None:
+        audit = self.restore.index("CNDIconServicesPublisherAuditVariantInBatch(")
+        restoring = self.restore.index('dispatchVariant[@"state"] = @"restoring";')
+        checkpoint = self.restore.index("CNDRemixWriteIconServicesJournal(journal)", restoring)
+        generation = self.restore.index("CNDIconServicesPublisherRestoreStockVariantInBatch(")
+        self.assertLess(audit, restoring)
+        self.assertLess(restoring, checkpoint)
+        self.assertLess(checkpoint, generation)
+        self.assertNotIn('journal[@"state"] = @"restoring";', self.restore[:audit])
+
+    def test_verified_stock_journal_cleanup_does_not_count_as_dirty_failure(self) -> None:
+        self.assertIn("else if (appVerified) {\n                        journalCleanupFailures++;", self.restore)
+        self.assertIn('@"ok": @(appVerified)', self.restore)
+        self.assertIn('@"journalCleanupOK": @(journalCleanupFailures == 0)', self.restore)
 
     def test_restore_springboard_session_is_not_skipped(self) -> None:
         helper_start = self.source.index(

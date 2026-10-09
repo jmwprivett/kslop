@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 #include <errno.h>
+#include <limits.h>
 #include <mach/mach.h>
 #include <mach/arm/thread_status.h>
 #include <mach-o/loader.h>
@@ -68,6 +69,73 @@ typedef int (*CNDKRWInitializer)(CNDKRWHandlers *handlers);
 static void *g_libkrw_handle;
 static CNDKReadFunction g_libkrw_read;
 static CNDKWriteFunction g_libkrw_write;
+static CNDKCallFunction g_libkrw_kcall;
+static int g_vphone_kcall_syscall;
+
+enum {
+    CND_VPHONE_KCALL_SYSCALL = 439,
+    CND_VPHONE_KCALL_MAX_ARGUMENTS = 7,
+};
+
+static int kernel_call_target_valid(uint64_t base, uint64_t function)
+{
+    static const uint64_t maximum_kernel_image_span = 0x40000000ULL;
+    return base != 0 && function >= base &&
+        function - base < maximum_kernel_image_span &&
+        (function & 0x3ULL) == 0;
+}
+
+/*
+ * The jailbroken vPhone firmware reserves syscall 439 for its ABI-correct
+ * target + seven arguments kernel-call cave. Use the raw Darwin arm64 syscall
+ * convention so a successful UINT64_MAX result is not mistaken for errno.
+ */
+static int vphone_kcall_syscall(uint64_t function, size_t argument_count,
+                               const uint64_t *arguments, uint64_t *result)
+{
+    if (!result || argument_count > CND_VPHONE_KCALL_MAX_ARGUMENTS ||
+        (argument_count != 0 && !arguments)) {
+        return EINVAL;
+    }
+    uint64_t values[CND_VPHONE_KCALL_MAX_ARGUMENTS] = {0};
+    if (argument_count != 0) {
+        memcpy(values, arguments, argument_count * sizeof(values[0]));
+    }
+    register uint64_t x0 __asm("x0") = function;
+    register uint64_t x1 __asm("x1") = values[0];
+    register uint64_t x2 __asm("x2") = values[1];
+    register uint64_t x3 __asm("x3") = values[2];
+    register uint64_t x4 __asm("x4") = values[3];
+    register uint64_t x5 __asm("x5") = values[4];
+    register uint64_t x6 __asm("x6") = values[5];
+    register uint64_t x7 __asm("x7") = values[6];
+    register uint64_t x16 __asm("x16") = CND_VPHONE_KCALL_SYSCALL;
+    unsigned int failed = 0;
+    __asm__ volatile(
+        "svc #0x80\n\t"
+        "cset %w[failed], cs"
+        : "+r"(x0), [failed] "=&r"(failed)
+        : "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5), "r"(x6),
+          "r"(x7), "r"(x16)
+        : "cc", "memory");
+    if (failed) return x0 <= INT_MAX ? (int)x0 : EIO;
+    *result = x0;
+    return 0;
+}
+
+static int vphone_kcall_syscall_available(void)
+{
+    uint64_t ignored = 0;
+    int result = vphone_kcall_syscall(0, 0, NULL, &ignored);
+    /* The patched cave rejects a null target; stock kas_info is ENOTSUP. */
+    return result == EINVAL;
+}
+
+static CNDKCallFunction active_kernel_call(void)
+{
+    if (g_libkrw_kcall) return g_libkrw_kcall;
+    return g_vphone_kcall_syscall ? vphone_kcall_syscall : NULL;
+}
 
 /*
  * kinfo_proc.p_comm is limited to MAXCOMLEN (16) characters.  Several of the
@@ -301,6 +369,7 @@ static int activate_libkrw(uint64_t *base, const char **source)
             g_libkrw_handle = handle;
             g_libkrw_read = handlers.kread;
             g_libkrw_write = handlers.kwrite;
+            g_libkrw_kcall = handlers.kcall;
             *base = candidate;
             if (source) *source = "libkrw-tfp0";
             return 0;
@@ -311,6 +380,7 @@ static int activate_libkrw(uint64_t *base, const char **source)
                 plugin_paths[i], initialize_result, base_result, read_result,
                 candidate, magic);
         dlclose(handle);
+        g_libkrw_kcall = NULL;
     }
 
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
@@ -327,6 +397,8 @@ static int activate_libkrw(uint64_t *base, const char **source)
             (CNDKReadFunction)dlsym(handle, "kread");
         CNDKWriteFunction kwrite =
             (CNDKWriteFunction)dlsym(handle, "kwrite");
+        CNDKCallFunction kcall =
+            (CNDKCallFunction)dlsym(handle, "kcall");
         uint64_t candidate = 0;
         uint32_t magic = 0;
         int base_result = kbase ? kbase(&candidate) : ENOSYS;
@@ -339,6 +411,7 @@ static int activate_libkrw(uint64_t *base, const char **source)
             g_libkrw_handle = handle;
             g_libkrw_read = kread;
             g_libkrw_write = kwrite;
+            g_libkrw_kcall = kcall;
             *base = candidate;
             if (source) *source = "libkrw";
             return 0;
@@ -348,6 +421,7 @@ static int activate_libkrw(uint64_t *base, const char **source)
                 "readResult=%d base=%#llx magic=%#x\n",
                 paths[i], base_result, read_result, candidate, magic);
         dlclose(handle);
+        g_libkrw_kcall = NULL;
     }
     return ENOENT;
 }
@@ -403,7 +477,8 @@ static int handle_client(int client, mach_port_t kernel_task, uint64_t base)
         int has_payload = request.operation == CNDLabKRWOperationWrite ||
             request.operation == CNDLabKRWOperationResolvePID ||
             request.operation == CNDLabKRWOperationTaskWrite ||
-            request.operation == CNDLabKRWOperationTaskThreadStart;
+            request.operation == CNDLabKRWOperationTaskThreadStart ||
+            request.operation == CNDLabKRWOperationKernelCall;
         int returns_payload = request.operation == CNDLabKRWOperationRead ||
             request.operation == CNDLabKRWOperationTaskRead;
         if (request.magic != CND_LAB_KRW_MAGIC ||
@@ -429,6 +504,9 @@ static int handle_client(int client, mach_port_t kernel_task, uint64_t base)
             if ((g_libkrw_read && g_libkrw_write && base != 0) ||
                 (MACH_PORT_VALID(kernel_task) && base != 0)) {
                 capabilities |= CNDLabKRWCapabilityKernelReadWrite;
+            }
+            if (active_kernel_call() && base != 0) {
+                capabilities |= CNDLabKRWCapabilityKernelCall;
             }
             result = send_response(client, capabilities ? 0 : ENOTSUP, 0,
                                    capabilities);
@@ -466,6 +544,33 @@ static int handle_client(int client, mach_port_t kernel_task, uint64_t base)
                 status = kr == KERN_SUCCESS ? 0 : EIO;
             }
             result = send_response(client, status, 0, 0);
+        } else if (request.operation == CNDLabKRWOperationKernelCall) {
+            int status = ENOTSUP;
+            uint64_t call_result = 0;
+            if (request.address != 0 ||
+                request.length != sizeof(CNDLabKernelCallRequest)) {
+                status = EINVAL;
+            } else {
+                CNDLabKernelCallRequest call = {0};
+                memcpy(&call, payload, sizeof(call));
+                if (call.version != CND_LAB_KCALL_ABI_VERSION ||
+                    call.argument_count > CND_LAB_KCALL_MAX_ARGUMENTS ||
+                    !kernel_call_target_valid(base, call.function)) {
+                    status = EINVAL;
+                } else if (active_kernel_call()) {
+                    if (!g_libkrw_kcall &&
+                        call.argument_count >
+                            CND_VPHONE_KCALL_MAX_ARGUMENTS) {
+                        status = E2BIG;
+                    } else {
+                        status = active_kernel_call()(
+                            call.function, call.argument_count,
+                            call.arguments, &call_result);
+                    }
+                }
+            }
+            result = send_response(client, status, 0,
+                                   status == 0 ? call_result : 0);
         } else if (request.operation == CNDLabKRWOperationResolvePID) {
             int status = ESRCH;
             pid_t found_pid = 0;
@@ -727,6 +832,9 @@ static mach_port_t acquire_kernel_task(void)
 
 int main(int argc, char **argv)
 {
+    g_vphone_kcall_syscall = vphone_kcall_syscall_available();
+    fprintf(stderr, "vphone kcall syscall=%s\n",
+            g_vphone_kcall_syscall ? "available" : "unavailable");
     mach_port_t kernel_task = acquire_kernel_task();
     const char *socket_path = argc >= 3
         ? argv[2] : CND_LAB_KRW_SOCKET_PATH;
@@ -804,11 +912,16 @@ int main(int argc, char **argv)
         (MACH_PORT_VALID(kernel_task) && base != 0)) {
         capabilities |= CNDLabKRWCapabilityKernelReadWrite;
     }
+    if (active_kernel_call() && base != 0) {
+        capabilities |= CNDLabKRWCapabilityKernelCall;
+    }
     FILE *marker = fopen(CND_LAB_KRW_MARKER_PATH, "w");
     if (!marker) return 6;
     fprintf(marker,
-            "version=1\npid=%d\nsocket=%s\ncapabilities=%#llx\n",
-            getpid(), socket_path, capabilities);
+            "version=1\npid=%d\nsocket=%s\nargument=%s\n"
+            "capabilities=%#llx\n",
+            getpid(), socket_path, argc >= 2 ? argv[1] : "auto",
+            capabilities);
     fclose(marker);
 
     printf("ready socket=%s kernelTask=%#x base=%#llx source=%s "

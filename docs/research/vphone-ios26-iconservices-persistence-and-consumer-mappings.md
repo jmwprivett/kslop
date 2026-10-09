@@ -370,6 +370,65 @@ That instruction patch suppresses the chiclet globally in that process. It is
 useful as a control but is not the themed-only solution, and it must not be
 described as if it were the four-hook marker-aware mapping.
 
+## Flat persistent `IFImage.data` control (negative result)
+
+On 2026-09-27, the 23A341 VM tested whether publication itself could select
+the flat presentation path and eliminate the Spotlight PID redirect. This was
+not the earlier failed `prepareImageForDescriptor:` experiment. The lab
+publisher successfully constructed the replacement with the exact runtime ABI
+
+```objc
+-[IFImage initWithCGImage:scale:] // @32@0:8^{CGImage=}16d24
+```
+
+and returned its `data` from the normal one-shot
+`generateImageReturningRecordIdentifiers:` transaction. No synthetic
+`layerData` was supplied.
+
+The control first regenerated and verified the stock 68-point eBay record:
+
+- UUID `7621092D-4DC3-3721-B0DE-4A761F9C6A69`;
+- 204 by 204 RGBA SHA-256
+  `47ab4a73026bf9ccec41c2209851f4f1bf17aa76f9ccc19acc0c45e5492ecf4f`.
+
+The flat replacement then survived an `iconservicesagent` replacement and an
+unhooked persistent readback:
+
+- UUID `1A1EA239-E714-3BB2-8B51-C39E5CCCFB43`;
+- 166,512-byte response SHA-256
+  `68baef076582ad5816da9287bc351f7141a8988858181a617b48e5707dd42cbb`;
+- 204 by 204 RGBA SHA-256
+  `c2277e4250cdbc8d9daa0b871f7d5dca5c7990c7f350f3f32a5e2e215cb0a8f9`;
+- `layerData.length == 0` and `ICRIconLayer == nil` after reconstructing the
+  stored response as `IFCacheImage`.
+
+Spotlight PID 431 was terminated and the first target row was created in fresh
+PID 596. The experiment installed no flat-preference or chiclet redirect; the
+signed-IMP probe reported `mutation=none` and only set the visible query text.
+The 68-point Top Hit displayed an empty rounded plate rather than the themed
+pixels.
+
+The read-only live-object inspection proved this was not a persistent-store or
+`SearchUIIconImageCache` miss:
+
+- the visible row was `SearchUIHomeScreenAppIconView` variant 5 at 68 points;
+- `cachedImageForIcon:` contained the exact themed RGBA hash `c2277e42...`;
+- its `SBIconImageView` had `displayedImage == nil` and layer opacity `0`;
+- `contentsLayerView` was `SBHIconLayerView`, but both its `ICRIconLayer`
+  getter and the carrier's `ICRIconLayer` getter were nil.
+
+Thus the consumer had accepted and cached the flat bitmap, but the normal
+Spotlight icon-view path did not materialize it as a visible image. Plain flat
+persistent bytes do **not** replace the process-local presentation redirect.
+The structured persistent payload remains necessary for the other consumers,
+and Spotlight still needs its stock flat-image branch selected before the row
+is built.
+
+Stock was regenerated afterward. A clean readback restored the original stock
+RGBA hash, and fresh Spotlight PID 694 displayed the normal eBay Top Hit. The
+visual controls are retained under
+`~/Library/CyanideVPhoneLab/evidence/spotlight-flat-payload-20260927/`.
+
 ## Final transparent presentation route
 
 The four-hook mapping proved that consumer presentation, rather than store
@@ -400,6 +459,104 @@ is an existing Apple-signed always-true IMP. The tracing dylib present during
 the final control only logged calls and invoked originals; it did not mutate
 presentation. Restarting Spotlight removed prior broad prominence and opaque
 experiments, so the single flat-preference redirect explains the result.
+
+### Stock Low Power Mode branch and caller trace
+
+A later control proved that the redirect selects an existing stock policy
+branch rather than providing a renderer that Spotlight otherwise lacks. With
+the structured eBay record still installed, Low Power Mode was enabled and a
+fresh Spotlight PID was allowed to construct the row without a presentation
+redirect. The row displayed the transparent themed pixels without the grey
+plate. Its live state was:
+
+```text
+prefersFlat=0 effectivelyFlat=1 square=0
+appearance=SBHLightIconImageAppearance hasGlass=0
+lowPower=1 thermal=0
+```
+
+The persistent response remained UUID
+`841834B2-4176-3FB4-A4BA-E5752207BD41`, data SHA-256
+`80b73f23ed6e9902dd1dad2ee90712b80f4c1caf1e06a4d64a3a0618a7450d6b`,
+and RGBA SHA-256
+`c2277e4250cdbc8d9daa0b871f7d5dca5c7990c7f350f3f32a5e2e215cb0a8f9`.
+The same RGBA hash reached the visible alternate `CALayer`. This distinguishes
+the stock flat-presentation policy from publication and cache lookup.
+
+`scripts/lab/cnd_spotlight_transition_trace.m` was then injected into fresh
+Spotlight PID 1293 before setting the eBay query. It interposed the exact
+Objective-C ABIs for these methods while always invoking their original IMPs:
+
+```text
+-[SBIconView setPrefersFlatImageLayers:]               v20@0:8B16
+-[SBIconImageView setPrefersFlatImageLayers:]          v20@0:8B16
+-[SBIconView setShowsSquareCorners:]                   v20@0:8B16
+-[SBIconImageView setShowsSquareCorners:]              v20@0:8B16
+-[SBIconImageView effectivelyPrefersFlatImageLayers]   B16@0:8
+```
+
+The first eBay row construction produced no positive flat-policy setter. Its
+actual configuration chain was:
+
+```text
+SearchUIHomeScreenAppIconView updateWithRowModel:
+  -> SBIconView setIcon:animated:
+  -> SBIconView _updateIconImageViewAnimated:
+  -> SBIconView _makeIconImageView
+  -> SBIconView _configureIconImageView:
+       -> SBIconImageView setShowsSquareCorners:0
+       -> SBIconImageView setPrefersFlatImageLayers:0
+  -> SBIconView _updateIconImageViewAnimated:
+       -> SBIconImageView setPrefersFlatImageLayers:0
+```
+
+Thus SearchUI does not configure this result as a flat icon. It creates an
+ordinary `SBIconImageView` with both stored flags false. The observed calls to
+`effectivelyPrefersFlatImageLayers` came from the stock SpringBoardHome image
+update machinery:
+
+```text
+SBIconImageView iconImageOptions
+  <- SBIconImageView needsContentsLayerUpdate
+  <- SBIconImageView updateImageSublayerAnimated:
+  <- SBIconImageView updateImageAnimated:
+  <- SBIconImageView setIcon:location:animated:
+
+SBIconImageView iconImageOptions
+  <- SBIconImageView updateImageSublayerAnimated:
+  <- SBIconImageView updateImageAnimated:
+  <- SBIconView didMoveToWindow
+  <- SearchUIHomeScreenAppIconView didMoveToWindow
+
+SBIconImageView iconImageOptions
+  <- SBIconImageView updateExistingIconLayerAnimated:
+  <- SBIconImageView updateImageSublayerAnimated:
+```
+
+In every target call the stored flags remained false, appearance `hasGlass`
+remained false, thermal state remained nominal, and the method returned true
+only because Low Power Mode was enabled. Static disassembly of iOS 26.0 build
+23A341 agrees with the runtime trace: the method returns true for an explicit
+flat preference; for square corners with a non-glass appearance; for Low Power
+Mode; or for serious/critical thermal state.
+
+Static cross-reference enumeration also found the stock positive-policy
+propagation paths in SpringBoardHome. `SBHIconManager` distributes its own
+`prefersFlatImageLayers` value through
+`configureIconView:forIcon:`, `configureLibraryViewController:`, library pod
+configuration, and floating-dock configuration. None of those manager-owned
+paths appeared in the Spotlight result-row construction trace. Spotlight's
+SearchUI row directly owns the `SBIconView`, leaving the value false. This is
+why toggling the SpringBoard icon manager cannot be assumed to configure a
+future Spotlight PID.
+
+The conclusion is narrower than “Spotlight requires a custom renderer.” It
+does not. Spotlight requires the stock flat-image policy to evaluate true for
+these transparent themed rows. Low Power Mode proves that stock end-to-end
+route. Without Low Power Mode, square corners, or a serious thermal state, the
+normal SearchUI construction path supplies no stock positive preference, so a
+process-local policy selection is still required unless another supported
+configuration entry point can be found.
 
 ### Physical-device installer
 
@@ -443,49 +600,161 @@ retroactive to a row or icon layer already materialized, so the installer must
 run against a fresh/dormant PID before Spotlight rows are built; existing views
 must be reconstructed after installation.
 
-### Phase-4 production process lifecycle
+### SpringBoard-owned Spotlight lifetime assertion preflight
 
-`CNDIconServicesConsumerLifecycleCoordinator.m` observes SpringBoard and
-Spotlight as process identities, not as durable service names. SnowBoard Remix
-arms it after verified persistent publication whenever the **Transparent Home
-& Spotlight Icons** toggle is enabled. Its 250 ms identity poll opens no task
-channel. A new PID must remain stable for at least 200 ms before it is
-eligible. Installation then uses the VM direct-task route or the physical
-Apple-signed IMP RemoteCall route described above.
+The 23A341 VM's historical memorystatus ledger records a suspended Spotlight
+process with termination reason `idle-exit`, rather than a pressure kill. That
+distinction makes a termination-resistance assertion relevant: it can suppress
+ordinary idle termination, but it is not crash or jetsam immunity.
 
-Both consumers are inspected immediately when the watcher starts. Spotlight
-is a continuously observed resident process; opening its UI is not an
-eligibility requirement. A frontmost-application transition merely
-accelerates the next identity check. Once installed or terminally blocked, a
-host drops to a two-second liveness cadence until its PID changes.
+Static disassembly also provides an Apple-owned construction reference.
+`SBLegacyVOIPRefreshWakeTracker` creates an `RBSAssertion` in SpringBoard for
+another application identity, calls `acquireWithError:` synchronously, retains
+the result in a strong ivar, and invalidates it during cleanup. Its full
+short-lived VOIP profile includes CPU, running-reason, foreground jetsam,
+termination-resistance, and duration attributes. Cyanide does not need that
+high-impact profile merely to preserve a suspended Spotlight PID.
 
-For each exact `(process name, PID, consumer payload version)` incarnation, the
-watcher invokes the PID-bound direct installer at most once. A failed automatic
-attempt is parked for that PID; the watcher waits for a new process incarnation
-unless the user explicitly stops and rearms it after inspection. A successful
-PID is deduplicated until it changes. Stopping the watcher stops future
-monitoring only; installed process-local presentation remains until that host
-exits.
+`scripts/lab/cnd_spotlight_assertion_probe.py` injected an inspection payload
+into SpringBoard and verified the narrower primitive on the live Spotlight PID.
+The exact runtime encodings were:
 
-The watcher is process-resident in Cyanide. The existing Keep Alive preference
-and background task cover automatic repair while Cyanide remains alive. The
-installed presentation state survives Cyanide exit for the lifetime of its
-exact host PIDs, and the stored IconServices response remains durable
-independently. A future host PID cannot be repaired while Cyanide itself is terminated; that
-requires reopening Cyanide with KRW available, a jailbreak daemon, or a
-separate persistent privileged host.
+| Class and selector | Encoding |
+| --- | --- |
+| `-[RBSAssertion initWithExplanation:target:attributes:]` | `@40@0:8@16@24@32` |
+| `-[RBSAssertion acquireWithError:]` | `B24@0:8o^@16` |
+| `-[RBSAssertion invalidateSyncWithError:]` | `B24@0:8o^@16` |
+| `-[RBSAssertion isValid]` | `B16@0:8` |
+| `-[RBSAssertion state]` | `Q16@0:8` |
+| `+[RBSTarget targetWithPid:]` | `@20@0:8i16` |
+| `+[RBSResistTerminationGrant grantWithResistance:]` | `@20@0:8C16` |
+| `+[RBSProcessHandle handleForIdentifier:error:]` | `@32@0:8@16o^@24` |
+| `-[RBSProcessHandle currentState]` | `@16@0:8` |
+| `-[RBSProcessState terminationResistance]` | `C16@0:8` |
 
-`CNDSnowBoardRemix.m` keeps persistent publication and presentation lifecycle
-separate. Apply may queue one one-shot repair for the current SpringBoard and
-Spotlight PIDs, but that work does not start a watcher and is not an Apply
-success criterion. SpringBoard is never lifecycle-watched. The Spotlight-only
-watcher starts exclusively from its explicit UI action; launch, activation,
-toggle changes, Apply, and Restore do not start it. A verified presentation
-install must not call
+SpringBoard's signed entitlements include
+`com.apple.runningboard.primitiveattribute`,
+`com.apple.runningboard.process-state`, and
+`com.apple.runningboard.underlyingassertion`. The VM server consequently
+accepted an assertion containing only
+`[RBSResistTerminationGrant grantWithResistance:30]`. The grant described
+itself as `NonInteractive`; acquisition returned true, the assertion became
+valid in state 1, and an associated object on SpringBoard's `NSProcessInfo`
+retained it after the injector exited.
+
+RunningBoard then reported Spotlight as `running-suspended`, CPU role `None`,
+and termination resistance `NonInteractive`. The custom primitive assertion
+was visible alongside the normal FrontBoard after-life and underlying
+assertions. No CPU-access or jetsam-priority grant was installed. Synchronous
+invalidation returned true, changed the assertion to invalid state 2, removed
+the associated object and custom primitive, and restored aggregate termination
+resistance to `None` while Spotlight remained suspended. The lab left no
+assertion installed.
+
+This proves the exact API, entitlement, synchronous acquisition, durable
+SpringBoard ownership, low-power suspended state, and bounded cleanup route.
+It does not yet prove survival through a deliberately induced idle-exit or
+memory-pressure cycle. A production decision should therefore distinguish two
+claims: confidence is high that the assertion suppresses the observed ordinary
+`idle-exit`, but it must never be presented as protection from a crash, forced
+termination, SpringBoard restart, or severe jetsam pressure.
+
+#### Background-jetsam strengthening probe
+
+The live 23A341 VM also accepted a deliberately bounded strengthening:
+
+```objc
+@[
+    [RBSResistTerminationGrant grantWithResistance:30],
+    [RBSJetsamPriorityGrant grantWithBackgroundPriority],
+]
+```
+
+`RBSAssertion.attributes` readback contained exactly `NonInteractive`
+termination resistance and jetsam band `40`. Acquisition returned true, the
+assertion remained valid in state 1 after the injector exited, and a later
+status probe found the same Spotlight PID and the same retained assertion.
+RunningBoard continued to report `running-suspended` and CPU role `None`.
+Synchronous invalidation succeeded and restored termination resistance to
+`None`; the lab left no assertion installed.
+
+This is the strongest narrow profile justified by the current evidence. It
+raises the suspended process's memory-pressure standing without adding CPU
+access or a running reason. Foreground jetsam priority, CPU access, or
+`Interactive` termination resistance would be substantially broader and do
+not address the known `idle-exit` reason. The extra background grant still
+cannot protect a replaced PID, crash, forced termination, SpringBoard restart,
+reboot, or sufficiently severe memory pressure.
+
+#### Low Power Mode notification spoof experiment
+
+Static 23A341 disassembly shows that every
+`-[SBIconImageView effectivelyPrefersFlatImageLayers]` evaluation obtains
+`+[NSProcessInfo processInfo]` and calls `-isLowPowerModeEnabled`; the result is
+not cached on `SBIconImageView`. Foundation forwards that call to
+`_NSSwiftProcessInfo`. On its first query in a process, Foundation registers
+the Darwin notification `com.apple.system.lowpowermode`, reads the associated
+64-bit state, caches the resulting Boolean in process-local global state, and
+updates that byte when the notification is delivered.
+
+`scripts/lab/cnd_low_power_notify_probe.c` confirmed both sides on the VM. A
+root lab process could change the notify state from `0` to `1` with
+`notify_set_state` (status 0), and a separately launched process then reported
+both notify state 1 and `NSProcessInfo.isLowPowerModeEnabled == YES`. Restoring
+state 0 likewise made a subsequent process report false. The same new-process
+seeding worked without posting the notification: set state 1 without a post,
+launch a fresh process, then restore state 0 without a post.
+
+That last sequence is a possible launch-window primitive, not a durable
+Spotlight-scoped setting. Leaving the notify state at 1 affects every process
+that initializes the Foundation query afterward. Posting the name updates all
+existing subscribers. Avoiding the post limits disturbance, but an external
+controller must set the state before Spotlight's first query, keep the launch
+window free of unrelated process initialization, and restore it only after
+Spotlight has cached the value. Repeating that for every replacement PID still
+requires a persistent launch observer/supervisor, and power-state ownership can
+overwrite the notify state later.
+
+A direct redirect of `-[NSProcessInfo isLowPowerModeEnabled]` inside Spotlight
+is therefore not an improvement: it remains PID-bound and changes every Low
+Power Mode decision in Spotlight, while the existing
+`effectivelyPrefersFlatImageLayers` redirect changes only the intended icon
+presentation policy. The global notify route should remain a lab diagnostic,
+not the production persistence mechanism.
+
+### Current production process lifecycle
+
+The polling lifecycle watcher is retired from production. Launch, activation,
+toggle changes, Apply, Restore, and queue execution never call
+`CNDIconServicesConsumerLifecycleStart`. The coordinator source remains for
+bounded lab diagnostics and compatibility reads, but it is not an automatic
+or user-facing runtime dependency.
+
+Production exposes independent durable **SpringBoard Fixes** and **Spotlight
+Fixes** actions. Each is adaptive: it runs immediately when queued alone or
+after the queue's shared respring when another action establishes a boundary.
+SpringBoard Fixes installs only the SpringBoard transparency and Clock/Calendar
+presentation repair. Spotlight Fixes optionally installs the equivalent
+Spotlight presentation repair, then always opens one bounded SpringBoard
+RemoteCall session, creates a `NonInteractive` RunningBoard assertion with a
+background jetsam-priority grant for the current Spotlight PID, retains it as
+a SpringBoard-owned associated object, verifies it, and closes the session.
+Cyanide keeps no timer, watcher, background task, or open RemoteCall channel
+afterward.
+
+The assertion is deliberately narrow. It addresses the observed Spotlight
+`idle-exit`; it does not promise survival from a crash, forced termination,
+SpringBoard restart, reboot, or severe memory pressure. A replaced Spotlight
+PID needs another explicitly queued repair because an assertion and installed
+method redirect are both process-incarnation scoped.
+
+Persistent publication remains separate from presentation repair. SnowBoard
+Apply and Restore publish and verify IconServices records before the shared
+respring. They do not claim presentation completion and do not start lifecycle
+machinery. The post-respring action must not call
 `_ISInvalidateCacheEntriesForBundleIdentifier`: on iOS 26 that function sends
 `clearCachedItemsForBundeID:reply:` to iconservicesagent and clears the
-persistent records SnowBoard Remix replaced. SpringBoard refreshes only its
-consumer-owned SpringBoardHome caches in the existing PID-bound session.
+persistent records SnowBoard Remix replaced.
 
 ## Restore contract
 

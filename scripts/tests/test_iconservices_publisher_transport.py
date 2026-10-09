@@ -127,7 +127,8 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertIn('@"cacheStoreEqual"', audit)
         self.assertIn('@"cacheStoreIdentifierEqual"', audit)
         self.assertIn("cnd_publisher_source_registry_map(", audit)
-        self.assertIn('"dataForUUID:"', audit)
+        self.assertIn("cnd_publisher_source_registry_entries(", audit)
+        self.assertNotIn('sourceRegistry, "dataForUUID:"', audit)
         self.assertIn(
             '"initWithBundleIdentifier:allowPlaceholder:error:"', audit
         )
@@ -162,7 +163,15 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertIn('"@32@0:8@16Q24"', helper)
         self.assertIn("registryURL, 4000", helper)
         self.assertIn('"fileExistsAtPath:"', helper)
-        self.assertIn('"dataForUUID:", "@24@0:8@16"', helper)
+        self.assertIn(
+            "CNDIconServicesSourceRegistryNodeHeader23A341", helper
+        )
+        self.assertIn(
+            "CNDIconServicesPublisherAuditMaximumSourceIdentifiers", helper
+        )
+        self.assertIn("bucketReferenceAddress", helper)
+        self.assertIn("uuidWords[0] ^ uuidWords[1]", helper)
+        self.assertNotIn('"dataForUUID:", "@24@0:8@16"', helper)
         self.assertIn('"_ISMutableStoreIndex_mappedDataWithURL:"', helper)
         self.assertIn('"_ISStoreIndex_isValid"', helper)
         self.assertIn('map, "_data", 0x10, scratch', helper)
@@ -176,11 +185,8 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         )
         audit = self.adapter[audit_start:audit_end]
         self.assertIn('"@36@0:8@16B24^@28"', audit)
-        self.assertIn('"count", "Q16@0:8"', audit)
         self.assertIn('"objectAtIndex:",', audit)
-        self.assertIn(
-            "CNDIconServicesPublisherAuditMaximumSourceIdentifiers", audit
-        )
+        self.assertIn("sourceIdentifiers.count", audit)
         self.assertIn(
             "isEqualToData:currentSourceIdentifierData", audit
         )
@@ -308,7 +314,8 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         )
         publication = self.adapter[start:end]
         self.assertIn(
-            "cnd_publisher_copy_remote_indexed_identifier(stockUUID)",
+            "cnd_publisher_audit_copy_indexed_identifier(\n"
+            "                    stockUUID, persistentIndexScratch)",
             publication,
         )
         self.assertIn('report[@"stockResponse"] = stockResponse', publication)
@@ -777,6 +784,25 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
             '            themeLookup[@"com.apple.mobilecal"]',
             remix,
         )
+        self.assertIn(
+            "CNDRemixActiveCalendar68StructuredResponse(0)", remix
+        )
+        self.assertIn(
+            "CNDRemixActiveCalendar68StructuredResponse(1)", remix
+        )
+        self.assertIn(
+            'result[@"__cnd_calendar_68_structured"] =',
+            remix,
+        )
+        self.assertIn(
+            'result[@"__cnd_calendar_68_structured_a1"] =',
+            remix,
+        )
+        lifecycle = (
+            INSTALLER / "CNDIconServicesConsumerLifecycleCoordinator.m"
+        ).read_text(encoding="utf-8")
+        self.assertIn('@"__cnd_calendar_68_structured"', lifecycle)
+        self.assertIn('@"__cnd_calendar_68_structured_a1"', lifecycle)
         self.assertIn("exact Calendar provider bridge", remix)
         self.assertIn("llround(68.0 * scale)", remix)
         self.assertIn("CNDProcessIconThemePNG(", remix)
@@ -943,7 +969,8 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertNotIn("method_setImplementation", direct)
         self.assertNotIn('r_msg2(stockUUID, "UUIDString"', direct)
         self.assertIn(
-            "cnd_publisher_copy_remote_indexed_identifier(stockUUID)", direct
+            "cnd_publisher_audit_copy_indexed_identifier(\n"
+            "                    stockUUID, persistentIndexScratch)", direct
         )
         self.assertNotIn('@"opaque-indexed-identifier"', direct)
         self.assertLess(

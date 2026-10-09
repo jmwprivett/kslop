@@ -162,7 +162,7 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
         self.assertIn("redirect->installedByThisCall", body)
         self.assertIn('@"switcherRedirectsVerified"', body)
 
-    def test_springboard_reconstruction_precedes_clock_calendar_sources(self) -> None:
+    def test_springboard_reconstruction_precedes_terminal_clock_calendar_sources(self) -> None:
         start = self.hook.index(
             "cnd_consumer_install_physical_flat_image_redirect("
         )
@@ -205,9 +205,13 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
         self.assertNotIn('"__cnd_calendar_background"', sources)
         self.assertNotIn("themer_apply_static_calendar_background(", sources)
         self.assertIn(
-            "themer_configure_calendar_provider_source(installCalendar)",
+            "themer_configure_calendar_provider_source(\n"
+            "                installCalendar, expectedCalendar68A0,\n"
+            "                expectedCalendar68A1,\n"
+            "                !useStaticClockPresentation)",
             sources,
         )
+        self.assertIn('@"__cnd_calendar_68_structured_a1"', sources)
         self.assertIn("themer_configure_clock_base_source(", sources)
         self.assertIn('"clock-safe-generic-redirect"', sources)
         self.assertIn("installSafeSpringBoardClockRedirect", sources)
@@ -336,7 +340,7 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
 
     def test_calendar_provider_bridge_preserves_apple_size_and_layer_paths(self) -> None:
         start = self.themer.index(
-            "themer_configure_calendar_provider_source(bool install)"
+            "} ThemerCalendarSourceCacheRefresh;"
         )
         end = self.themer.index(
             "themer_configure_clock_calendar_sources_in_session(", start
@@ -353,16 +357,228 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
         self.assertIn('"prepareImageForDescriptor:"', self.themer)
         self.assertIn('CUIKIcon/CUIKDefaultIconGenerator', calendar)
         self.assertIn('"reloadIconImage"', calendar)
+        self.assertIn("themer_spotlight_current_graph", calendar)
+        self.assertIn(
+            '"appIconForApplicationBundleIdentifier:"', calendar
+        )
+        self.assertIn(
+            'materializerMethod, "@24@0:8@16"', calendar
+        )
+        self.assertNotIn(
+            "if (spotlightGraphKnown && r_is_objc_ptr(spotlightOwner)",
+            calendar,
+        )
+        self.assertIn(
+            "bool allowSpotlightGraph = !refreshSpringBoardConsumer;",
+            calendar,
+        )
+        self.assertIn(
+            "bool spotlightGraphKnown = allowSpotlightGraph &&",
+            calendar,
+        )
+        self.assertIn(
+            "if (allowSpotlightGraph && spotlightGraphKnown) {",
+            calendar,
+        )
+        self.assertIn("uint64_t spotlightRoots[3]", calendar)
+        self.assertNotIn("uint64_t spotlightRoots[4]", calendar)
+        self.assertIn(
+            "if (allowSpotlightGraph && !r_is_objc_ptr(model) &&",
+            calendar,
+        )
+        self.assertIn(
+            "if (!allowSpotlightGraph && !r_is_objc_ptr(model))",
+            calendar,
+        )
+        self.assertLess(
+            calendar.index("if (allowSpotlightGraph && spotlightGraphKnown)"),
+            calendar.index("r_responds_main(spotlightOwner,"),
+        )
+        self.assertNotIn("model = candidate;", calendar)
+        self.assertIn('themer_cache_icon_bundle(\n                    candidate,', calendar)
+        self.assertIn(
+            "themer_lookup_model_icon_for_bundle_with_roots", calendar
+        )
+        self.assertIn("spotlightIconModel", calendar)
+        self.assertIn(
+            '"leafIconsUniquedByApplicationBundleIdentifier"', calendar
+        )
+        self.assertIn("themer_calendar_collect_active_models", calendar)
+        self.assertIn("themer_calendar_configure_active_provider", calendar)
+        self.assertIn('model, "imageProvider", "@16@0:8"', calendar)
+        self.assertIn('model, "imageGeneration", "Q16@0:8"', calendar)
+        self.assertIn('provider, "reloadIconImage", "v16@0:8"', calendar)
+        self.assertIn('provider, "delegate", "@16@0:8"', calendar)
+        self.assertIn(
+            'source, "imageCache", "@16@0:8"', calendar
+        )
+        self.assertIn(
+            'cache, "imageBagsByDescriptor", "@16@0:8"', calendar
+        )
+        self.assertIn(
+            'cache, "setImageBagsByDescriptor:", "v24@0:8@16"',
+            calendar,
+        )
+        self.assertIn(
+            "themer_calendar_refresh_source_cache_once", calendar
+        )
+        provider_start = calendar.index(
+            "static bool themer_calendar_configure_active_provider("
+        )
+        provider_end = calendar.index(
+            "static NSDictionary<NSString *, id> *\n"
+            "themer_configure_calendar_provider_source", provider_start
+        )
+        provider = calendar[provider_start:provider_end]
+        self.assertIn(
+            "themer_calendar_prepare_source_cache_once(", provider
+        )
+        purge = provider.index(
+            "themer_calendar_refresh_source_cache_once("
+        )
+        prepare = provider.index(
+            "themer_calendar_prepare_source_cache_once("
+        )
+        reload_provider = provider.index(
+            'r_msg2_main(provider, "reloadIconImage"'
+        )
+        self.assertLess(purge, prepare)
+        self.assertLess(prepare, reload_provider)
+        self.assertNotIn(
+            '"findStoreUnitForIcon:descriptor:UUID:validationToken:"',
+            provider,
+        )
+        self.assertIn("sourceCacheIndex >= 0", provider)
+        self.assertIn(
+            "themer_calendar_wait_for_source_cache_refills", calendar
+        )
+        self.assertIn(
+            "themer_calendar_source_cache_expected_response", calendar
+        )
+        self.assertIn(
+            'source, "prepareImageForDescriptor:", "@24@0:8@16"',
+            calendar,
+        )
+        self.assertIn(
+            'r_msg2_main_retained_object(\n'
+            '        source, "prepareImageForDescriptor:"',
+            calendar,
+        )
+        self.assertIn("appearance < 2", calendar)
+        self.assertIn(
+            "68.0, 3.0, appearance, 0, false", calendar
+        )
+        self.assertIn(
+            "responseVerified[cacheIndex][appearance]", calendar
+        )
+        self.assertIn(
+            "sourceCacheRefresh.responseExactMatchCount ==\n"
+            "            (NSUInteger)sourceCacheRefresh.cacheCount * 2U",
+            calendar,
+        )
+        self.assertIn("sourceCachePrepareSuccessCount", calendar)
+        self.assertIn(
+            "bags = r_msg2_main_retained_object(", calendar
+        )
+        self.assertIn(
+            "bagValues = r_msg2_main_retained_object(", calendar
+        )
+        self.assertIn(
+            "images = r_msg2_main_retained_object(", calendar
+        )
+        self.assertIn(
+            "data = r_msg2_main_retained_object(", calendar
+        )
+        self.assertIn('data, "isEqualToData:"', calendar)
+        self.assertIn(
+            "sourceCacheRefresh.responseExactMatchCount ==", calendar
+        )
+        self.assertIn(
+            '@"expectedStructuredResponseMatched"', calendar
+        )
+        self.assertNotIn(
+            "if (r_is_objc_ptr(bags) && entries > 0", calendar
+        )
+        self.assertNotIn("(void)expectedStructuredData", calendar)
+        self.assertIn("REFILL_POLL_INTERVAL_US = 5000", calendar)
+        self.assertIn("REFILL_POLL_LIMIT = 51", calendar)
+        self.assertIn(
+            "sourceCacheRefresh.responseVerifiedCount ==", calendar
+        )
         self.assertNotIn("pass < 2", calendar)
-        self.assertIn('@"fastPath": @YES', calendar)
-        self.assertIn("reloadPasses == 1", calendar)
+        self.assertIn('@"fastPath": @NO', calendar)
+        self.assertNotIn('@"fastPath": @YES', calendar)
+        self.assertIn(
+            "activeProviderCount == activeModelCount", calendar
+        )
+        self.assertIn("reloadPasses == configuredProviders", calendar)
+        self.assertIn(
+            "generationAfter == generationBefore + 1ULL", calendar
+        )
+        self.assertIn(
+            "themer_calendar_refresh_springboard_consumer_cache(",
+            calendar,
+        )
+        self.assertIn(
+            'cache, "updateImageForIcon:", "v24@0:8@16"',
+            calendar,
+        )
+        self.assertIn(
+            'r_msg2_main(cache, "updateImageForIcon:", model',
+            calendar,
+        )
+        self.assertIn("enum { MODEL_CAP = 8 };", calendar)
+        self.assertIn(
+            "refresh->updatedModelCount == refresh->requestedModelCount",
+            calendar,
+        )
+        source_wait = calendar.index(
+            "themer_calendar_wait_for_source_cache_refills("
+        )
+        consumer_update = calendar.index(
+            "themer_calendar_refresh_springboard_consumer_cache(",
+            source_wait,
+        )
+        self.assertLess(source_wait, consumer_update)
+        restore_start = calendar.index("if (!install) {")
+        restore_end = calendar.index(
+            "if (![expectedStructuredDataA0 isKindOfClass:NSData.class]",
+            restore_start,
+        )
+        restore = calendar[restore_start:restore_end]
+        self.assertIn(
+            "themer_calendar_refresh_springboard_consumer_cache(",
+            restore,
+        )
         self.assertIn('@"calendar-provider-source-ready"', calendar)
         self.assertIn('@"requiresVisibleView": @NO', calendar)
         self.assertIn('@"viewScanUsed": @NO', calendar)
         self.assertIn('@"viewPaintUsed": @NO', calendar)
         self.assertIn('@"persistentDescriptorMatrixPreserved": @YES', calendar)
         self.assertNotIn('sel_registerName("windows")', calendar)
+        self.assertNotIn('"setDisplayedImage:"', calendar)
+        self.assertNotIn("SBIconImageView", calendar)
         self.assertNotIn("RemoteCallSession *", calendar)
+
+        install_start = calendar.index(
+            "/* Spotlight owns a private SBHIconModel"
+        )
+        install = calendar[install_start:]
+        self.assertIn("themer_calendar_collect_active_models(", install)
+        self.assertIn(
+            "themer_calendar_prune_stale_provider_states(", install
+        )
+        self.assertIn(
+            "stateCount == configuredProviders", install
+        )
+        self.assertNotIn("if (stateCount > 0)", install)
+        self.assertNotIn('"fast-path=1\\n"', install)
+        self.assertIn(
+            '@"expectedStructuredResponsePresent": @YES', install
+        )
+        self.assertIn(
+            '@"expectedStructuredAppearanceCount": @2', install
+        )
 
     def test_spotlight_clock_uses_static_generic_view_factory(self) -> None:
         start = self.themer.index(
@@ -388,6 +604,7 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
             "useStaticClockPresentation && installClock", sources
         )
         self.assertIn('@"spotlight-static-clock-ready"', sources)
+
         self.assertIn('@"requiresVisibleLeaf": @NO', sources)
         self.assertIn(
             '@"replacementSource": '
@@ -419,6 +636,34 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
             "staticIconDataByBundle ?: @{}, isSpotlight", installer
         )
 
+    def test_calendar_materializes_before_spotlight_clock_presentation(self) -> None:
+        start = self.themer.index(
+            "themer_configure_clock_calendar_sources_in_session("
+        )
+        end = self.themer.index(
+            "themer_set_static_dynamic_icon_overlays_in_session(", start
+        )
+        sources = self.themer[start:end]
+        obsolete_image = sources.index(
+            '"calendar-obsolete-generic-image"'
+        )
+        obsolete_layer = sources.index(
+            '"calendar-obsolete-image-backed-layer"'
+        )
+        calendar = sources.index(
+            'printf("[SBR_DYNAMIC_STAGE] calendar-source-begin\\n")'
+        )
+        spotlight_clock = sources.index(
+            '"spotlight-clock-static-view-class"'
+        )
+        clock_hands = sources.index(
+            'printf("[SBR_DYNAMIC_STAGE] clock-hands-begin requested=%d "'
+        )
+        self.assertLess(obsolete_image, calendar)
+        self.assertLess(obsolete_layer, calendar)
+        self.assertLess(calendar, spotlight_clock)
+        self.assertLess(calendar, clock_hands)
+
     def test_spotlight_installs_independent_dynamic_sources(self) -> None:
         remix = (INSTALLER / "CNDSnowBoardRemix.m").read_text(encoding="utf-8")
         start = remix.index("+ (NSDictionary<NSString *, id> *)repairSpotlightPresentation")
@@ -433,8 +678,60 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
         self.assertIn('@"dynamicIconSourcesAttempted"] =', repair)
         self.assertIn('@"dynamicIconSourcesSupported"] = @YES', repair)
         self.assertIn('[sourceResult[@"ok"] boolValue]', repair)
+        self.assertIn(
+            '[repair[@"transparencyVerified"] boolValue]', repair
+        )
+        self.assertIn(
+            '@"spotlight-transparency-ready-dynamic-icons-failed"', repair
+        )
         self.assertNotIn('@"dynamic-source-replacement-unavailable"', repair)
         self.assertNotIn('@"SpringBoard"', repair)
+
+    def test_spotlight_launch_uses_exact_global_search_main_thread_path(self) -> None:
+        start = self.hook.index(
+            "CNDIconServicesConsumerHookPresentSpotlight(void)"
+        )
+        end = self.hook.index(
+            "CNDIconServicesConsumerHookRetireSharingUIService(void)",
+            start,
+        )
+        launch = self.hook[start:end]
+        self.assertEqual(launch.count('initWithProcess:@"SpringBoard"'), 1)
+        self.assertIn('springBoardClass, "_toggleSearch", NO,', launch)
+        self.assertIn('"v16@0:8"', launch)
+        self.assertIn(
+            '"performSelectorOnMainThread:withObject:waitUntilDone:"',
+            launch,
+        )
+        self.assertIn("observedClass == springBoardClass", launch)
+        self.assertIn(
+            "cnd_consumer_acquire_spotlight_assertion_in_current_session(",
+            launch,
+        )
+        self.assertIn("[session destroyRemoteCall]", launch)
+        self.assertIn("BOOL closed = ![session hasLocalState]", launch)
+        self.assertIn("assertionOK && remoteOK && closed", launch)
+
+    def test_flat_redirect_verdict_is_separate_from_auxiliary_sources(self) -> None:
+        start = self.hook.index(
+            "cnd_consumer_install_physical_flat_image_redirect("
+        )
+        end = self.hook.index(
+            "typedef struct {\n    uint32_t flagsBefore;", start
+        )
+        installer = self.hook[start:end]
+        self.assertIn("BOOL presentationVerified =", installer)
+        self.assertIn("BOOL auxiliaryWorkVerified =", installer)
+        self.assertIn('@"presentationVerified"', installer)
+        self.assertIn('@"auxiliaryWorkVerified"', installer)
+        self.assertIn("presentation=%s auxiliary=%s", installer)
+        self.assertIn(
+            '@"presentation-ready-dynamic-icons-failed"', installer
+        )
+        self.assertIn(
+            'The Spotlight presentation redirect verified',
+            installer,
+        )
 
     def test_partial_dynamic_work_keeps_verified_transparency_pid(self) -> None:
         start = self.lifecycle.index("BOOL transparencyReady =")
@@ -744,7 +1041,7 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
             "themer_audit_springboard_iconservices_consumers_in_session("
         )
         end = self.themer.index(
-            "bool themer_refresh_springboard_iconservices_cache_in_session(void)",
+            "themer_inspect_springboard_app_library_miniature_pipeline_in_session(void)",
             start,
         )
         audit = self.themer[start:end]
@@ -810,9 +1107,15 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
         start = remix.index("CNDRemixReconcilePresentationLifecycle(void)")
         end = remix.index("static NSURL *CNDRemixIndexURL(void)", start)
         reconcile = remix[start:end]
-        self.assertIn("CNDIconServicesConsumerLifecycleStatus()", reconcile)
+        self.assertIn(
+            "themer_set_springboard_iconservices_refresh_bundle_identifiers",
+            reconcile,
+        )
+        self.assertIn('@"queued-repair-required"', reconcile)
         self.assertNotIn("CNDIconServicesConsumerLifecycleStart", reconcile)
         self.assertNotIn("CNDIconServicesConsumerLifecycleStop", reconcile)
+        self.assertNotIn("CNDIconServicesConsumerLifecycleStatus", reconcile)
+        self.assertNotIn("CNDIconServicesConsumerLifecycleIsRunning", reconcile)
 
     def test_initial_apply_cache_refresh_has_reversible_experiment_gate(self) -> None:
         remix = (INSTALLER / "CNDSnowBoardRemix.m").read_text(encoding="utf-8")
@@ -885,7 +1188,8 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
             "BOOL persistentRecoveryOK = persistentDataClean && !cancelled && failed == 0;",
             remix,
         )
-        self.assertIn("BOOL cleanupOK = sessionClosed && presentationOK;", remix)
+        self.assertIn("BOOL cleanupOK = sessionClosed && presentationOK &&", remix)
+        self.assertIn("journalCleanupFailures == 0;", remix)
         self.assertIn("CNDRemixCoordinatorResult(persistentRecoveryOK,", remix)
         self.assertIn("CNDRemixJournalRepresentsDirtyPersistentData", remix)
 
@@ -972,23 +1276,43 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
         self.assertLess(reservation_end, target_call)
         self.assertNotIn("CNDConsumerLifecycleAttemptInstall(state", manual)
 
-    def test_watcher_start_exists_only_behind_explicit_settings_action(self) -> None:
+    def test_watcher_is_replaced_by_the_queued_spotlight_assertion(self) -> None:
         app_delegate = APP_DELEGATE.read_text(encoding="utf-8")
         settings = SETTINGS.read_text(encoding="utf-8")
+        queue = (INSTALLER / "PackageQueue.m").read_text(encoding="utf-8")
+        hook = HOOK.read_text(encoding="utf-8")
         self.assertNotIn("reconcilePresentationLifecycle", app_delegate)
         self.assertNotIn(
             "settings_reconcile_snowboard_remix_presentation_async", settings
         )
-        self.assertEqual(
-            settings.count("CNDIconServicesConsumerLifecycleStart("), 1
+        self.assertNotIn("CNDIconServicesConsumerLifecycleStart(", app_delegate)
+        self.assertNotIn("CNDIconServicesConsumerLifecycleStart(", settings)
+        self.assertNotIn(
+            'isEqualToString:@"sbl-start-kernel-consumer-watcher"', settings
         )
-        action = settings.index(
-            'isEqualToString:@"sbl-start-kernel-consumer-watcher"'
+        self.assertIn("[CNDSnowBoardRemix presentSpotlight]", queue)
+        self.assertNotIn("acquireSpotlightLifetimeAssertion", queue)
+        self.assertNotIn("CNDIconServicesConsumerLifecycleStart(", queue)
+        self.assertNotIn("Watcher stopped.", settings)
+        assertion_start = hook.index(
+            "cnd_consumer_acquire_spotlight_assertion_in_current_session("
         )
-        start = settings.index(
-            "CNDIconServicesConsumerLifecycleStart(", action
+        launch_start = hook.index(
+            "CNDIconServicesConsumerHookPresentSpotlight(void)",
+            assertion_start,
         )
-        self.assertGreater(start, action)
+        assertion = hook[assertion_start:launch_start]
+        launch = hook[launch_start:hook.index(
+            "CNDIconServicesConsumerHookRetireSharingUIService(void)",
+            launch_start,
+        )]
+        self.assertIn("grantWithResistance:", assertion)
+        self.assertIn("grantWithBackgroundPriority", assertion)
+        self.assertEqual(launch.count('initWithProcess:@"SpringBoard"'), 1)
+        self.assertEqual(launch.count("remote_call_with_session(session"), 1)
+        self.assertIn("[session destroyRemoteCall]", launch)
+        self.assertIn("BOOL closed = ![session hasLocalState]", launch)
+        self.assertIn("assertionOK && remoteOK && closed", launch)
 
 
 if __name__ == "__main__":

@@ -29,8 +29,12 @@ static __thread unsigned gCNDTraceDepth;
 static unsigned gCNDTraceEvent;
 static unsigned gCNDTraceProvokeAttempt;
 static bool gCNDTraceProvoked;
+static unsigned gCNDTracePolicySetterCount;
+static unsigned gCNDTraceEffectivePolicyCount;
+static __thread unsigned gCNDTracePolicyDepth;
 
 typedef void (*CNDTraceBoolIMP)(id, SEL, BOOL);
+typedef BOOL (*CNDTraceBoolGetterIMP)(id, SEL);
 typedef void (*CNDTraceObjectsIMP)(id, SEL, id, id);
 typedef void (*CNDTraceImageUpdateIMP)(id, SEL, id, id, BOOL, BOOL);
 typedef id (*CNDTraceObjectArgIMP)(id, SEL, id);
@@ -51,6 +55,11 @@ static CNDTraceObjectArgIMP gCNDOriginalImageForDescriptor;
 static CNDTraceObjectArgIMP gCNDOriginalPrepareObject;
 static CNDTraceVoidArgIMP gCNDOriginalPrepareVoid;
 static CNDTraceMakeLayerIMP gCNDOriginalMakeLayer;
+static CNDTraceBoolIMP gCNDOriginalIconViewSetPrefersFlat;
+static CNDTraceBoolIMP gCNDOriginalImageViewSetPrefersFlat;
+static CNDTraceBoolIMP gCNDOriginalIconViewSetShowsSquare;
+static CNDTraceBoolIMP gCNDOriginalImageViewSetShowsSquare;
+static CNDTraceBoolGetterIMP gCNDOriginalEffectivelyPrefersFlat;
 
 static void CNDTraceLog(const char *format, ...)
     __attribute__((format(printf, 1, 2)));
@@ -470,6 +479,102 @@ static void CNDTraceLogStack(unsigned event)
                     resolved && info.dli_sname ? info.dli_sname : "-",
                     (unsigned long)symbolOffset);
     }
+}
+
+static void CNDTracePolicySetter(id self, SEL command, BOOL value,
+                                 CNDTraceBoolIMP original,
+                                 const char *hookName)
+{
+    original(self, command, value);
+    id icon = nil;
+    id row = nil;
+    bool target = CNDTraceTargetCarrier(self, &icon, &row);
+    bool withinCap = gCNDTracePolicySetterCount < 128U;
+    gCNDTracePolicySetterCount++;
+    if (!target && !withinCap) return;
+    unsigned event = ++gCNDTraceEvent;
+    NSProcessInfo *processInfo = NSProcessInfo.processInfo;
+    CNDTraceLog(
+        "[CND_TRANSITION] POLICY_SET event=%u hook=%s selector=%s "
+        "receiver=%p/%s value=%d target=%d bundle=%s icon=%p/%s "
+        "row=%p/%s prefersFlat=%d square=%d lowPower=%d thermal=%ld\n",
+        event, hookName, sel_getName(command), CNDTracePointer(self),
+        CNDTraceClassName(self), value, target,
+        CNDTraceCarrierBundle(self, NULL, NULL).UTF8String ?: "-",
+        CNDTracePointer(icon), CNDTraceClassName(icon),
+        CNDTracePointer(row), CNDTraceClassName(row),
+        CNDTraceBoolGetter(self, "prefersFlatImageLayers"),
+        CNDTraceBoolGetter(self, "showsSquareCorners"),
+        processInfo.isLowPowerModeEnabled, (long)processInfo.thermalState);
+    CNDTraceLogStack(event);
+}
+
+static void CNDTraceIconViewSetPrefersFlat(id self, SEL command, BOOL value)
+{
+    CNDTracePolicySetter(self, command, value,
+                         gCNDOriginalIconViewSetPrefersFlat,
+                         "SBIconView");
+}
+
+static void CNDTraceImageViewSetPrefersFlat(id self, SEL command, BOOL value)
+{
+    CNDTracePolicySetter(self, command, value,
+                         gCNDOriginalImageViewSetPrefersFlat,
+                         "SBIconImageView");
+}
+
+static void CNDTraceIconViewSetShowsSquare(id self, SEL command, BOOL value)
+{
+    CNDTracePolicySetter(self, command, value,
+                         gCNDOriginalIconViewSetShowsSquare,
+                         "SBIconView");
+}
+
+static void CNDTraceImageViewSetShowsSquare(id self, SEL command, BOOL value)
+{
+    CNDTracePolicySetter(self, command, value,
+                         gCNDOriginalImageViewSetShowsSquare,
+                         "SBIconImageView");
+}
+
+static BOOL CNDTraceEffectivelyPrefersFlat(id self, SEL command)
+{
+    if (gCNDTracePolicyDepth++) {
+        BOOL result = gCNDOriginalEffectivelyPrefersFlat(self, command);
+        gCNDTracePolicyDepth--;
+        return result;
+    }
+    BOOL result = gCNDOriginalEffectivelyPrefersFlat(self, command);
+    id icon = nil;
+    id row = nil;
+    bool target = CNDTraceTargetCarrier(self, &icon, &row);
+    bool withinCap = gCNDTraceEffectivePolicyCount < 128U;
+    gCNDTraceEffectivePolicyCount++;
+    if (target || withinCap) {
+        unsigned event = ++gCNDTraceEvent;
+        id appearance = CNDTraceObjectGetter(
+            self, "effectiveIconImageAppearance");
+        NSProcessInfo *processInfo = NSProcessInfo.processInfo;
+        CNDTraceLog(
+            "[CND_TRANSITION] POLICY_EFFECTIVE event=%u selector=%s "
+            "receiver=%p/%s target=%d bundle=%s icon=%p/%s row=%p/%s "
+            "prefersFlat=%d square=%d appearance=%p/%s hasGlass=%d "
+            "lowPower=%d thermal=%ld result=%d\n",
+            event, sel_getName(command), CNDTracePointer(self),
+            CNDTraceClassName(self), target,
+            CNDTraceCarrierBundle(self, NULL, NULL).UTF8String ?: "-",
+            CNDTracePointer(icon), CNDTraceClassName(icon),
+            CNDTracePointer(row), CNDTraceClassName(row),
+            CNDTraceBoolGetter(self, "prefersFlatImageLayers"),
+            CNDTraceBoolGetter(self, "showsSquareCorners"),
+            CNDTracePointer(appearance), CNDTraceClassName(appearance),
+            CNDTraceBoolGetter(appearance, "hasGlass"),
+            processInfo.isLowPowerModeEnabled,
+            (long)processInfo.thermalState, result);
+        CNDTraceLogStack(event);
+    }
+    gCNDTracePolicyDepth--;
+    return result;
 }
 
 static void CNDTraceLogState(unsigned event, const char *phase, id carrier)
@@ -894,6 +999,26 @@ static void CNDTraceInstallHooks(void)
 {
     unsigned installed = 0U;
     installed += CNDTraceInstallHook(
+        "SBIconView", "setPrefersFlatImageLayers:",
+        (IMP)CNDTraceIconViewSetPrefersFlat,
+        (IMP *)&gCNDOriginalIconViewSetPrefersFlat, "v20@0:8B16");
+    installed += CNDTraceInstallHook(
+        "SBIconImageView", "setPrefersFlatImageLayers:",
+        (IMP)CNDTraceImageViewSetPrefersFlat,
+        (IMP *)&gCNDOriginalImageViewSetPrefersFlat, "v20@0:8B16");
+    installed += CNDTraceInstallHook(
+        "SBIconView", "setShowsSquareCorners:",
+        (IMP)CNDTraceIconViewSetShowsSquare,
+        (IMP *)&gCNDOriginalIconViewSetShowsSquare, "v20@0:8B16");
+    installed += CNDTraceInstallHook(
+        "SBIconImageView", "setShowsSquareCorners:",
+        (IMP)CNDTraceImageViewSetShowsSquare,
+        (IMP *)&gCNDOriginalImageViewSetShowsSquare, "v20@0:8B16");
+    installed += CNDTraceInstallHook(
+        "SBIconImageView", "effectivelyPrefersFlatImageLayers",
+        (IMP)CNDTraceEffectivelyPrefersFlat,
+        (IMP *)&gCNDOriginalEffectivelyPrefersFlat, "B16@0:8");
+    installed += CNDTraceInstallHook(
         "SBIconImageView", "updateExistingIconLayerAnimated:",
         (IMP)CNDTraceUpdateExisting, (IMP *)&gCNDOriginalUpdateExisting,
         "v20@0:8B16");
@@ -920,7 +1045,7 @@ static void CNDTraceInstallHooks(void)
     bool boundaryInstalled = CNDTraceInstallMakeLayerHook();
     installed += boundaryInstalled;
     CNDTraceLog("[CND_TRANSITION] TRACE_READY pid=%d installed=%u target=%s "
-                "mode=trace-plus-one-stock-refresh hooks=7 boundary=%d "
+                "mode=trace-plus-one-stock-refresh hooks=12 boundary=%d "
                 "themedPresentationCalls=0 storeWrites=0 "
                 "bundleWrites=0\n", getpid(), installed,
                 CND_TRACE_TARGET_BUNDLE, boundaryInstalled);

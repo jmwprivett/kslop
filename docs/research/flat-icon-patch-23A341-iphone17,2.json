@@ -1,0 +1,301 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Offline derivation of always-true flat icon presentation policy; no writer included",
+  "runtimeVerified": false,
+  "os": {
+    "productVersion": "26.0",
+    "productBuildVersion": "23A341",
+    "productType": "iPhone17,2",
+    "deviceClass": "d94ap",
+    "architecture": "arm64e",
+    "identitySource": "local IPSW; device not queried"
+  },
+  "ipsw": {
+    "fileName": "iPhone17,2_26.0_23A341_Restore.ipsw",
+    "sha256": "200d164bc353cadd1c2428d9ac223bcf96d841eb6a744691ce79286c147b9487",
+    "buildManifestSHA256": "3bd9185242c487ef4a970d56f332ae795ef9c5a23f7998646052635e6cff8f24",
+    "systemVersionSHA256": "d39b696af4acd537cb27c8a170f7bb9978aff7e0ce1ba8ee3269e954b26ba380",
+    "systemTrustCache": {
+      "path": "Firmware/090-88891-659.dmg.aea.trustcache",
+      "uuid": "2F6E64AD-157D-4C99-8D18-0C0E7398C10C",
+      "sha384": "a82dd4932c2faf2ddb31b19e529d208a134ee727f8d55940cd0172885f8668a31828d500bd9835f05ab41d1a9c9d9769",
+      "buildManifestDigestVerified": true
+    }
+  },
+  "cache": {
+    "fileName": "dyld_shared_cache_arm64e",
+    "uuid": "DC5F2F67-1FC8-3905-873B-35D17D1A44E8",
+    "sha256": "a54a614e3a24f6a26cea9c3d0f46cd7776635c98ae6bcbdb0f609ddf8a78ab92",
+    "sharedRegionStart": "0x180000000",
+    "codeDirectory": {
+      "sha256": "10faedfde7b44d0ff9c70d323c3601cee1b495d7ec06df115bd2faf700db8742",
+      "cdHash20": "10faedfde7b44d0ff9c70d323c3601cee1b495d7",
+      "hashType": 2,
+      "pageSize": 16384,
+      "verifiedCodePages": 36
+    },
+    "subcache": {
+      "fileName": "dyld_shared_cache_arm64e.19",
+      "uuid": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+      "sha256": "b5b23dff0de2aa23a24e0d600e5dc6368986bad71e1cae6d7b0176913d70be96",
+      "codeDirectory": {
+        "sha256": "acd0de9b9ea6cc0f66011973c6889dcf93757779388b85917eff8f37584c704e",
+        "cdHash20": "acd0de9b9ea6cc0f66011973c6889dcf93757779",
+        "hashType": 2,
+        "pageSize": 16384,
+        "verifiedCodePages": 6753
+      }
+    }
+  },
+  "image": {
+    "path": "/System/Library/PrivateFrameworks/SpringBoardHome.framework/SpringBoardHome",
+    "uuid": "F3A89682-429D-3319-876B-46D2348E0DFD",
+    "unslidLoadAddress": "0x1bdeb2000"
+  },
+  "method": {
+    "symbol": "-[SBIconImageView effectivelyPrefersFlatImageLayers]",
+    "returnType": "_Bool",
+    "unslidVMAddress": "0x1be102e6c",
+    "byteLength": 156,
+    "sha256": "5b6b4195fd170b260c5d0e0906aecd7bf7c18bfdbc881ab02c832047c974b89c",
+    "entryInstruction": "pacibsp",
+    "returnInstruction": "retab",
+    "disassembly": [
+      {
+        "address": "0x1be102e6c",
+        "bytes": "7f2303d5",
+        "instruction": "pacibsp"
+      },
+      {
+        "address": "0x1be102e70",
+        "bytes": "f44fbea9",
+        "instruction": "stp x20, x19, [sp, #-0x20]!"
+      },
+      {
+        "address": "0x1be102e74",
+        "bytes": "fd7b01a9",
+        "instruction": "stp fp, lr, [sp, #0x10]"
+      },
+      {
+        "address": "0x1be102e78",
+        "bytes": "fd430091",
+        "instruction": "add fp, sp, #0x10"
+      },
+      {
+        "address": "0x1be102e7c",
+        "bytes": "f30300aa",
+        "instruction": "mov x19, x0"
+      },
+      {
+        "address": "0x1be102e80",
+        "bytes": "d82c0994",
+        "instruction": "bl 0x1be34e1e0"
+      },
+      {
+        "address": "0x1be102e84",
+        "bytes": "60000036",
+        "instruction": "tbz w0, #0, 0x1be102e90"
+      },
+      {
+        "address": "0x1be102e88",
+        "bytes": "34008052",
+        "instruction": "mov w20, #0x1"
+      },
+      {
+        "address": "0x1be102e8c",
+        "bytes": "1b000014",
+        "instruction": "b 0x1be102ef8"
+      },
+      {
+        "address": "0x1be102e90",
+        "bytes": "e00313aa",
+        "instruction": "mov x0, x19"
+      },
+      {
+        "address": "0x1be102e94",
+        "bytes": "2b880994",
+        "instruction": "bl 0x1be364f40"
+      },
+      {
+        "address": "0x1be102e98",
+        "bytes": "20010034",
+        "instruction": "cbz w0, 0x1be102ebc"
+      },
+      {
+        "address": "0x1be102e9c",
+        "bytes": "e00313aa",
+        "instruction": "mov x0, x19"
+      },
+      {
+        "address": "0x1be102ea0",
+        "bytes": "70bb0894",
+        "instruction": "bl 0x1be331c60"
+      },
+      {
+        "address": "0x1be102ea4",
+        "bytes": "57d59494",
+        "instruction": "bl 0x1c0638400"
+      },
+      {
+        "address": "0x1be102ea8",
+        "bytes": "f30300aa",
+        "instruction": "mov x19, x0"
+      },
+      {
+        "address": "0x1be102eac",
+        "bytes": "a5d20894",
+        "instruction": "bl 0x1be337940"
+      },
+      {
+        "address": "0x1be102eb0",
+        "bytes": "f40300aa",
+        "instruction": "mov x20, x0"
+      },
+      {
+        "address": "0x1be102eb4",
+        "bytes": "abd59494",
+        "instruction": "bl 0x1c0638560"
+      },
+      {
+        "address": "0x1be102eb8",
+        "bytes": "94feff34",
+        "instruction": "cbz w20, 0x1be102e88"
+      },
+      {
+        "address": "0x1be102ebc",
+        "bytes": "68531490",
+        "instruction": "adrp x8, 0x1e6b6e000"
+      },
+      {
+        "address": "0x1be102ec0",
+        "bytes": "009146f9",
+        "instruction": "ldr x0, [x8, #0xd20]"
+      },
+      {
+        "address": "0x1be102ec4",
+        "bytes": "c72f0994",
+        "instruction": "bl 0x1be34ede0"
+      },
+      {
+        "address": "0x1be102ec8",
+        "bytes": "4ed59494",
+        "instruction": "bl 0x1c0638400"
+      },
+      {
+        "address": "0x1be102ecc",
+        "bytes": "f30300aa",
+        "instruction": "mov x19, x0"
+      },
+      {
+        "address": "0x1be102ed0",
+        "bytes": "f4050994",
+        "instruction": "bl 0x1be3446a0"
+      },
+      {
+        "address": "0x1be102ed4",
+        "bytes": "60000036",
+        "instruction": "tbz w0, #0, 0x1be102ee0"
+      },
+      {
+        "address": "0x1be102ed8",
+        "bytes": "34008052",
+        "instruction": "mov w20, #0x1"
+      },
+      {
+        "address": "0x1be102edc",
+        "bytes": "06000014",
+        "instruction": "b 0x1be102ef4"
+      },
+      {
+        "address": "0x1be102ee0",
+        "bytes": "e00313aa",
+        "instruction": "mov x0, x19"
+      },
+      {
+        "address": "0x1be102ee4",
+        "bytes": "ef930994",
+        "instruction": "bl 0x1be367ea0"
+      },
+      {
+        "address": "0x1be102ee8",
+        "bytes": "08f87f92",
+        "instruction": "and x8, x0, #0xfffffffffffffffe"
+      },
+      {
+        "address": "0x1be102eec",
+        "bytes": "1f0900f1",
+        "instruction": "cmp x8, #0x2"
+      },
+      {
+        "address": "0x1be102ef0",
+        "bytes": "f4179f1a",
+        "instruction": "cset w20, eq"
+      },
+      {
+        "address": "0x1be102ef4",
+        "bytes": "9bd59494",
+        "instruction": "bl 0x1c0638560"
+      },
+      {
+        "address": "0x1be102ef8",
+        "bytes": "e00314aa",
+        "instruction": "mov x0, x20"
+      },
+      {
+        "address": "0x1be102efc",
+        "bytes": "fd7b41a9",
+        "instruction": "ldp fp, lr, [sp, #0x10]"
+      },
+      {
+        "address": "0x1be102f00",
+        "bytes": "f44fc2a8",
+        "instruction": "ldp x20, x19, [sp], #0x20"
+      },
+      {
+        "address": "0x1be102f04",
+        "bytes": "ff0f5fd6",
+        "instruction": "retab"
+      }
+    ]
+  },
+  "patch": {
+    "unslidVMAddress": "0x1be102ef0",
+    "methodOffset": "0x84",
+    "imageOffset": "0x250ef0",
+    "sharedRegionOffset": "0x3e102ef0",
+    "subcacheFileOffset": "0x44aaef0",
+    "alignment": 4,
+    "byteLength": 4,
+    "originalWord": "0x1a9f17f4",
+    "originalBytesLE": "f4179f1a",
+    "originalInstruction": "cset w20, eq",
+    "replacementWord": "0x52800034",
+    "replacementBytesLE": "34008052",
+    "replacementInstruction": "mov w20, #1",
+    "patchedMethodSHA256": "f05997cfe0c93bb8ff5dc506cf6cd407d452ca4f3d7858d498dc6446bea22a16",
+    "semantics": "All existing true paths stay true; final nominal/fair thermal path becomes true",
+    "preserved": [
+      "entry instruction",
+      "branches",
+      "calls",
+      "object release",
+      "frame restore",
+      "authenticated return"
+    ]
+  },
+  "guard": {
+    "unslidVMAddress": "0x1be102e5c",
+    "subcacheFileOffset": "0x44aae5c",
+    "byteLength": 188,
+    "bytesHex": "c0035fd60268283802008052969b09147f2303d5f44fbea9fd7b01a9fd430091f30300aad82c099460000036340080521b000014e00313aa2b88099420010034e00313aa70bb089457d59494f30300aaa5d20894f40300aaabd5949494feff3468531490009146f9c72f09944ed59494f30300aaf4050994600000363400805206000014e00313aaef93099408f87f921f0900f1f4179f1a9bd59494e00314aafd7b41a9f44fc2a8ff0f5fd668f216d008758ab9096868383f01026b",
+    "sha256": "542063d6c8ea82afbe734ace1895ba0f2b7ab15160c6053176604644741f20d5",
+    "methodOffset": 16,
+    "patchOffset": 148
+  },
+  "independentEncodingCheck": {
+    "assembler": "clang integrated assembler",
+    "target": "arm64e-apple-macos14.0",
+    "source": ".text\n.p2align 2\ncset w20, eq\nmov w20, #1\n",
+    "textHex": "f4179f1a34008052"
+  }
+}

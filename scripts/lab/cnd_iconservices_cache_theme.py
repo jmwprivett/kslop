@@ -40,6 +40,7 @@ INJECT_LOG_PATH = "/var/tmp/cyanide-iconservices-theme-inject.log"
 EXPECTED_THEME_HASH = (
     "74122c8aa948fc4e2d9d02148f62b88b8e4c77b1727cd34cf5632f9c6bbdca8b"
 )
+PDF_CANARY_SUBJECT = "CND_SPOTLIGHT_PDF_CANARY_V1"
 
 
 def c_literal(value: str) -> str:
@@ -49,9 +50,13 @@ def c_literal(value: str) -> str:
 def build_mutator(theme_path: str = "/var/tmp/cnd-iconservices-theme.png",
                   output_token: str = "", root_token: str = "",
                   opaque_black_background: bool = False,
+                  flat_payload: bool = False,
+                  pdf_canary_path: str = "",
+                  expected_pdf_canary_hash: str = "",
                   bundle: str = "com.ebay.iphone",
                   point_size: int = 68, appearance: int = 0,
-                  variant_options: int = 0) -> Path:
+                  variant_options: int = 0,
+                  expected_theme_hash: str = EXPECTED_THEME_HASH) -> Path:
     bundle = validate_bundle(bundle)
     output = BUILD_DIR / "cnd_iconservices_cache_theme.dylib"
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
@@ -65,10 +70,16 @@ def build_mutator(theme_path: str = "/var/tmp/cnd-iconservices-theme.png",
         f'-DCND_ICON_THEME_ROOT_TOKEN="{c_literal(root_token)}"',
         f'-DCND_ICON_THEME_TARGET_BUNDLE="{c_literal(bundle)}"',
         f"-DCND_ICON_THEME_OPAQUE_BLACK={int(opaque_black_background)}",
+        f"-DCND_ICON_THEME_FLAT_PAYLOAD={int(flat_payload)}",
+        f"-DCND_ICON_THEME_PDF_CANARY={int(bool(pdf_canary_path))}",
+        f'-DCND_ICON_THEME_PDF_CANARY_PATH="{c_literal(pdf_canary_path)}"',
+        f'-DCND_ICON_THEME_EXPECTED_PDF_SHA256="'
+        f'{c_literal(expected_pdf_canary_hash)}"',
         f"-DCND_ICON_THEME_POINT_SIZE={point_size}",
         f"-DCND_ICON_THEME_APPEARANCE={appearance}",
         f"-DCND_ICON_THEME_VARIANT_OPTIONS={variant_options}",
         f"-DCND_ICON_THEME_PIXEL_SIZE={pixel_size}",
+        f'-DCND_ICON_THEME_EXPECTED_SOURCE_SHA256="{expected_theme_hash}"',
         str(SOURCE), "-framework", "Foundation", "-framework",
         "CoreGraphics", "-framework", "ImageIO", "-o", str(output),
     ])
@@ -76,17 +87,74 @@ def build_mutator(theme_path: str = "/var/tmp/cnd-iconservices-theme.png",
     return output
 
 
-def copy_theme(ssh: SSH) -> str:
-    digest = hashlib.sha256(THEME.read_bytes()).hexdigest()
-    if digest != EXPECTED_THEME_HASH:
-        raise LabError(f"theme hash mismatch: {digest}")
-    remote = f"/var/tmp/cnd-iconservices-theme-{digest[:16]}.png"
-    ssh.copy(THEME, remote)
+def pdf_canary_bytes() -> bytes:
+    """Return a deterministic, benign one-page PDF with a trace marker."""
+    stream = (
+        b"q\n1 0 0 rg\n0 0 34 68 re f\n"
+        b"0 1 0 rg\n34 0 34 68 re f\nQ\n"
+    )
+    objects = (
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 68 68] "
+         b"/Resources << >> /Contents 4 0 R >>"),
+        (b"<< /Length " + str(len(stream)).encode("ascii") +
+         b" >>\nstream\n" + stream + b"endstream"),
+        (b"<< /Producer (Cyanide benign reachability probe) /Subject (" +
+         PDF_CANARY_SUBJECT.encode("ascii") + b") >>"),
+    )
+    result = bytearray(b"%PDF-1.4\n% CND benign PDF canary; no malformed data\n")
+    offsets = [0]
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(result))
+        result.extend(f"{number} 0 obj\n".encode("ascii"))
+        result.extend(body)
+        result.extend(b"\nendobj\n")
+    xref = len(result)
+    result.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    result.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        result.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    result.extend(
+        (f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R "
+         f"/Info 5 0 R >>\nstartxref\n{xref}\n%%EOF\n").encode("ascii")
+    )
+    return bytes(result)
+
+
+def build_pdf_canary() -> tuple[Path, str]:
+    output = BUILD_DIR / "cnd-spotlight-pdf-canary.pdf"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    data = pdf_canary_bytes()
+    output.write_bytes(data)
+    return output, hashlib.sha256(data).hexdigest()
+
+
+def copy_pdf_canary(ssh: SSH) -> tuple[str, str]:
+    local, digest = build_pdf_canary()
+    remote = f"/var/tmp/cnd-spotlight-pdf-canary-{digest[:16]}.pdf"
+    ssh.copy(local, remote)
     ssh.command(
         f"/iosbinpack64/usr/sbin/chown root:wheel {shlex.quote(remote)} && "
         f"/iosbinpack64/bin/chmod 0644 {shlex.quote(remote)}"
     )
-    return remote
+    return remote, digest
+
+
+def copy_theme(ssh: SSH, theme: Path = THEME,
+               expected_hash: str | None = EXPECTED_THEME_HASH) -> tuple[str, str]:
+    if not theme.is_file():
+        raise LabError(f"theme file missing: {theme}")
+    digest = hashlib.sha256(theme.read_bytes()).hexdigest()
+    if expected_hash is not None and digest != expected_hash:
+        raise LabError(f"theme hash mismatch: {digest}")
+    remote = f"/var/tmp/cnd-iconservices-theme-{digest[:16]}.png"
+    ssh.copy(theme, remote)
+    ssh.command(
+        f"/iosbinpack64/usr/sbin/chown root:wheel {shlex.quote(remote)} && "
+        f"/iosbinpack64/bin/chmod 0644 {shlex.quote(remote)}"
+    )
+    return remote, digest
 
 
 def terminate_exact_agent(ssh: SSH, expected_pid: int | None = None) -> None:
@@ -135,7 +203,11 @@ def read_report(ssh: SSH) -> str:
 
 
 def wait_ready(ssh: SSH) -> str:
-    deadline = time.monotonic() + 8.0
+    # A cold post-boot iconservicesagent can spend more than eight seconds in
+    # its first CoreSVG dlopen on the vPhone.  Keep this bounded, but do not
+    # misclassify that one-time framework initialization as an injection
+    # failure.
+    deadline = time.monotonic() + 30.0
     report = ""
     while time.monotonic() < deadline:
         report = read_report(ssh)
@@ -217,10 +289,24 @@ def main() -> int:
         help="flatten transparent source pixels onto opaque pure black",
     )
     parser.add_argument(
+        "--flat-payload", action="store_true",
+        help=("construct IFImage.data with initWithCGImage:scale: and no "
+              "synthetic structured layer payload"),
+    )
+    parser.add_argument(
+        "--pdf-canary", action="store_true",
+        help=("replace the structured icon's vector rendition with a benign "
+              "PDF canary for the Spotlight CoreUI reachability test"),
+    )
+    parser.add_argument(
         "--reuse-clean-agent", action="store_true",
         help=("reuse the currently resident, already-unhooked agent; this is "
               "for bounded matrix runs that verified the preceding unhooked "
               "persistent readback"),
+    )
+    parser.add_argument(
+        "--theme", type=Path, default=THEME,
+        help="exact local PNG to publish (defaults to the lab fixture)",
     )
     args = parser.parse_args()
     bundle = validate_bundle(args.bundle)
@@ -228,12 +314,22 @@ def main() -> int:
         raise LabError("variant must be a nonnegative int32")
     if args.point_size <= 0 or args.point_size > 1024:
         raise LabError("point size must be in 1-1024")
+    if args.pdf_canary and args.flat_payload:
+        raise LabError("--pdf-canary requires the structured payload")
 
     if args.action == "build":
+        pdf_path = ""
+        pdf_hash = ""
+        if args.pdf_canary:
+            local_pdf, pdf_hash = build_pdf_canary()
+            pdf_path = str(local_pdf)
         print(build_hold())
         print(build_trigger())
         print(build_mutator(
             opaque_black_background=args.opaque_black_background,
+            flat_payload=args.flat_payload,
+            pdf_canary_path=pdf_path,
+            expected_pdf_canary_hash=pdf_hash,
             bundle=bundle, point_size=args.point_size,
             appearance=args.appearance, variant_options=args.variant))
         return 0
@@ -252,16 +348,27 @@ def main() -> int:
 
     if not args.reuse_clean_agent:
         terminate_exact_agent(ssh)
-    remote_theme = copy_theme(ssh)
+    remote_theme, theme_hash = copy_theme(
+        ssh, args.theme,
+        EXPECTED_THEME_HASH if args.theme == THEME else None,
+    )
+    remote_pdf = ""
+    pdf_hash = ""
+    if args.pdf_canary:
+        remote_pdf, pdf_hash = copy_pdf_canary(ssh)
     output_token = issue_file_extension(ssh, "/var/tmp")
     root_token = issue_file_extension(ssh, "/private/var")
     mutator = build_mutator(
         remote_theme, output_token, root_token,
         opaque_black_background=args.opaque_black_background,
+        flat_payload=args.flat_payload,
+        pdf_canary_path=remote_pdf,
+        expected_pdf_canary_hash=pdf_hash,
         bundle=bundle,
         point_size=args.point_size,
         appearance=args.appearance,
         variant_options=args.variant,
+        expected_theme_hash=theme_hash,
     )
     remote_hold = copy_executable(ssh, build_hold(),
                                   "cnd-iconservices-hold")
@@ -284,7 +391,8 @@ def main() -> int:
                            report)
         print(
             f"themed generation pid={injected_pid} command={command} "
-            f"payload={remote_mutator} theme={remote_theme}"
+            f"payload={remote_mutator} theme={remote_theme} "
+            f"pdfCanary={remote_pdf or '-'}"
         )
         print("--- themed forced response ---")
         print(forced_output.rstrip())

@@ -34,6 +34,27 @@ typedef struct {
     char reason[192];
 } CNDIconServicesConsumerHookReport;
 
+/// Internal transport primitive shared by resident presentation payloads.
+/// It maps an exact signed __TEXT section from Cyanide's currently running
+/// thin slice into the active RemoteCall target and keeps only the final
+/// page anonymous/read-write for caller-owned context. The target-side RX
+/// mapping is the authority; F_CHECK_LV remains an advisory diagnostic.
+FOUNDATION_EXPORT BOOL CNDSignedRemotePayloadMapCurrentSession(
+    const char *sectionName,
+    const uint8_t *localPayload,
+    size_t payloadLength,
+    uint64_t pageSize,
+    size_t contextOffset,
+    const void *contextBytes,
+    size_t contextLength,
+    uint64_t *remoteBaseOut,
+    uint64_t *mappingLengthOut,
+    bool *libraryValidationAcceptedOut,
+    bool *libraryValidationPolicyFallbackUsedOut,
+    int *libraryValidationErrnoOut,
+    char *diagnostic,
+    size_t diagnosticLength);
+
 /// Installs the marker-aware transparent IconRendering consumer into the
 /// currently active RemoteCall target. The caller must keep one session open;
 /// payload delivery and verification reuse that session on both the vPhone
@@ -96,6 +117,35 @@ CNDIconServicesConsumerHookInstallForPIDWithOptions(
 /// start a watcher.
 NSDictionary<NSString *, id> *
 CNDIconServicesConsumerHookRefreshSpringBoardForPID(pid_t pid);
+
+/// Opens one exact PID-bound SpringBoard RemoteCall session and performs only
+/// the focused App Library category-miniature repair. The active themed bundle
+/// identifiers must already have been configured through themer's refresh
+/// target API. This does not install presentation redirects, touch the Hail
+/// Mary dispatch entry, reload App Library list/search rows, relayout, signal,
+/// restart, respring, or write shared-cache data.
+NSDictionary<NSString *, id> *
+CNDIconServicesConsumerHookRefreshAppLibraryMiniaturesForPID(pid_t pid);
+
+/// Opens one PID-bound SpringBoard RemoteCall session, validates and invokes
+/// the exact iOS 26 `-[SpringBoard _toggleSearch]` ABI synchronously on the
+/// main thread, waits for a stable Spotlight identity, and acquires the exact
+/// RunningBoard NonInteractive/background-jetsam lifetime assertion before
+/// closing that same session. The assertion remains retained by SpringBoard;
+/// Spotlight repair uses only its separate Spotlight-target session and does
+/// not require Cyanide to reach background.
+NSDictionary<NSString *, id> *
+CNDIconServicesConsumerHookPresentSpotlight(void);
+
+/// Retires the exact currently running SharingUIService incarnation after a
+/// verified AirDrop pseudo-bundle mutation. The service owns a process-local
+/// SFUIImageProvider NSCache and is not guaranteed to exit with SpringBoard.
+/// An absent service is already fresh-by-construction and succeeds without
+/// opening RemoteCall. A live service is identity-bound once, receives one
+/// terminal self-SIGKILL, and must prove that exact proc/task incarnation
+/// exited before the cleanup is reported as complete.
+NSDictionary<NSString *, id> *
+CNDIconServicesConsumerHookRetireSharingUIService(void);
 
 /// Opens one scoped SpringBoard session and returns a read-only snapshot of
 /// canonical, live-leaf, and materialized switcher icon identities for the

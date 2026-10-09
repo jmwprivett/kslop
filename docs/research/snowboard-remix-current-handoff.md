@@ -401,6 +401,15 @@ exact provider boundary in both processes.
   reload, and only then clears its process-owned recovery registry.
 - Both obsolete class-wide Calendar redirects are explicitly restored. The
   Calendar path performs no visible-view scan and no one-shot view paint.
+- Spotlight must materialize Calendar through its exact
+  `SearchUIHomeScreenModel -appIconForApplicationBundleIdentifier:` method
+  before obtaining the provider. On iOS 26.0 (`23A341`) this method first
+  calls `beginTrackingApplicationsWithBundleIdentifiers:` and then performs
+  the private `SBHIconModel applicationIconForBundleIdentifier:` lookup.
+  Calling the icon model directly can return nil until a result row happens
+  to create Calendar. Production verifies the exact `@24@0:8@16` ABI and
+  uses the Apple materializer first, so a visible Calendar result is not a
+  prerequisite.
 
 This Clock/Calendar source pass has deliberately **not been compiled**, per the user
 instruction to implement each dynamic icon separately without building. Host
@@ -753,8 +762,9 @@ build/runtime validation:
 
 1. For SpringBoard Clock, require `clock-base-source-ready`, the exact digest
    readback, at least one retained source state, and two refresh passes.
-2. For Calendar, require `calendar-provider-source-ready`, one retained
-   provider state, and two verified `reloadIconImage` passes. The Calendar
+2. For Calendar, require `calendar-provider-source-ready`, one retained state
+   for every distinct active canonical/live-leaf provider, and exactly one
+   verified provider `reloadIconImage` callback per provider. The Calendar
    repair must not report either obsolete generic redirect as installed.
 3. Visually verify the transparent Clock face remains while the themed hands
    move, Calendar displays the persistent themed icon rather than a grey plate,
@@ -834,6 +844,25 @@ The selector itself is the association key. The associated object is the
 canonical `ISBundleIdentifierIcon` returned by
 `ISIconManager -findOrRegisterIcon:` for `com.apple.mobilecal`.
 
+The 23A341 `ISIcon` metadata gives `-prepareImageForDescriptor:` the exact
+object-returning ABI `@24@0:8@16`, not `v24@0:8@16`. Its disassembly first
+calls `imageForDescriptor:`, drives `_prepareImagesForImageDescriptors:` when
+that result is absent or a placeholder, performs the refill lookup, and
+returns the resulting image. The descriptor tracer uses that object-returning
+signature so instrumentation cannot discard or corrupt this consumer result.
+
+Production deliberately does not invoke this method as a separate RemoteCall
+verification step. Physical arm64e testing on 2026-09-29 produced two
+SpringBoard `EXC_ARM_PAC_FAIL` reports: one while `NSInvocation
+retainArguments` retained the injected descriptor/source argument, and one in
+`-[NSUUID isEqual:]` after UUID/token objects crossed separate RemoteCall
+invocations without safe ownership. Persistent response bytes and identity
+are already verified by the publisher. The live-process operation is limited
+to replacing the distinct source cache, invoking Apple's native provider
+reload, verifying the consumer generation advance and observing the cache
+dictionary afterward; Apple performs `prepareImageForDescriptor:` inside its
+ordinary provider/consumer call chain.
+
 This is deliberately not a mutation of the internal 32x32 `CUIKIcon` response.
 That response and its UUID are regenerated. It is also not a generic
 `SBLeafIcon`/`SBIcon` redirect: those paths skipped part of the provider and
@@ -841,14 +870,49 @@ produced the grey plate. Both obsolete redirects are restored before the
 provider bridge is installed. No specialized Calendar view class, recursive
 view walk, or painted overlay is used.
 
-The process registry strongly retains the Calendar model, provider,
-replacement source, and original provider/source classes. Two normal provider
-reloads must continue returning the replacement source. Restore reinstalls the
-original provider class, clears the association, proves that the getter again
-returns a `CUIKIcon` before and after a provider reload, and only then removes
-the registry. The same bridge is used in SpringBoard and Spotlight, preserving
-all observed 68pt, 48pt, and 27pt outer presentations through Apple's existing
-provider logic.
+The process registry strongly retains each covered Calendar model, provider,
+replacement source, and original provider/source class. SpringBoard cannot
+treat one retained provider as global: its canonical
+`applicationIconForBundleIdentifier:` object and the Calendar entry in
+`leafIconsUniquedByApplicationBundleIdentifier` can be distinct objects, and
+each `SBHCalendarApplicationIcon` owns its own provider. Every invocation with
+an empty process registry reacquires that bounded active set, deduplicates
+provider pointers, installs one bridge per provider, and rejects incomplete
+coverage. A repeated repair in the same process instead validates every
+retained model/provider/source relationship and returns through an idempotent
+fast path without rediscovery or regeneration. Spotlight continues to use only
+its exact private-model materializer for the initial installation.
+
+The resolver must also remain target-role aware. `SearchUIHomeScreenModel`
+exists inside SpringBoard, but its Calendar icon is not the mounted Home
+consumer. SpringBoard therefore disables the SearchUI graph entirely and
+resolves through `SBIconController -> SBHIconManager -> iconModel`; only the
+Spotlight target may use `SearchUIHomeScreenModel`. A physical trace caught the
+former bug as themed canonical `0xb2a1b37a0` versus mounted Home
+`0xb27d64820`. After the role gate, both identities were `0xb27d64820`, its
+source changed from `CUIKIcon` to `ISBundleIdentifierIcon`, generation moved
+2 to 3, and the four mounted layers repainted immediately without a view scan.
+Spotlight follows the equivalent private-model rule: its SearchUI materializer
+may initialize the graph but cannot supply the accepted identity; Calendar is
+reacquired from the private `SBHIconModel` before any provider is bridged.
+
+The 23A341 disassembly also establishes that this does not require a manual
+view repaint. `SBCalendarIconImageProvider -reloadIconImage` synchronously
+calls its delegate's `calendarIconImageProviderHasChanged:`, and
+`SBHCalendarApplicationIcon` implements that delegate method as a tail call to
+its inherited `reloadIconImage`. `SBIcon -reloadIconImage` increments
+`imageGeneration`, updates its registered icon-layer views, and notifies its
+ordinary image observers. Production issues that one Apple-owned invalidation
+callback per newly bridged active provider and verifies the generation advanced
+by exactly one. A same-process fast-path repair issues no callback and reports
+zero reloads and generation advances. It never scans windows/views, calls
+`setDisplayedImage:`, or paints an overlay.
+
+Restore reinstalls every registered provider's original class, clears its
+association, proves that the getter again returns a `CUIKIcon` before and after
+the provider callback, and only then removes the registry. The same source
+bridge is used in SpringBoard and Spotlight, preserving all observed 68pt,
+48pt, and 27pt outer presentations through Apple's existing provider logic.
 
 Host-side copies of the raw VM traces are preserved at:
 

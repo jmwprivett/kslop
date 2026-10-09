@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>documentHeight</key>
+	<real>40</real>
+	<key>documentResizesToView</key>
+	<false/>
+	<key>documentWidth</key>
+	<real>40</real>
+	<key>geometryFlipped</key>
+	<false/>
+	<key>loopEnd</key>
+	<real>+infinity</real>
+	<key>loopStart</key>
+	<real>0.0</real>
+	<key>loopingEnabled</key>
+	<true/>
+	<key>rootDocument</key>
+	<string>main.caml</string>
+	<key>scalesToFitInPlayer</key>
+	<false/>
+	<key>unitsInPixelsInPlayer</key>
+	<true/>
+</dict>
+</plist>

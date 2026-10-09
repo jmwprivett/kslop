@@ -264,9 +264,18 @@ int main(int argc, char **argv)
         bool probeVariants = false;
         bool factoryRequested = false;
         bool variantOptionsRequested = false;
+        bool drawBorderRequested = false;
+        bool templateVariantRequested = false;
+        bool appearanceVariantRequested = false;
+        bool shareStyleRequested = false;
+        bool airDropActivityRequested = false;
         int32_t requestedIconVariant = 0;
         int32_t requestedFactoryOptions = 0;
         uint64_t requestedVariantOptions = 0;
+        BOOL requestedDrawBorder = NO;
+        BOOL requestedTemplateVariant = NO;
+        int64_t requestedAppearanceVariant = 0;
+        int64_t requestedShareStyle = 1;
         uint32_t requestedPointSize = 68U;
         int64_t requestedAppearance = 0;
         NSString *bundleIdentifier = @"com.ebay.iphone";
@@ -281,6 +290,8 @@ int main(int argc, char **argv)
                 inspectLayer = true;
             } else if (!strcmp(argv[i], "--inspect-descriptor")) {
                 inspectDescriptor = true;
+            } else if (!strcmp(argv[i], "--airdrop-activity")) {
+                airDropActivityRequested = true;
             } else if (!strcmp(argv[i], "--bundle") && i + 1 < argc) {
                 bundleIdentifier = [NSString stringWithUTF8String:argv[++i]];
             } else if (!strcmp(argv[i], "--variant") && i + 1 < argc) {
@@ -344,6 +355,46 @@ int main(int argc, char **argv)
                     return 64;
                 }
                 requestedAppearance = (int64_t)value;
+            } else if (!strcmp(argv[i], "--appearance-variant") &&
+                       i + 1 < argc) {
+                const char *text = argv[++i];
+                char *end = NULL;
+                errno = 0;
+                long long value = strtoll(text, &end, 0);
+                if (errno || !end || *end || value < 0 || value > INT_MAX) {
+                    fprintf(stderr,
+                            "appearance variant must be a nonnegative int32\n");
+                    return 64;
+                }
+                requestedAppearanceVariant = (int64_t)value;
+                appearanceVariantRequested = true;
+            } else if (!strcmp(argv[i], "--draw-border") &&
+                       i + 1 < argc) {
+                const char *text = argv[++i];
+                if (strcmp(text, "0") && strcmp(text, "1")) {
+                    fprintf(stderr, "draw border must be 0 or 1\n");
+                    return 64;
+                }
+                requestedDrawBorder = !strcmp(text, "1");
+                drawBorderRequested = true;
+            } else if (!strcmp(argv[i], "--template-variant") &&
+                       i + 1 < argc) {
+                const char *text = argv[++i];
+                if (strcmp(text, "0") && strcmp(text, "1")) {
+                    fprintf(stderr, "template variant must be 0 or 1\n");
+                    return 64;
+                }
+                requestedTemplateVariant = !strcmp(text, "1");
+                templateVariantRequested = true;
+            } else if (!strcmp(argv[i], "--share-style") &&
+                       i + 1 < argc) {
+                const char *text = argv[++i];
+                if (strcmp(text, "1") && strcmp(text, "2")) {
+                    fprintf(stderr, "share style must be 1 (light) or 2 (dark)\n");
+                    return 64;
+                }
+                requestedShareStyle = strtoll(text, NULL, 10);
+                shareStyleRequested = true;
             } else if (!strcmp(argv[i], "--compare-png") && i + 1 < argc) {
                 comparePath = [NSString stringWithUTF8String:argv[++i]];
             } else if (!strcmp(argv[i], "--dump-layer") && i + 1 < argc) {
@@ -354,6 +405,10 @@ int main(int argc, char **argv)
                         "[--variant INT32] [--factory-options INT32] "
                         "[--variant-options UINT64] "
                         "[--point-size UINT32] [--appearance 0|1] "
+                        "[--appearance-variant INT32] "
+                        "[--draw-border 0|1] [--template-variant 0|1] "
+                        "[--share-style 1|2] "
+                        "[--airdrop-activity] "
                         "[--probe-variants] "
                         "[--inspect-descriptor] [--inspect-layer] "
                         "[--compare-png PATH] "
@@ -364,6 +419,52 @@ int main(int argc, char **argv)
         if (!CNDTriggerValidBundle(bundleIdentifier.UTF8String)) {
             fprintf(stderr, "bundle must be one explicit bundle identifier\n");
             return 64;
+        }
+        if (airDropActivityRequested) {
+            void *shareSheetHandle = dlopen(
+                "/System/Library/PrivateFrameworks/ShareSheet.framework/"
+                "ShareSheet", RTLD_NOW | RTLD_LOCAL);
+            Class activityClass = shareSheetHandle
+                ? NSClassFromString(@"UIAirDropActivity") : Nil;
+            SEL identitySelector = sel_registerName(
+                "_bundleIdentifierForActivityImageCreation");
+            SEL imageSelector = sel_registerName("_activityImage");
+            Method identityMethod = activityClass
+                ? class_getInstanceMethod(activityClass, identitySelector)
+                : NULL;
+            Method imageMethod = activityClass
+                ? class_getInstanceMethod(activityClass, imageSelector)
+                : NULL;
+            if (!activityClass || !identityMethod || !imageMethod ||
+                strcmp(method_getTypeEncoding(identityMethod), "@16@0:8") ||
+                strcmp(method_getTypeEncoding(imageMethod), "@16@0:8")) {
+                fprintf(stderr, "UIAirDropActivity ABI mismatch\n");
+                return 3;
+            }
+            id activity = [[activityClass alloc] init];
+            NSString *identity = ((id (*)(id, SEL))objc_msgSend)(
+                activity, identitySelector);
+            id image = ((id (*)(id, SEL))objc_msgSend)(
+                activity, imageSelector);
+            CGImageRef cgImage = NULL;
+            SEL cgImageSelector = sel_registerName("CGImage");
+            if ([image respondsToSelector:cgImageSelector]) {
+                cgImage = ((CGImageRef (*)(id, SEL))objc_msgSend)(
+                    image, cgImageSelector);
+            }
+            size_t pixelWidth = cgImage ? CGImageGetWidth(cgImage) : 0U;
+            size_t pixelHeight = cgImage ? CGImageGetHeight(cgImage) : 0U;
+            NSData *rgba = CNDTriggerRGBAData(
+                cgImage, pixelWidth, pixelHeight);
+            printf("CND_AIRDROP_ACTIVITY pid=%d activity=%p/%s "
+                   "identity=%s image=%p/%s pixels=%zux%zu rgba=%s\n",
+                   getpid(), (__bridge void *)activity,
+                   class_getName(object_getClass(activity)),
+                   identity.UTF8String ?: "-", (__bridge void *)image,
+                   image ? class_getName(object_getClass(image)) : "-",
+                   pixelWidth, pixelHeight,
+                   CNDTriggerSHA256(rgba).UTF8String ?: "-");
+            return image && cgImage ? 0 : 4;
         }
         void *handle = dlopen(
             "/System/Library/PrivateFrameworks/IconServices.framework/"
@@ -479,6 +580,70 @@ int main(int argc, char **argv)
                 descriptor, sel_registerName("setVariantOptions:"),
                 requestedVariantOptions);
         }
+        if (appearanceVariantRequested) {
+            if (!CNDTriggerMethodHasTypes(
+                    descriptor, "setAppearanceVariant:", "v24@0:8q16") ||
+                !CNDTriggerMethodHasTypes(
+                    descriptor, "appearanceVariant", "q16@0:8")) {
+                fprintf(stderr, "appearanceVariant ABI mismatch\n");
+                return 3;
+            }
+            ((void (*)(id, SEL, int64_t))objc_msgSend)(
+                descriptor, sel_registerName("setAppearanceVariant:"),
+                requestedAppearanceVariant);
+        }
+        if (drawBorderRequested) {
+            if (!CNDTriggerMethodHasTypes(
+                    descriptor, "setDrawBorder:", "v20@0:8B16") ||
+                !CNDTriggerMethodHasTypes(
+                    descriptor, "drawBorder", "B16@0:8")) {
+                fprintf(stderr, "drawBorder ABI mismatch\n");
+                return 3;
+            }
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(
+                descriptor, sel_registerName("setDrawBorder:"),
+                requestedDrawBorder);
+        }
+        if (templateVariantRequested) {
+            if (!CNDTriggerMethodHasTypes(
+                    descriptor, "setTemplateVariant:", "v20@0:8B16") ||
+                !CNDTriggerMethodHasTypes(
+                    descriptor, "templateVariant", "B16@0:8")) {
+                fprintf(stderr, "templateVariant ABI mismatch\n");
+                return 3;
+            }
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(
+                descriptor, sel_registerName("setTemplateVariant:"),
+                requestedTemplateVariant);
+        }
+        if (shareStyleRequested) {
+            void *sharingHandle = dlopen(
+                "/System/Library/PrivateFrameworks/SharingUI.framework/"
+                "SharingUI", RTLD_NOW | RTLD_LOCAL);
+            Class imageProviderClass = sharingHandle
+                ? NSClassFromString(@"SFUIActivityImageProvider") : Nil;
+            SEL tintSelector = sel_registerName(
+                "tintImageDescriptor:withUserInterfaceStyle:forGraphicIcon:");
+            Method tintMethod = imageProviderClass
+                ? class_getClassMethod(imageProviderClass, tintSelector) : NULL;
+            char *tintReturnType = tintMethod
+                ? method_copyReturnType(tintMethod) : NULL;
+            bool validTintReturn = tintReturnType &&
+                tintReturnType[0] == '@';
+            free(tintReturnType);
+            if (!tintMethod || method_getNumberOfArguments(tintMethod) != 5U ||
+                !validTintReturn) {
+                fprintf(stderr, "SharingUI descriptor tint ABI mismatch\n");
+                return 3;
+            }
+            descriptor = ((id (*)(id, SEL, id, int64_t, BOOL))objc_msgSend)(
+                imageProviderClass, tintSelector, descriptor,
+                requestedShareStyle, NO);
+            if (!descriptor) {
+                fprintf(stderr, "SharingUI descriptor tint returned nil\n");
+                return 3;
+            }
+        }
         if (ignoreCache) {
             if (!CNDTriggerMethodHasTypes(
                     descriptor, "setIgnoreCache:", "v20@0:8B16")) {
@@ -517,6 +682,23 @@ int main(int argc, char **argv)
                 ? ((uint64_t (*)(id, SEL))objc_msgSend)(
                       descriptor, sel_registerName("variantOptions"))
                 : UINT64_MAX;
+        int64_t observedAppearanceVariant =
+            CNDTriggerMethodHasTypes(
+                descriptor, "appearanceVariant", "q16@0:8")
+                ? ((int64_t (*)(id, SEL))objc_msgSend)(
+                      descriptor, sel_registerName("appearanceVariant"))
+                : INT64_MIN;
+        BOOL observedDrawBorder =
+            CNDTriggerMethodHasTypes(descriptor, "drawBorder", "B16@0:8")
+                ? ((BOOL (*)(id, SEL))objc_msgSend)(
+                      descriptor, sel_registerName("drawBorder"))
+                : NO;
+        BOOL observedTemplateVariant =
+            CNDTriggerMethodHasTypes(
+                descriptor, "templateVariant", "B16@0:8")
+                ? ((BOOL (*)(id, SEL))objc_msgSend)(
+                      descriptor, sel_registerName("templateVariant"))
+                : NO;
         id descriptorDigest = CNDTriggerObjectGetter(descriptor, "digest");
         NSString *descriptorDigestText =
             [descriptorDigest respondsToSelector:@selector(UUIDString)]
@@ -537,6 +719,8 @@ int main(int argc, char **argv)
         }
         printf("CND_ICON_TRIGGER start pid=%d bundle=%s variant=%d "
                "factoryOptions=%d variantOptions=%llu/%llu "
+               "appearanceVariant=%lld/%lld drawBorder=%d/%d "
+               "templateVariant=%d/%d "
                "icon=%p/%s descriptor=%p/%s "
                "provider=%p/%s geometry=%.1fx%.1f@%.2f appearance=%lld "
                "digest=%s "
@@ -545,6 +729,10 @@ int main(int argc, char **argv)
                requestedFactoryOptions,
                (unsigned long long)requestedVariantOptions,
                (unsigned long long)observedVariantOptions,
+               (long long)requestedAppearanceVariant,
+               (long long)observedAppearanceVariant,
+               requestedDrawBorder, observedDrawBorder,
+               requestedTemplateVariant, observedTemplateVariant,
                (__bridge void *)icon,
                class_getName(object_getClass(icon)),
                (__bridge void *)descriptor,
@@ -583,7 +771,7 @@ int main(int argc, char **argv)
             fflush(stdout);
         } else if ([icon respondsToSelector:sel_registerName(
                 "prepareImageForDescriptor:")]) {
-            ((void (*)(id, SEL, id))objc_msgSend)(
+            image = ((id (*)(id, SEL, id))objc_msgSend)(
                 icon, sel_registerName("prepareImageForDescriptor:"),
                 descriptor);
         }

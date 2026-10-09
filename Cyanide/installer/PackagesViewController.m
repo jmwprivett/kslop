@@ -7,17 +7,20 @@
 #import "PackageCatalog.h"
 #import "PackageDetailViewController.h"
 #import "PackageQueue.h"
+#import "CNDQueuedActionCatalog.h"
 #import "../SettingsViewController.h"
 
 static NSString * const kPackageCellID         = @"PackageCell";
 static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
-static NSString * const kReworkedSnowBoardIdentifier = @"com.darksword.snowboardlite";
-static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-changer";
+static NSString * const kNewSnowBoardIdentifier = @"com.darksword.snowboardlite";
+static NSString * const kNewFontIdentifier = @"com.darksword.font-changer";
+static NSString * const kNewLockscreenGlyphsIdentifier = @"com.darksword.lockscreen-glyphs";
+static NSString * const kNewCCThemingIdentifier = @"com.darksword.cc-theming";
 
 @interface PackagesViewController () <UISearchResultsUpdating>
 @property (nonatomic, copy)   NSArray<Package *> *allPackagesSorted;
 @property (nonatomic, copy)   NSArray<Package *> *favoritePackages;
-@property (nonatomic, copy)   NSArray<Package *> *reworkedPackages;
+@property (nonatomic, copy)   NSArray<Package *> *curatedNewPackages;
 @property (nonatomic, copy)   NSArray<Package *> *flatPackages;        // shown when !groupByCategory
 @property (nonatomic, copy)   NSArray<NSString *> *visibleCategories;  // shown when groupByCategory
 @property (nonatomic, copy)   NSDictionary<NSString *, NSArray<Package *> *> *packagesByCategory;
@@ -59,8 +62,8 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
     }
 
     UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:@"Run System Edit Alone"
-                                            message:reason ?: @"This system edit must be the only pending queue item."
+        [UIAlertController alertControllerWithTitle:@"Could Not Queue Change"
+                                            message:reason ?: @"The queued change could not be saved."
                                      preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"OK"
                                               style:UIAlertActionStyleDefault
@@ -224,24 +227,25 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
     for (Package *p in self.allPackagesSorted) {
         if ([self package:p matchesQuery:self.searchText]) [filtered addObject:p];
     }
-    NSMutableArray<Package *> *reworked = [NSMutableArray array];
+    NSMutableArray<Package *> *newPackages = [NSMutableArray array];
     NSMutableArray<Package *> *remaining = [NSMutableArray array];
-    NSSet<NSString *> *reworkedIdentifiers = [NSSet setWithObjects:
-        kReworkedSnowBoardIdentifier, kReworkedFontIdentifier, nil];
+    NSSet<NSString *> *newIdentifiers = [NSSet setWithObjects:
+        kNewSnowBoardIdentifier, kNewFontIdentifier,
+        kNewLockscreenGlyphsIdentifier, kNewCCThemingIdentifier, nil];
     for (Package *package in filtered) {
-        if ([reworkedIdentifiers containsObject:package.identifier]) {
-            [reworked addObject:package];
+        if ([newIdentifiers containsObject:package.identifier]) {
+            [newPackages addObject:package];
         } else {
             [remaining addObject:package];
         }
     }
-    [reworked sortUsingComparator:^NSComparisonResult(Package *a, Package *b) {
-        BOOL aSnowBoard = [a.identifier isEqualToString:kReworkedSnowBoardIdentifier];
-        BOOL bSnowBoard = [b.identifier isEqualToString:kReworkedSnowBoardIdentifier];
+    [newPackages sortUsingComparator:^NSComparisonResult(Package *a, Package *b) {
+        BOOL aSnowBoard = [a.identifier isEqualToString:kNewSnowBoardIdentifier];
+        BOOL bSnowBoard = [b.identifier isEqualToString:kNewSnowBoardIdentifier];
         if (aSnowBoard != bSnowBoard) return aSnowBoard ? NSOrderedAscending : NSOrderedDescending;
         return [a.name caseInsensitiveCompare:b.name];
     }];
-    self.reworkedPackages = reworked;
+    self.curatedNewPackages = newPackages;
     self.flatPackages = remaining;
 
     NSSet<NSString *> *favoriteIdentifiers = PackageFavoriteIdentifiers();
@@ -279,7 +283,7 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
-    // Favorites is always section zero; Reworked is the curated section
+    // Favorites is always section zero; New is the curated section
     // immediately below it, before the normal category buckets.
     if (self.groupByCategory) return (NSInteger)self.visibleCategories.count + 2;
     return 3;
@@ -288,7 +292,7 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
     if (section == 0) return MAX((NSInteger)self.favoritePackages.count, 1);
-    if (section == 1) return MAX((NSInteger)self.reworkedPackages.count, 1);
+    if (section == 1) return MAX((NSInteger)self.curatedNewPackages.count, 1);
     if (self.groupByCategory) {
         NSString *cat = self.visibleCategories[section - 2];
         return (NSInteger)self.packagesByCategory[cat].count;
@@ -298,7 +302,7 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section
 {
-    // Keep the Favorites and Reworked headers compact above the package rows.
+    // Keep the Favorites and New headers compact above the package rows.
     if (section <= 1) return 26.0;
     return UITableViewAutomaticDimension;
 }
@@ -334,7 +338,7 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
     if (section == 0) return @"Favorites";
-    if (section == 1) return @"Reworked";
+    if (section == 1) return @"New";
     if (self.groupByCategory) return self.visibleCategories[section - 2];
     return @"All Tweaks";
 }
@@ -346,8 +350,8 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
         return self.favoritePackages[indexPath.row];
     }
     if (indexPath.section == 1) {
-        if (self.reworkedPackages.count == 0) return nil;
-        return self.reworkedPackages[indexPath.row];
+        if (self.curatedNewPackages.count == 0) return nil;
+        return self.curatedNewPackages[indexPath.row];
     }
     if (self.groupByCategory) {
         NSString *cat = self.visibleCategories[indexPath.section - 2];
@@ -366,17 +370,17 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
 
     Package *pkg = [self packageAtIndexPath:indexPath];
     if (!pkg) {
-        BOOL reworkedSection = indexPath.section == 1;
-        BOOL filteringFavorites = !reworkedSection && self.searchText.length > 0 &&
+        BOOL newSection = indexPath.section == 1;
+        BOOL filteringFavorites = !newSection && self.searchText.length > 0 &&
                                   PackageFavoriteIdentifiers().count > 0;
         UIListContentConfiguration *empty = [UIListContentConfiguration subtitleCellConfiguration];
-        empty.image = [UIImage systemImageNamed:reworkedSection ? @"wand.and.stars" : @"star"];
+        empty.image = [UIImage systemImageNamed:newSection ? @"wand.and.stars" : @"star"];
         empty.imageProperties.tintColor = UIColor.tertiaryLabelColor;
-        if (reworkedSection) {
+        if (newSection) {
             empty.text = self.searchText.length > 0
-                ? @"No matching reworked tweaks" : @"No reworked tweaks";
+                ? @"No matching new tweaks" : @"No new tweaks";
             empty.secondaryText = self.searchText.length > 0
-                ? @"Try another search." : @"SnowBoard Remix and Font Changer appear here.";
+                ? @"Try another search." : @"SnowBoard Remix, Font Changer, and Lockscreen Glyphs appear here.";
         } else {
             empty.text = filteringFavorites ? @"No matching favorites" : @"No favorites yet";
             empty.secondaryText = filteringFavorites
@@ -481,6 +485,26 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
 - (UIView *)accessoryViewForPackage:(Package *)pkg
 {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:pkg];
+    if ([pkg.identifier isEqualToString:kNewSnowBoardIdentifier]) {
+        CNDQueuedAction *queued = [[PackageQueue sharedQueue]
+            standaloneActionForConflictKey:
+                CNDQueuedActionConflictKeySnowBoardRemix];
+        if (queued) {
+            BOOL apply = [queued.operation isEqualToString:
+                CNDQueuedActionOperationApplyTheme];
+            UIColor *color = self.view.tintColor;
+            return [self pillWithText:apply
+                        ? @"APPLY PENDING" : @"RESTORE PENDING"
+                           background:[color colorWithAlphaComponent:0.18]
+                            textColor:color];
+        }
+        if (pkg.isAppliedForCurrentSystemEpoch) {
+            return [self pillWithText:@"ACTIVE"
+                           background:[UIColor.systemGreenColor
+                               colorWithAlphaComponent:0.18]
+                            textColor:UIColor.systemGreenColor];
+        }
+    }
     if (pkg.kind == PackageInstallKindDirectTool) {
         return [self pillWithText:@"MANUAL"
                        background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14]
@@ -542,9 +566,28 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
                            background:[color colorWithAlphaComponent:0.18]
                             textColor:color];
         }
+        if (pkg.isAppliedForCurrentSystemEpoch) {
+            return [self pillWithText:@"ACTIVE"
+                           background:[UIColor.systemGreenColor
+                               colorWithAlphaComponent:0.18]
+                            textColor:UIColor.systemGreenColor];
+        }
         return [self pillWithText:@"MANUAL"
                        background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14]
                         textColor:UIColor.secondaryLabelColor];
+    }
+    if (pkg.kind == PackageInstallKindLockscreenGlyphs) {
+        return [self pillWithText:@"MANUAL"
+                       background:[UIColor.secondaryLabelColor colorWithAlphaComponent:0.14]
+                        textColor:UIColor.secondaryLabelColor];
+    }
+    if ([pkg.identifier isEqualToString:@"com.darksword.sbcustomizer"] &&
+        intent == PackageQueueIntentNone &&
+        pkg.isAppliedForCurrentSystemEpoch) {
+        return [self pillWithText:@"ACTIVE"
+                       background:[UIColor.systemGreenColor
+                           colorWithAlphaComponent:0.18]
+                        textColor:UIColor.systemGreenColor];
     }
     if (intent != PackageQueueIntentNone) {
         NSString *text = (intent == PackageQueueIntentInstall) ? @"WILL ACTIVATE" : @"WILL DEACTIVATE";
@@ -614,6 +657,10 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     Package *pkg = [self packageAtIndexPath:indexPath];
     if (!pkg) return;
+    if ([pkg.identifier isEqualToString:@"com.darksword.snowboardlite"]) {
+        [self navigateToSettingsSectionForPackage:pkg];
+        return;
+    }
     PackageDetailViewController *detail = [[PackageDetailViewController alloc] initWithPackage:pkg];
     [self.navigationController pushViewController:detail animated:YES];
 }
@@ -808,6 +855,22 @@ static NSString * const kReworkedFontIdentifier     = @"com.darksword.font-chang
         restore.image = [UIImage systemImageNamed:@"arrow.clockwise"];
 
         UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[apply, restore]];
+        cfg.performsFirstActionWithFullSwipe = NO;
+        return cfg;
+    }
+
+    if (pkg.kind == PackageInstallKindLockscreenGlyphs && intent == PackageQueueIntentNone) {
+        UIContextualAction *open = [UIContextualAction
+            contextualActionWithStyle:UIContextualActionStyleNormal
+                                title:@"Controls"
+                              handler:^(UIContextualAction *a, UIView *v, void (^done)(BOOL)) {
+            done(YES);
+            PackageDetailViewController *detail = [[PackageDetailViewController alloc] initWithPackage:pkg];
+            [self.navigationController pushViewController:detail animated:YES];
+        }];
+        open.backgroundColor = self.view.tintColor;
+        open.image = [UIImage systemImageNamed:@"lock.display"];
+        UISwipeActionsConfiguration *cfg = [UISwipeActionsConfiguration configurationWithActions:@[open]];
         cfg.performsFirstActionWithFullSwipe = NO;
         return cfg;
     }

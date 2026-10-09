@@ -19,7 +19,7 @@ The per-app core profile uses 3× scale throughout:
 | --- | --- | --- |
 | 13×13 | 0 | Core |
 | 27×27 | 0, 1 | Core; its appearance-0 store unit can alias 28-point |
-| 28×28 | 0 | Core launch/return consumer |
+| 28×28 | 0 | Core launch/return consumer (`variantOptions=0`) and Share-sheet Apps-list consumer (`variantOptions=0x4`, `drawBorder=YES`) |
 | 38×38 | 0, 1 | Core |
 | 48×48 | 0 | Core |
 | 64×64 | 0 | Core for every app's Spotlight Apps-list result |
@@ -27,9 +27,13 @@ The per-app core profile uses 3× scale throughout:
 | 68×68 | 0 | Core launch/return record with `variantOptions=0x20000` |
 | 20×20 | 0 | Safari-only SnippetUI badge, outside the per-app core |
 
-Exact descriptors, including the factory options and observed pixel dimensions,
-are constructed in `CNDIconServicesDescriptorSpec`. An existing 10-record
-journal expands safely by publishing only the missing 64-point record.
+Exact descriptors, including variant options, factory options, and observed
+pixel dimensions, are constructed in `CNDIconServicesDescriptorSpec`.
+Existing active journals expand safely by publishing only missing records.
+AirDrop is the one bounded non-application identity: when a theme supplies
+`com.apple.Sharing.AirDrop.png`, Cyanide publishes its 64-point activity-strip
+record and its bordered 28-point Apps-list record under
+`com.apple.Sharing.AirDrop`.
 
 ## Persistence and audit
 
@@ -63,3 +67,29 @@ validation” about work completed later. Use this status page and the top of
 `snowboard-remix-current-handoff.md` for the current position, then the dated
 sections for evidence. Static dyld-cache and disassembly work uses the exact
 iOS 26.0 `23A341` / `iPhone17,3` VM profile.
+
+Pulsar Control Center port research is documented separately. See
+`vphone-ios26-pulsar-controlcenter-tracing.md` for the canonical Misaka v2
+target inventory, the bounded iOS 26 runtime trace, and the capture acceptance
+gates.
+
+The durable pre/post-respring installer architecture, recovery invariants,
+durable SnowBoard and epoch-bound presentation ACTIVE-state semantics, and the
+final device-validation checklist are recorded in
+`queued-system-change-coordinator.md`.
+
+The authoritative Calendar implementation contract—including the distinct
+SpringBoard and Spotlight model graphs, provider/source-cache ordering,
+bounded consumer update, Restore sequence, and the physical false-success
+proof—is recorded in `vphone-ios26-calendar-provider-repair.md`.
+
+The repeatable VM-only kernel-call setup, live debugger-address capture,
+verification gates, signature recovery, and physical-aperture safety boundary
+are recorded in
+[`vm-guide.md`](vm-guide.md).
+
+The October 7 2026 panic evidence that closed the text-page mutation route
+(esr `0x9600004f`, write permission fault in the physical aperture, seven
+identical panics) and the follow-up identical-bytes data-page aperture
+experiment are recorded in
+[`hail-mary-data-page-experiment.md`](hail-mary-data-page-experiment.md).

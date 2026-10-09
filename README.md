@@ -11,23 +11,78 @@ It preserves the original kernel read/write and RemoteCall foundation while
 substantially reworking the application, tweak runner, recovery behavior, and
 iOS 26 support.
 
-Most development time has gone into rebuilding SnowBoard support as a persistent
-IconServices-backed theme engine. Using this, we achieve complete coverage across Home
-Screen icons, folders, App Library, notifications, the app switcher, Spotlight,
-and launch/return transitions. Icon theme is persistent through reboot everywhere! 
-For transparent themes springboard and spotlight are manually repaired which is
-respring persistent for springboard, and mostly respring persistent for spotlight, 
-sometimes it restarts :D but with only KRW its the best we got.
-
-kslop also includes system Font Changer adapted from Lara's font-replacement
-approach, with local font importing, size validation, stock backups,
-restoration, and Regular/Italic/Mono family support.
-
-Gonna also port the KRW tweaks from iOS 16 in misaka and PureKFD, stay tuned.
+Recent development has focused on making iOS 26 appearance changes explicit,
+recoverable, and honest about their lifetime. Persistent changes use exact target
+validation and durable recovery journals; process-local and per-boot changes are
+kept separate and clearly labeled in the UI.
 
 Original Development and integration credits: [`rooootdev`](https://github.com/rooootdev) /
 [`zeroxjf`](https://github.com/zeroxjf). The upstream contributors and license
 are credited below.
+
+## New
+
+### SnowBoard Remix
+
+SnowBoard Remix grew from the original SnowBoard Lite import UI into a persistent
+IconServices publisher. It imports SnowBoard/IconBundles themes, builds the exact
+iOS descriptor set used by Home Screen, folders, App Library, notifications, the
+app switcher, Spotlight, and launch/return transitions, then publishes structured
+themed records through one identity-bound daemon session. Each app has an
+independent recovery journal containing its stock records, so Apply, Restore, and
+Update Repair can verify or roll back one app without sacrificing the rest of the
+theme.
+
+Getting there required tracing SpringBoard, Spotlight, and `iconservicesagent` in
+the VM and on a physical device; decoding the iOS 26 shared cache; and checking the
+persistent IconServices index and store using UUIDs, validation tokens, source
+identities, and byte/pixel hashes. Those findings became a durable queue that runs
+publication and filesystem work before a respring, resumes safely afterward, and
+keeps persistent icon state distinct from process-local presentation repairs.
+
+### Transparency Fix (Hail Mary)
+
+Transparent themes exposed a separate iOS 26 presentation decision even when the
+underlying IconServices records were correct. The first Hail Mary experiment proved
+that the relevant shared-cache text page was physically read-only, so the project
+moved to the class's preoptimized Objective-C dispatch-cache entry on a shared data
+page. The production Transparency Fix proves SpringBoard and Spotlight see the same
+physical frame and exact offline guard, then performs one guarded 32-bit change to
+redirect `-[SBIconImageView effectivelyPrefersFlatImageLayers]` to an existing
+Apple-signed true-returning implementation. Restore performs the exact inverse.
+
+The operation is pinned to the proven iPhone 16 Pro Max / iOS 26.0 `23A341`
+combination, uses no injected executable code or PAC pointer, and never kills or
+restarts a process after the write. It is deliberately a reversible, per-boot fix:
+it survives ordinary resprings while the modified shared page remains resident, but
+a reboot or later page reclamation can return the stock entry and require Apply
+again. The final result is checked visually by the user.
+
+### Control Center theming
+
+Control Center theming applies the original Pulsar artwork through validated CAML
+packages and native CoreUI catalogs. It is file-backed rather than a live view hook:
+Apply verifies the exact iOS 26 `23A341` resources, saves stock bytes in a durable
+journal, installs only the packaged routes, verifies every write, and rolls back a
+failed transaction. Restore writes the journaled stock resources back. Both actions
+run through the saved queue and finish with the shared respring flow.
+
+### Lock Screen glyphs
+
+Lock Screen Glyphs themes the live camera and flashlight quick actions with Pulsar
+artwork, including separate flashlight off and on states. Apply and Restore rebuild
+the native glyph objects in SpringBoard and verify the result without overwriting a
+system asset. This one is intentionally temporary: a SpringBoard respring or reboot
+returns the stock glyphs.
+
+### Font Changer
+
+Font Changer imports local TTF, OTF, or TTC files for the system Regular, Italic,
+and Mono roles. Regular is required; Italic and Mono are optional, and every
+replacement must fit within the original target file. The first Apply saves stock
+backups, the durable queue performs Apply or Restore before the shared respring, and
+Restore writes those exact backups back. The implementation adapts Lara's in-place
+font-replacement approach.
 
 ## Tweaks
 
@@ -77,15 +132,23 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
 ### Appearance
 
 - **SnowBoard Remix**: imports SnowBoard/IconBundles themes and publishes
-  persistent IconServices records through a pinned daemon session. It keeps
-  original stock records in recovery journals for Apply and Restore; **Update
-  Repair** handles newly installed or updated apps. SpringBoard cache refresh
-  is still under investigation. The import UI began with the SnowBoard Lite
-  port from [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios), then was
-  rebuilt by `rooootdev / zeroxjf`.
-- **Font Changer**: imports local fonts, validates their size, and replaces the
-  system Regular, Italic, and Mono families with stock backups and Restore.
-  Adapted by `rooootdev / zeroxjf` from Lara's font-replacement approach.
+  persistent IconServices records through an identity-bound daemon session.
+  Per-app recovery journals protect Apply and Restore; **Update Repair** handles
+  newly installed or updated apps. Transparent presentation is handled separately
+  by the queueable, per-boot **Transparency Fix** plus bounded consumer repairs.
+  The import UI began with the SnowBoard Lite port from
+  [`d1y/cyanide-ios`](https://github.com/d1y/cyanide-ios), then was rebuilt by
+  `rooootdev / zeroxjf`.
+- **Control Center Theming**: installs the packaged Pulsar CAML/CoreUI resources
+  through an exact-build, journaled file transaction, then resprings. Restore
+  reinstates the saved stock resources. Currently locked to iOS 26.0 `23A341`.
+- **Lock Screen Glyphs**: applies Pulsar camera and flashlight artwork live in
+  SpringBoard, including off/on flashlight states. Restore is immediate; respring
+  or reboot also returns the stock glyphs.
+- **Font Changer**: imports local TTF, OTF, or TTC files, validates the in-place
+  size limit, and replaces the system Regular, Italic, and Mono roles with stock
+  backups and queued Restore. Adapted by `rooootdev / zeroxjf` from Lara's
+  font-replacement approach.
 
 ### Beta
 
@@ -151,7 +214,7 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
 The [current research status](docs/research/README.md) and
 [chronological handoff](docs/research/snowboard-remix-current-handoff.md)
 record physical-device and VM evidence, plus the exact iOS 26.0 `23A341`,
-`iPhone17,3` dyld-cache and disassembly work. Publication uses structured
+`iPhone17,2` dyld-cache and disassembly work. Publication uses structured
 `IFImage` objects, exact descriptors, one pinned daemon session, and recovery
 journals. Restore and app-update rebasing have been verified. A persistent
 index-token correction addresses unrelated app-install garbage collection;

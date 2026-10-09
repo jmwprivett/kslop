@@ -5,6 +5,7 @@
 
 #import "Package.h"
 #import "PackageQueue.h"
+#import "CNDTransientAppliedState.h"
 #import "../SettingsViewController.h"
 #import "../PatreonAuth.h"
 #import "../LogTextView.h"
@@ -113,8 +114,10 @@ void PackageSetIdentifierFavorite(NSString *identifier, BOOL favorite)
         case PackageInstallKindCallRecordingSound:
         case PackageInstallKindHideHomeBar:
         case PackageInstallKindFontChanger:
+        case PackageInstallKindLockscreenGlyphs:
+        case PackageInstallKindControlCenterTheming:
             // Manual-control packages: no persistent "installed" state from
-            // the app's POV. The detail view shows an Apply/Remove menu and
+            // the app's POV. The detail view shows an Apply/Restore menu and
             // each commit is a fresh one-shot run.
             return NO;
         case PackageInstallKindDirectTool:
@@ -141,67 +144,110 @@ void PackageSetIdentifierFavorite(NSString *identifier, BOOL favorite)
     return NO;
 }
 
+- (BOOL)isAppliedForCurrentSystemEpoch
+{
+    if ([self.identifier isEqualToString:@"com.darksword.snowboardlite"]) {
+        return CNDTransientAppliedStateIsActive(
+            CNDTransientAppliedStateSnowBoardRemix);
+    }
+    if (self.kind == PackageInstallKindFontChanger) {
+        return CNDTransientAppliedStateIsActive(
+            CNDTransientAppliedStateFontChanger);
+    }
+    if ([self.identifier isEqualToString:@"com.darksword.sbcustomizer"]) {
+        return CNDTransientAppliedStateIsActive(
+            CNDTransientAppliedStateSBCustomizer);
+    }
+    return NO;
+}
+
 - (void)install   { [[PackageQueue sharedQueue] toggleForPackage:self]; }
 - (void)uninstall { [[PackageQueue sharedQueue] toggleForPackage:self]; }
 
 // Called by PackageQueue.commit — writes the persisted state without
 // triggering settings_run_actions itself (the queue does that once).
-- (void)applyCommittedState:(BOOL)installed
+- (BOOL)applyCommittedState:(BOOL)installed
 {
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     switch (self.kind) {
         case PackageInstallKindToggle:
-            if (self.enabledKey) {
-                [d setBool:installed forKey:self.enabledKey];
-                [d synchronize];
-            }
-            return;
+            if (!self.enabledKey) return NO;
+            [d setBool:installed forKey:self.enabledKey];
+            return [d synchronize];
         case PackageInstallKindOTA:
-            if (settings_apply_ota_disabled(installed)) {
+        {
+            BOOL success = settings_apply_ota_disabled(installed);
+            if (success) {
                 log_user("[INSTALLER] OTA updates %s.\n", installed ? "disabled" : "enabled");
             } else {
                 log_user("[INSTALLER] OTA %s failed; install state was not changed.\n",
                          installed ? "disable" : "enable");
             }
-            return;
+            return success;
+        }
         case PackageInstallKindNanoRegistry:
-            if (settings_apply_nano_registry_now(installed)) {
+        {
+            BOOL success = settings_apply_nano_registry_now(installed);
+            if (success) {
                 log_user("[INSTALLER] Watch pairing override %s.\n",
                          installed ? "applied" : "removed");
             } else {
                 log_user("[INSTALLER] Watch pairing override %s failed; state was not changed.\n",
                          installed ? "apply" : "remove");
             }
-            return;
+            return success;
+        }
         case PackageInstallKindCallRecordingSound:
-            if (settings_apply_call_recording_sound_disabled(installed)) {
+        {
+            BOOL success = settings_apply_call_recording_sound_disabled(installed);
+            if (success) {
                 log_user("[INSTALLER] Call recording disclosure sound %s.\n",
                          installed ? "silenced" : "restored");
             } else {
                 log_user("[INSTALLER] Call recording disclosure sound %s failed.\n",
                          installed ? "silence" : "restore");
             }
-            return;
+            return success;
+        }
         case PackageInstallKindHideHomeBar:
-            if (settings_apply_hide_home_bar_hidden(installed)) {
+        {
+            BOOL success = settings_apply_hide_home_bar_hidden(installed);
+            if (success) {
                 log_user("[INSTALLER] Home bar %s.\n",
                          installed ? "hidden; respring to apply" : "restore queued; respring to apply");
             } else {
                 log_user("[INSTALLER] Home bar %s failed.\n",
                          installed ? "hide" : "restore");
             }
-            return;
+            return success;
+        }
         case PackageInstallKindFontChanger:
-            if (settings_apply_font_changer_now(installed)) {
+        {
+            BOOL success = settings_apply_font_changer_now(installed);
+            if (success) {
                 log_user("[INSTALLER] Font Changer %s; respring to apply.\n",
                          installed ? "applied" : "restored");
             } else {
                 log_user("[INSTALLER] Font Changer %s failed.\n",
                          installed ? "apply" : "restore");
             }
-            return;
+            return success;
+        }
+        case PackageInstallKindControlCenterTheming:
+        {
+            BOOL success = settings_apply_cc_theming_now(installed);
+            if (success) {
+                log_user("[INSTALLER] Control Center resources %s; respring queued.\n",
+                         installed ? "applied" : "restored");
+            } else {
+                log_user("[INSTALLER] Control Center resource %s failed.\n",
+                         installed ? "apply" : "restore");
+            }
+            return success;
+        }
+        case PackageInstallKindLockscreenGlyphs:
         case PackageInstallKindDirectTool:
-            return;
+            return NO;
     }
 }
 

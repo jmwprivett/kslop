@@ -552,6 +552,8 @@ void CNDIconServicesConsumerLifecycleSetStaticDynamicIconData(
         [NSMutableDictionary dictionaryWithCapacity:8];
     for (NSString *bundleIdentifier in @[
             @"com.apple.mobiletimer", @"com.apple.mobilecal",
+            @"__cnd_calendar_68_structured",
+            @"__cnd_calendar_68_structured_a1",
             @"__cnd_clock_hours", @"__cnd_clock_minutes",
             @"__cnd_clock_seconds", @"__cnd_clock_hour_minute_dot",
             @"__cnd_clock_second_dot", @"__cnd_clock_background"]) {
@@ -571,10 +573,13 @@ void CNDIconServicesConsumerLifecycleSetStaticDynamicIconData(
             @"__cnd_clock_second_dot"]) {
         if (staged[componentKey]) clockComponents++;
     }
-    log_user("[SBR_DYNAMIC_ICONS] staged payloads=%lu clock=%s calendar=%s clock-components=%lu/5 background=%s\n",
+    log_user("[SBR_DYNAMIC_ICONS] staged payloads=%lu clock=%s calendar=%s "
+             "calendar-68=%s/%s clock-components=%lu/5 background=%s\n",
              (unsigned long)staged.count,
              staged[@"com.apple.mobiletimer"] ? "yes" : "no",
              staged[@"com.apple.mobilecal"] ? "yes" : "no",
+             staged[@"__cnd_calendar_68_structured"] ? "a0" : "-",
+             staged[@"__cnd_calendar_68_structured_a1"] ? "a1" : "-",
              (unsigned long)clockComponents,
              staged[@"__cnd_clock_background"] ? "yes" : "no");
     /* Snapshot publication is informational. Never synchronously wait on the

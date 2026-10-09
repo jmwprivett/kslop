@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trace real app-icon descriptors in vPhone SpringBoard or Spotlight."""
+"""Trace real app-icon descriptors in vPhone SpringBoard, Spotlight, or Files."""
 
 from __future__ import annotations
 
@@ -33,9 +33,30 @@ def c_literal(value: str) -> str:
 
 
 def safe_target(target: str) -> str:
-    if target not in ("SpringBoard", "Spotlight"):
-        raise LabError("target must be SpringBoard or Spotlight")
+    if target not in ("SpringBoard", "Spotlight", "Files"):
+        raise LabError("target must be SpringBoard, Spotlight, or Files")
     return target
+
+
+def resolve_files(ssh: SSH) -> tuple[int, str]:
+    output = ssh.command("/bin/ps -A -o pid=,command=")
+    matches: list[tuple[int, str]] = []
+    for line in output.splitlines():
+        pid_text, separator, command = line.strip().partition(" ")
+        if not separator or not pid_text.isdigit():
+            continue
+        command = command.strip()
+        executable = command.split(" ", 1)[0]
+        if (executable.startswith("/var/containers/Bundle/Application/") and
+                executable.endswith("/Files.app/Files")):
+            matches.append((int(pid_text), command))
+    if len(matches) != 1 or matches[0][0] <= 1:
+        raise LabError(f"expected exactly one Files process, observed {matches!r}")
+    return matches[0]
+
+
+def resolve_trace_target(ssh: SSH, target: str) -> tuple[int, str]:
+    return resolve_files(ssh) if target == "Files" else resolve_target(ssh, target)
 
 
 def output_path(target: str) -> str:
@@ -72,7 +93,7 @@ def read_report(ssh: SSH, target: str) -> str:
 
 def inject(ssh: SSH, target: str, bundle: str) -> tuple[int, str]:
     target = safe_target(target)
-    pid, command = resolve_target(ssh, target)
+    pid, command = resolve_trace_target(ssh, target)
     token = issue_file_extension(ssh, "/var/tmp")
     payload = build(target, bundle, token)
     digest = hashlib.sha256(payload.read_bytes()).hexdigest()[:16]
@@ -82,22 +103,28 @@ def inject(ssh: SSH, target: str, bundle: str) -> tuple[int, str]:
         f"/iosbinpack64/usr/sbin/chown root:wheel {shlex.quote(remote)} && "
         f"/iosbinpack64/bin/chmod 0755 {shlex.quote(remote)}"
     )
-    current_pid, _ = resolve_target(ssh, target)
+    current_pid, _ = resolve_trace_target(ssh, target)
     if current_pid != pid or pid <= 1:
         raise LabError(
             f"refusing: {target} identity changed before injection "
             f"({pid} -> {current_pid})"
         )
-    expected = TARGETS[target]
     report = output_path(target)
     inject_log = f"/var/tmp/cyanide-icon-descriptor-{target}-inject.log"
     ssh.command(
         f"/iosbinpack64/bin/rm -f {shlex.quote(report)} "
         f"{shlex.quote(inject_log)}; "
         f"current=$(/bin/ps -p {pid} -o command=); "
-        f"case \"$current\" in "
-        f"{shlex.quote(expected)}|{shlex.quote(expected + ' ')}*) ;; "
-        f"*) echo 'target identity changed' >&2; exit 90;; esac; "
+        + (
+            f"case \"$current\" in */Files.app/Files|*/Files.app/Files\\ *) ;; "
+            f"*) echo 'target identity changed' >&2; exit 90;; esac; "
+            if target == "Files" else
+            f"case \"$current\" in "
+            f"{shlex.quote(TARGETS[target])}|"
+            f"{shlex.quote(TARGETS[target] + ' ')}*) ;; "
+            f"*) echo 'target identity changed' >&2; exit 90;; esac; "
+        )
+        +
         f"/var/jb/usr/bin/timeout -k 2 20 "
         f"/iosbinpack64/bin/opainject {pid} {shlex.quote(remote)} "
         f">{shlex.quote(inject_log)} 2>&1; status=$?; "
@@ -137,7 +164,7 @@ def mark(ssh: SSH, target: str, label: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("build", "inject", "read", "mark"))
-    parser.add_argument("target", choices=("SpringBoard", "Spotlight"))
+    parser.add_argument("target", choices=("SpringBoard", "Spotlight", "Files"))
     parser.add_argument("label", nargs="?", default="")
     parser.add_argument("--bundle", default="com.ebay.iphone")
     parser.add_argument("--host", default=None, help="device host (required for live operations)")

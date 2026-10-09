@@ -74,7 +74,7 @@ static NSDictionary<NSString *, id> *cnd_icon_result(
 @protocol CNDISBundleIdentifierIconRuntime <NSObject>
 - (instancetype)initWithBundleIdentifier:(NSString *)bundleIdentifier;
 - (id)_makeResourceProviderAllowIconResourceFallback:(BOOL)allowFallback;
-- (void)prepareImageForDescriptor:(id)descriptor;
+- (id)prepareImageForDescriptor:(id)descriptor;
 - (id)imageForDescriptor:(id)descriptor;
 @end
 

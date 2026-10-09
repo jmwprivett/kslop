@@ -58,6 +58,15 @@ live-leaf icon objects.
 | Notifications | 38x38@3, appearances 0/1 | `8E649870…` / `a6e236b3…`; `799B5C5B…` / `156aab45…`; pixel `c6700efb…` | Normal rows: `NCUIMappedImageCache.sharedCache` for `BBSectionIcon` recipes; auxiliary switcher-suggestion path: `SBIconController.notificationIconImageCache` | PID 2772 mapped `0xb86214c80`; auxiliary `0xb87bc23a0`; both stable across manager reset | retained `NCBadgedIconView._iconView` / `_subordinateIconView` reached through sections → groups → requests → current cells | mapped `removeAllObjects` plus `allKeys` FIFO barrier; auxiliary `purgeAllCachedImages` | forced section reload; clear retained `UIImageView.image`; `NCBadgedIconView._updateVisibleIcons` | **Cache and future-consumer path pass; live-row visual proof pending.** Mapped cache emptied 52→0. Fresh 38-point light/dark recipes each returned 114x114 themed pixels with `c6700efb…`. Five sections were reachable, but the VM currently had 0 groups/requests/cells, so existing-row Apply/Restore still requires a materialized notification acceptance run. |
 | Launch and return transitions | 28x28@3 variant 0 and 68x68@3 `variantOptions=0x20000` | `2D588334…` / `f31ce7bc…` / `65d3dedd…`; `C233706B…` / `5a520436…` / `c2277e42…` | manager `SBHIconImageCache` | manager pointer above | transition `SBIconImageView` and crossfade consumer | manager reset | application generation reload; transition creates/refills consumer | **Pass.** Files launch and return requested these exact two descriptors. The themed UUID and pixel hash reached `setDisplayedImage:`; no speculative descriptor was needed. |
 
+### Additional Share-sheet consumer boundary
+
+AirDrop is not a SpringBoard surface, but its persistent pseudo-bundle record
+uses the same publisher and exposed an important process-lifetime boundary.
+
+| Surface | Descriptor | Persistent UUID/hash | Cache owner/getter | Cache pointer | Materialized consumer | Purge selector | Repaint selector | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Share sheet AirDrop tile | 64x64@3, appearance 0, variant 0 | `979F2325…` / data `f408d828…` / decoded pixels `e5e540dc…` | `SharingUIService` → `UIActivityContentViewController.activityImageProvider` → `SFUIImageProvider.imageCache` | provider `0x7b7355fe0` in PID 6173; cache object is process-local | horizontal activity cell retained the delivered stock `UIImage` `0x7b746c280` / RGBA `48fb01c4…` | no provider-specific purge selector; `NSCache.removeAllObjects` would not clear the cell's retained image | retire the exact `SharingUIService` incarnation after persistent verification; its normal relaunch rebuilds provider and cells | **Pass.** Publishing and unhooked readback alone left PID 6173 stock. Retiring only PID 6173 produced PID 6736, and the visible AirDrop tile immediately became themed without restarting SpringBoard. Production uses one identity-bound RemoteCall to that service, or no session when it is absent. |
+
 ## What reset actually does
 
 The PID-39 before/after probe recorded:
@@ -160,6 +169,7 @@ checks every private mutator's exact runtime encoding before invoking it.
 | `SBHIconManager` | `relayout` | `B16@0:8` | Returns whether relayout completed; false while a folder animation prevents immediate relayout. Production checks the BOOL. |
 | `SBFolderController` / `SBRootFolderController` | `iconImageCache`, `setIconImageCache:` | `@16@0:8`, `v24@0:8@16` | The setter synchronously forwards through `SBFolderView`, every owned `SBIconListView`, and materialized `SBIconView` / `SBIconImageView`; the latter detaches from the old cache and observes the new one. |
 | `SBHIconImageCache` | `purgeAllCachedImages` | `v16@0:8` | Immediately empties that cache object; it does not repaint retained consumers. |
+| `SBHIconImageCache` | `updateImageForIcon:` | `v24@0:8@16` | Synchronously refreshed the exact mounted Calendar model after its verified provider/source bridge was installed. Production permits this only for Calendar's capped canonical/live-leaf set; it remains forbidden as an installed-app batch fallback. |
 | `SBFolderIconImageCache` | `iconImageCache` | `@16@0:8` | Returns the retained source cache, which remains the old manager instance across reset. |
 | `SBFolderIconImageCache` | `rebuildAllCachedFolderImages` | `v16@0:8` | Rebuilds registered composites; insufficient without application generation reload. |
 | `SBIconModel` | `applicationIconForBundleIdentifier:` | `@24@0:8@16` | Returns canonical application icon. |
