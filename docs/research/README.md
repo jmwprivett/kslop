@@ -88,8 +88,36 @@ verification gates, signature recovery, and physical-aperture safety boundary
 are recorded in
 [`vm-guide.md`](vm-guide.md).
 
+The version-locked Frida setup and the bounded Frida/KRW correlation bridge are
+recorded in [`../frida-vm-testing.md`](../frida-vm-testing.md). Live `23A341`
+evidence is split into the read-only checkpoint
+([`frida-krw-bridge-23A341.json`](frida-krw-bridge-23A341.json)), safe kcall
+([`frida-krw-kcall-23A341.json`](frida-krw-kcall-23A341.json)), deterministic
+thread-state signer canary
+([`frida-krw-pac-signer-23A341.json`](frida-krw-pac-signer-23A341.json)),
+detailed validator/resume trace
+([`thread-state-validator-resume-23A341.json`](thread-state-validator-resume-23A341.json)),
+and its Frida-correlated run
+([`frida-krw-validator-resume-23A341.json`](frida-krw-validator-resume-23A341.json))
+so a userland attach, VM kcall, PAC signer observation, and validator-consumption
+proof are not conflated.
+
 The October 7 2026 panic evidence that closed the text-page mutation route
 (esr `0x9600004f`, write permission fault in the physical aperture, seven
 identical panics) and the follow-up identical-bytes data-page aperture
 experiment are recorded in
 [`hail-mary-data-page-experiment.md`](hail-mary-data-page-experiment.md).
+
+The source-level behavior of the injected Spectrum and Accent jailbreak
+tweaks, the boundary between launch-time dylib hooks and Cyanide's bounded
+RemoteCall model, and the recommended staged Notes/Clock accent implementation
+are recorded in
+[`spectrum-accent-dylib-port-feasibility.md`](spectrum-accent-dylib-port-feasibility.md).
+
+The file-backed and aperture data-page alternatives to per-PID accent
+tinting — named-color CAR grafts through the existing `overwrite_system_file`
+transaction, and guarded shared-cache data-page recolors through the proved
+Hail Mary aperture primitive — with the target provenance matrix for system
+blue/green and the Calculator, Notes, and Clock orange accents, are recorded
+in
+[`spectrum-color-file-ram-backing.md`](spectrum-color-file-ram-backing.md).

@@ -1,0 +1,414 @@
+{
+  "schema": "com.zeroxjf.cyanide.rea-secure-execution-runtime-observation",
+  "schema_version": 1,
+  "date": "2026-10-13",
+  "identity": {
+    "build": "23A341",
+    "product": "iPhone17,3",
+    "kernel_uuid": "03A93373-6498-3F25-8975-04DED251AF1F",
+    "kernel_static_text": "0xfffffe0007008000",
+    "kernel_live_text": "0xfffffe0037c18000",
+    "kernel_slide": "0x30c10000"
+  },
+  "process": {
+    "pid": 305,
+    "uid": 33,
+    "executable": "/usr/libexec/installd"
+  },
+  "query": {
+    "probe_sha256": "c1f16b69a22844163b575e55333846f221c00441537c0bda7295b52c03154a97",
+    "external_selector": 6,
+    "scalar_input_count": 1,
+    "structure_input_size": 20,
+    "ioreturn": "0x00000000",
+    "handler_static_address": "0xfffffe0008632afc",
+    "handler_live_address": "0xfffffe0039242afc",
+    "handler_hit": true,
+    "external_method_arguments_qwords": [
+      "0x0000000600000002",
+      "0x0000000000000000",
+      "0x0000000000000000",
+      "0x0000000000000000",
+      "0xfffffe1f4675af70",
+      "0x0000000000000001",
+      "0xfffffe1f4675af7c",
+      "0x0000000000000014",
+      "0x0000000000000000",
+      "0xfffffe78aa16faa0"
+    ],
+    "conclusion": "Runtime confirms the selector-6 ABI and exact REA handler. The patched query path returned success for the synthetic cdhash."
+  },
+  "negative_load": {
+    "probe_sha256": "f135d1a2e428b0b33ce29350f0eb0799ee2e62d83c9f8c07542117b4c68df377",
+    "external_selector": 2,
+    "scalar_input_count": 0,
+    "structure_input_size": 24,
+    "input": "invalid trust-cache header; no valid cache entries",
+    "ioreturn": "0xe00002c1",
+    "handler_static_address": "0xfffffe000863271c",
+    "handler_live_address": "0xfffffe003924271c",
+    "handler_hit": true,
+    "external_method_arguments_qwords": [
+      "0x0000000200000002",
+      "0x0000000000000000",
+      "0x0000000000000000",
+      "0x0000000000000000",
+      "0xfffffe1f46ba5370",
+      "0x0000000000000000",
+      "0xfffffe1f46ba5374",
+      "0x0000000000000018",
+      "0x0000000000000000",
+      "0xfffffe78aa457aa0"
+    ],
+    "kernel_load_helper_hit": false,
+    "txm_gateway_hit": false,
+    "conclusion": "Runtime confirms selectors 2/7 enter the REA load handler. Installd lacks com.apple.private.amfi.can-load-trust-cache, so the handler rejected the request before allocation, mapping, or TXM dispatch."
+  },
+  "natural_boot_observation": {
+    "classification": "runtime-observed",
+    "boot_identity": {
+      "kernel_uuid": "03A93373-6498-3F25-8975-04DED251AF1F",
+      "kernel_live_text": "0xfffffe00481d4000",
+      "kernel_slide": "0x411cc000"
+    },
+    "window": "normal boot through root-shell readiness",
+    "breakpoints": [
+      {
+        "name": "amfi_load",
+        "static_address": "0xfffffe000863271c",
+        "live_address": "0xfffffe00497fe71c",
+        "hits": 0
+      },
+      {
+        "name": "kernel_trustcache_load_core",
+        "static_address": "0xfffffe0007ffc388",
+        "live_address": "0xfffffe00491c8388",
+        "hits": 0
+      },
+      {
+        "name": "kernel_trustcache_load_helper",
+        "static_address": "0xfffffe0007ffc6a8",
+        "live_address": "0xfffffe00491c86a8",
+        "hits": 0
+      },
+      {
+        "name": "txm_gateway_operation_0x0c",
+        "static_address": "0xfffffe0007ffe884",
+        "live_address": "0xfffffe00491ca884",
+        "hits": 0
+      }
+    ],
+    "normal_amfi_query": {
+      "observed": true,
+      "pid": 129
+    },
+    "conclusion": "No natural trust-cache load crossed the observed AMFI/kernel/TXM boundaries during this boot window; trust state was already established before those observation points were armed."
+  },
+  "sptm_pac_oracle": {
+    "static_classification": "static-confirmed",
+    "runtime_classification": "runtime-observed",
+    "sptm_identity": {
+      "uuid": "483B7ACD-3530-3B47-A0D4-D54DF1297E2B",
+      "sha256": "cabff7498ecedcfce51e96592a9d37631b511e95770b758caae1b7bdff309ca5"
+    },
+    "dispatch": {
+      "endpoint": 0,
+      "table": 0,
+      "selectors": {
+        "16": "sign_user_pointer",
+        "17": "authenticate_user_pointer",
+        "40": "batch_sign_user_pointer"
+      },
+      "xnu_stubs": {
+        "sign_static": "0xfffffe00082f3788",
+        "auth_static": "0xfffffe00082f37a0",
+        "batch_static": "0xfffffe00082f3800"
+      },
+      "sptm_handlers": {
+        "sign": "0xfffffff0270c23c8",
+        "auth": "0xfffffff0270c2740",
+        "batch": "0xfffffff0270c24e0"
+      }
+    },
+    "runtime": {
+      "observation_file": "build/rea-secure-execution-23A341-iphone17,3/sptm-pac-runtime-observation.json",
+      "kernel_fileset_base": "0xfffffe00398d4000",
+      "kernel_inner_text": "0xfffffe00398d8000",
+      "kernel_slide": "0x328d0000",
+      "sign_live": "0xfffffe003abc3788",
+      "auth_live": "0xfffffe003abc37a0",
+      "pointer": "0x0000000100000000",
+      "discriminator": "0x0000000000434e44",
+      "key_0_signed": "0x407e000100000000",
+      "key_0_authenticated": "0x0000000100000000",
+      "key_2_signed": "0x0048800100000000",
+      "key_2_authenticated": "0x0000000100000000",
+      "pmap_sign_wrapper": "0xfffffe003a5118fc",
+      "pmap_auth_wrapper": "0xfffffe003a511c08",
+      "explicit_jop_key_a": "0x434e440100000001",
+      "explicit_jop_key_a_signed": "0x3b30000100000000",
+      "explicit_jop_key_a_authenticated": "0x0000000100000000",
+      "explicit_jop_key_b": "0x434e440200000001",
+      "explicit_jop_key_b_signed": "0x9e5f000100000000",
+      "key_a_signature_auth_with_key_b": "0x3b30000100000000",
+      "wrong_discriminator_result": "0xffffffffffffffff",
+      "persistent_mutation": false
+    },
+    "process_scope": {
+      "classification": "runtime-observed",
+      "process_a": {
+        "key_0_signature": "0x4b47800100000000",
+        "key_0_self_authentication": "0x0000000100000000",
+        "key_2_signature": "0x0057000100000000",
+        "key_2_self_authentication": "0x0000000100000000"
+      },
+      "process_b": {
+        "key_0_signature": "0x4b47800100000000",
+        "key_0_self_authentication": "0x0000000100000000",
+        "key_2_signature": "0x0057000100000000",
+        "key_2_self_authentication": "0x0000000100000000"
+      },
+      "process_c_authenticates_process_a": {
+        "key_0_result": "0x0000000100000000",
+        "key_2_result": "0x0000000100000000"
+      },
+      "same_signature_across_processes": true,
+      "cross_process_authentication": true,
+      "prior_boot_result": "An earlier run produced differing signatures and rejected cross-process authentication; it is retained as historical evidence but not treated as the current conclusion.",
+      "conclusion": "The corrected repeated run produced identical IA/DA signatures in two short-lived processes and a third process authenticated them. Strict process-context scope is not established on this VM."
+    },
+    "thread_state_consumer": {
+      "classification": "runtime-observed",
+      "converter_static_address": "0xfffffe0007c5de48",
+      "current_thread_static_address": "0xfffffe0007c56714",
+      "thread_jop_pid_offset": "0x00000000000001b0",
+      "jop_pid": "0xfeedfacefeedfad3",
+      "pc_discriminator": "0x0000000000007481",
+      "thread_state_flags": "0x0000000e",
+      "raw_pc": "0x0000000102f71008",
+      "thread_state_signed_pc": "0xca1b800102f71008",
+      "raw_selector_signed_pc": "0xca1b800102f71008",
+      "context_wrapper_signed_pc": "0xca1b800102f71008",
+      "api_authenticated_pc": "0x0000000102f71008",
+      "context_wrapper_authenticated_pc": "0x0000000102f71008",
+      "exact_match": true,
+      "persistent_mutation": false,
+      "conclusion": "The raw selector under the live worker context and the pmap wrapper under that exact thread's machine.jop_pid both reproduce the normal arm64e thread_get_state signed PC byte-for-byte and authenticate it back to the raw PC."
+    },
+    "thread_state_from_user_converter": {
+      "static_classification": "static-confirmed",
+      "runtime_classification": "runtime-observed",
+      "converter_static_address": "0xfffffe0007c5e1a0",
+      "pmap_auth_wrapper_static_address": "0xfffffe0007c41c08",
+      "thread_jop_pid_offset": "0x00000000000001b0",
+      "pc_discriminator": "0x0000000000007481",
+      "lr_discriminator": "0x00000000000077d3",
+      "input_tssf_flags": "TSSF_FLAGS_NONE",
+      "output_tssf_flags": "TSSF_PRESERVE_FLAGS",
+      "rea_snapshot_file": "build/rea-secure-execution-23A341-iphone17,3/kernel-thread-state-converter-from-user-rea-snapshot.json",
+      "rea_snapshot_sha256": "b6458a9fc3209df480cb9ae3a6264e51405437c942c897d481a30fc22c6322b1",
+      "observation_file": "build/rea-secure-execution-23A341-iphone17,3/thread-state-pac-oracle-observation.json",
+      "same_task_probe_sha256": "2c0f6cd69cb90f2e20847611f87cc1c7de26187c22dff5a92209c2b927536e01",
+      "cross_task_probe_sha256": "906a27897af5277c320e0c9f46a5e80b59eb845ef741f28e898e5da67bc68af5",
+      "exception_identity_probe_sha256": "e7338d72d6791393bdf2daa8d23272e8c5b7cce6c179be6aab4ea1b485ff990f",
+      "same_task_conversion": true,
+      "cross_task_conversion": true,
+      "exception_identity_message_received": true,
+      "exception_identity_thread_port_received": true,
+      "exception_identity_task_port_received": true,
+      "exception_identity_convert_kr": 0,
+      "exception_identity_reply_kr": 0,
+      "exception_identity_child_resumed": true,
+      "exception_identity_uses_mach_exception_codes": true,
+      "exception_identity_message_id": 2407,
+      "exception_identity_message_size": 364,
+      "exception_identity_descriptor_count": 2,
+      "target_process_authenticated_pc": "0x0000000102d78ac8",
+      "target_process_authenticated_lr": "0x0000000102d78acc",
+      "kernel_call_used": false,
+      "krw_used": false,
+      "requires_target_thread_control_port": true,
+      "establishes_control_port_acquisition_on_stock": false,
+      "physical_integration": "Keep physical KRW for task/thread discovery, exception setup, and validation. Prefer the delivered-right converter for exception PC/LR after a physical right-capability check; retain the existing KRW-only PAC-key-transplant route as fallback.",
+      "persistent_mutation": false,
+      "conclusion": "The public FROM_SELF converter accepted locally plain-signed PC/LR values and emitted user-diversified values for both same-task and transferred cross-task thread control rights. The target child authenticated the cross-task output. A separate EXCEPTION_STATE_IDENTITY | MACH_EXCEPTION_CODES probe validated message ID 2407 and its two port descriptors, converted through the delivered thread right, replied, and resumed the child. The probes used neither KRW nor kcall; obtaining a sufficient right on a physical stock boot remains a separate integration boundary."
+    },
+    "lab_krw_pac_adapter": {
+      "classification": "runtime-observed",
+      "profile_version": 1,
+      "integration_probe_sha256": "b56f8ba06ed962b7b33effd8787e4b29a1727d766822241a69ce7a555564b507",
+      "kernel_uuid": "03A93373-6498-3F25-8975-04DED251AF1F",
+      "kernel_fileset_base": "0xfffffe00398d4000",
+      "kernel_slide": "0x328d0000",
+      "kernel_thread": "0xfffffe1e440caa20",
+      "thread_jop_pid_offset": "0x00000000000001b0",
+      "jop_pid": "0xfeedfacefeedfad3",
+      "raw_pc": "0x0000000102f71008",
+      "expected_signed_pc": "0xca1b800102f71008",
+      "pmap_sign_wrapper": "0xfffffe003a5118fc",
+      "pmap_auth_wrapper": "0xfffffe003a511c08",
+      "exact_consumer_match": true,
+      "taskrop_route": "remote_pac",
+      "physical_offset_table_modified": false,
+      "persistent_mutation": false,
+      "conclusion": "The identity-gated Cyanide VM adapter reproduced the independently observed normal thread-state PAC consumer through the existing lab KRW transport."
+    },
+    "el1_saved_state_signer": {
+      "static_classification": "static-confirmed",
+      "runtime_classification": "runtime-observed",
+      "kernel_fileset_sha256": "c32c7005fd8f702bf7f34730a512af5cb896a8c61b4a80b8400401f3897060ea",
+      "kernel_uuid": "03A93373-6498-3F25-8975-04DED251AF1F",
+      "signer_static_address": "0xfffffe0007ab9344",
+      "validator_static_address": "0xfffffe0007ab9394",
+      "exception_return_static_address": "0xfffffe0007ab8178",
+      "exception_return_after_check_static_address": "0xfffffe0007ab81e4",
+      "exception_return_after_check_no_restore_static_address": "0xfffffe0007ab81f8",
+      "jop_hash_offset": "0x0000000000000128",
+      "bound_fields": [
+        "saved_state_address",
+        "pc",
+        "cpsr",
+        "lr",
+        "x16",
+        "x17"
+      ],
+      "rea": {
+        "signer_snapshot": "build/rea-secure-execution-23A341-iphone17,3/kernel-thread-state-signer-rea-snapshot.json",
+        "signer_snapshot_sha256": "0126c0b48c6b421eda97ad4b7af21ddc695e89d039cc0e6c8a316945a0e76189",
+        "signer_evidence": "ev_8094f868c3d2c457309d5f86ac1c94ae49674620d14faf2912dc03b3e9eb484f",
+        "validator_snapshot": "build/rea-secure-execution-23A341-iphone17,3/kernel-thread-state-validator-rea-snapshot.json",
+        "validator_snapshot_sha256": "9b8eef5469482a9474ae127be1efd8faf936e58bc418872edea024420d4561ec",
+        "validator_evidence": "ev_1d11828440a507a25c083d8ea115bccc68aac9c18a03cb30ec54e8f94efb5bee",
+        "exception_return_snapshot": "build/rea-secure-execution-23A341-iphone17,3/kernel-exception-return-rea-snapshot.json",
+        "exception_return_snapshot_sha256": "12739f727926115e3f440584e16a47895e1e4ef8de2a920ab2422e64a4260e4c",
+        "exception_return_evidence": "ev_8e7f011df1b0897239e9211f906b80f755cc2c5129d2bac3618816fa6bccc7fa"
+      },
+      "runtime": {
+        "observation_file": "build/rea-secure-execution-23A341-iphone17,3/thread-state-signer-canary-observation.json",
+        "kernel_fileset_base": "0xfffffe0046ed4000",
+        "kernel_slide": "0x000000003fed0000",
+        "signer_live_address": "0xfffffe0047989344",
+        "validator_live_address": "0xfffffe0047989394",
+        "exception_return_after_check_live_address": "0xfffffe00479881e4",
+        "kernel_hash": "0xb85b574200000000",
+        "repeat_hash": "0xb85b574200000000",
+        "rebound_hash": "0xb29f62ec00000000",
+        "user_hash": "0x94b21da100000000",
+        "changed_x17_hash": "0x5a354d7c00000000",
+        "deterministic": true,
+        "binds_state_address": true,
+        "binds_mode_and_control_state": true,
+        "validator_invoked": false,
+        "scratch_freed": true,
+        "provider_stopped": true,
+        "persistent_mutation": false
+      },
+      "legacy_bad_recovery": {
+        "status": "closed-on-xnu-12377",
+        "thread_recover_is_boolean": true,
+        "recovery_source": "immutable copyio_recover_table",
+        "table_bounds_checked": true,
+        "entry_alignment_checked": true
+      },
+      "syscall_return_caller": {
+        "classification": "static-confirmed",
+        "static_address": "0xfffffe0008127df4",
+        "source_assisted_name": "arm_prepare_u64_syscall_return",
+        "snapshot": "build/rea-secure-execution-23A341-iphone17,3/kernel-thread-state-signer-outlier-rea-snapshot.json",
+        "snapshot_sha256": "898599aeebe678b2676c5e33569a31ac905f7183ad0df6cb2270696cbd7839c4",
+        "rea_evidence": "ev_5e64eb14ee78f905525ee974202acf19a0aca8d245122bb2db4bc8a17055d157",
+        "authenticated_before_mutation": true,
+        "signed_mutation": "PC += -4 for ERESTART",
+        "arbitrary_pc_control": false,
+        "conclusion": "The outlier is a fixed syscall-restart adjustment, not a general signing oracle."
+      },
+      "thread_state64_to_saved_state_caller": {
+        "static_classification": "static-confirmed",
+        "runtime_classification": "runtime-observed",
+        "static_address": "0xfffffe0007c5db28",
+        "source_assisted_name": "thread_state64_to_saved_state",
+        "snapshot": "build/rea-secure-execution-23A341-iphone17,3/kernel-thread-state-signer-primary-caller-rea-snapshot.json",
+        "snapshot_sha256": "7c3c8bad63826be895c7a598cc17d4243dd014c81cfaee9b52545f2f53af4957",
+        "rea_evidence": "ev_439f6dd64f5c7acef7dcb41535685912723cc5fe07fcc45eafd95074db904a6d",
+        "source": "build/xnu-12377.1.9/osfmk/arm64/status.c",
+        "signer_calls": 5,
+        "validator_before_each_mutation": true,
+        "cpsr_mode_forced_to_el0": true,
+        "unentitled_direct_set_state": "terminated by kGUARD_EXC_THREAD_SET_STATE before mutation",
+        "required_vm_entitlement": "com.apple.private.thread-set-state",
+        "observation_file": "build/rea-secure-execution-23A341-iphone17,3/thread-state-signer-caller-observation.json",
+        "observation_sha256": "d54d16d7a8265fcb9663703e012d69605409ee6464b1b999ac226e7cbc38020f",
+        "kernel_inner_text": "0xfffffe0049c70000",
+        "kernel_slide": "0x0000000042c68000",
+        "candidate_kernel_pc_live": "0xfffffe004a7201e4",
+        "kernel_pc_accepted_under_el0": true,
+        "requested_cpsr": "0x00000005",
+        "observed_cpsr": "0x00000000",
+        "el1_preserved": false,
+        "krw_used": false,
+        "kernel_call_used": false,
+        "test_state_executed": false,
+        "original_thread_state_restored": true,
+        "persistent_mutation": false,
+        "conclusion": "The normal saved-state import path really invokes the EL1 signer and accepts a kernel PC as data, but it always produces an EL0 return state. Its direct thread_set_state trigger is additionally private-entitlement gated, so it is not an EL1 execution or stock kcall primitive."
+      },
+      "physical_transfer": "The signer ABI and bindings are exact. The primary normal caller is now runtime-classified: direct thread_set_state is private-entitlement gated and thread_state64_to_saved_state forces CPSR mode to EL0 even when a kernel PC is accepted. Physical KRW therefore still needs a different legitimate caller that preserves a controllable EL1 tuple, or an independently obtained kcall.",
+      "conclusion": "The real saved-state signer is callable on the VM and matches REA's six-field binding model. The normal imported-thread-state caller reaches it, but an EL1 request is sanitized to EL0 and the direct trigger requires a private entitlement. This closes that caller as a physical PAC-to-kcall bridge while retaining it as a useful signed-EL0-state oracle."
+    },
+    "rea_evidence": [
+      "ev_a441852990cbbc13705251f13e636909b99825cf4ec73d34fac20ee0bb6ee56a",
+      "ev_816351f14ec4db2e47314a8c7aa0d2f05e726d7901c37f19ca2149ea7ea8bdcf",
+      "ev_99f8f9a0fa0e7e6c37495ea6378faa0557383a457cfb234d40df2d7254f61805",
+      "ev_36e983d51b517e4500526a3e1a409a456a8d9efed227f62338d8b3c55a24bd6e",
+      "ev_9720c140d009111ae4c143ab4ddb6516cc2331c69f0539c8e0591bf0827964e5",
+      "ev_12a638277c3f8663ac774d2dec21465f267de6c1071b8d3359de49a4fc8e5643",
+      "ev_e404f8db27f605fb9923acac232ec3ba1d24a362d9edb997c43e820bcfa02a8b",
+      "ev_bdb4840de9cc5ed6db5a8a8fd83946a742bdc8c65f9886b847a42970e3392c6c",
+      "ev_8094f868c3d2c457309d5f86ac1c94ae49674620d14faf2912dc03b3e9eb484f",
+      "ev_1d11828440a507a25c083d8ea115bccc68aac9c18a03cb30ec54e8f94efb5bee",
+      "ev_8e7f011df1b0897239e9211f906b80f755cc2c5129d2bac3618816fa6bccc7fa",
+      "ev_5e64eb14ee78f905525ee974202acf19a0aca8d245122bb2db4bc8a17055d157",
+      "ev_439f6dd64f5c7acef7dcb41535685912723cc5fe07fcc45eafd95074db904a6d"
+    ],
+    "source_reconciliation": {
+      "classification": "source-assisted-inference-confirmed-against-shipped-assembly",
+      "source": "build/xnu-12377.1.9/osfmk/arm64/sptm/pmap/pmap.c",
+      "kernel_fileset_sha256": "c32c7005fd8f702bf7f34730a512af5cb896a8c61b4a80b8400401f3897060ea",
+      "live_kernel_source_version": "12377.42.6.0.0",
+      "source_tree_version": "12377.1.9",
+      "mapping": {
+        "0xfffffe0007c418fc": "pmap_sign_user_ptr",
+        "0xfffffe0007c419c4": "pmap_batch_sign_user_ptr",
+        "0xfffffe0007c41c08": "pmap_auth_user_ptr",
+        "0xfffffe0007c5db28": "thread_state64_to_saved_state",
+        "0xfffffe0007c5de48": "machine_thread_state_convert_to_user",
+        "0xfffffe0007c5e1a0": "machine_thread_state_convert_from_user",
+        "0xfffffe0007c56714": "current_thread",
+        "0xfffffe0007ab8cd0": "ml_enable_user_jop_key",
+        "0xfffffe0007ab8cf8": "ml_disable_user_jop_key"
+      }
+    },
+    "conclusion": "The exact VM exposes a callable SPTM oracle for IA/DA user-pointer signing and authentication under the supplied discriminator. The target-context probe resolves the exact worker thread and reproduces a real thread-state PAC consumer under its live jop_pid, and the identity-gated Cyanide VM adapter reproduces that consumer through the existing lab KRW transport. Independently, the public FROM_SELF converter produced reply-compatible PC/LR PAC for same-task and transferred cross-task thread control rights without KRW or kcall. The corrected repeated scope run does not establish strict process isolation, and stock acquisition of a sufficient target thread control right remains unproven. This does not establish arbitrary kernel-pointer signing, executable-memory modification, or an SPTM write primitive."
+  },
+  "static_reconciliation": {
+    "status": "static-confirmed-runtime-pending",
+    "kernel_operation": 12,
+    "kernel_argument_count": 7,
+    "txm_dispatcher": "0xfffffff01702ae80",
+    "txm_dispatch_case": 12,
+    "txm_load_adapter": "0xfffffff01702b6f4",
+    "txm_load_handler": "0xfffffff01702627c",
+    "rea_evidence": [
+      "ev_4e989992f6d43d54e8ca72780a3027be89c5c1f5afb978b96e2799857e37170c",
+      "ev_266d06e60b70ec2d63c26560a9790339f8a320011385d3f002d31a2e61d158b4",
+      "ev_5b79f98679e6413c7d4547701442651179e85162e12ed5f728e8055d339b7e1d"
+    ]
+  },
+  "side_effects": {
+    "trust_cache_loaded": false,
+    "persistent_trust_state_changed": false,
+    "debugger_detached": true,
+    "vm_left_running": true,
+    "note": "Probe dylibs remain mapped in installd until that process exits; copies remain under /var/tmp."
+  }
+}

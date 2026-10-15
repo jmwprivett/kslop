@@ -14,20 +14,24 @@ boot or attempt to discover the slide by reading speculative kernel addresses.
 Run the launcher in a terminal and keep it open. Do not add `--headless`:
 
 ```sh
-CND_VPHONE_CLI_ROOT=/path/to/vphone-cli-1.0.13
-"$CND_VPHONE_CLI_ROOT/.build/vphone-cli.app/Contents/MacOS/vphone-cli" \
-  vm launch \
-  --library-root "$HOME/Library/CyanideVPhoneLab/VMs" \
-  cyanide-ios26-base \
-  --variant jb \
-  --kernel-debug-port 62139 \
-  --project-root "$CND_VPHONE_CLI_ROOT"
+./scripts/run-vm.sh
 ```
+
+The script defaults to `~/dev/vphone-cli-1.0.13`. If that checkout lives
+elsewhere, set `CND_VPHONE_CLI_ROOT=/path/to/vphone-cli-1.0.13`. Run
+`./scripts/run-vm.sh --help` for the other optional environment overrides.
 
 Wait for the launcher to report the guest IP. The SSH port is `22222`; the
 kernel debug port above is local host port `62139`.
 
 ## Verify the guest before trusting a new IP
+
+The root password for this disposable lab VM is `alpine`. Set it for the host
+harnesses with:
+
+```sh
+export CND_VPHONE_ROOT_PASSWORD=alpine
+```
 
 The known-hosts file is:
 
@@ -93,13 +97,11 @@ UUID; it changes across installations.
 
 ## Build, arm, and verify kcall
 
-Set the root password in the environment without placing it in shell history,
-then use the debugger-port option rather than supplying a remembered address:
+Set the saved lab VM root password in the environment, then use the
+debugger-port option rather than supplying a remembered address:
 
 ```sh
-read -rs 'CND_VPHONE_ROOT_PASSWORD?VM root password: '
-export CND_VPHONE_ROOT_PASSWORD
-printf '\n'
+export CND_VPHONE_ROOT_PASSWORD=alpine
 
 VM_IP=192.168.64.76
 python3 scripts/lab/cnd_vphone_krw.py restart \

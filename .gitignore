@@ -31,6 +31,7 @@ xcuserdata/
 /.claude/
 /CLAUDE.md.old*.md
 /glm-cool.md
+/scripts/delegation/
 
 ## Local lab inputs and generated evidence
 __pycache__/

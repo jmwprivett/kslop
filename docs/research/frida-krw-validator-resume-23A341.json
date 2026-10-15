@@ -1,0 +1,372 @@
+{
+  "boundaryProbe": {
+    "childResumed": true,
+    "kind": "thread-state-validator-resume-canary",
+    "persistentKernelMutation": false,
+    "report": {
+      "anchors": {
+        "afterCheck": "0xfffffe0045669dd8",
+        "instructionChecks": {
+          "afterCheck": {
+            "address": "0xfffffe0045669dd8",
+            "bytes": "e10307aae203082a46041e12",
+            "exact": true,
+            "sha256": "1a0f0aab09877fcd225722c0f4f9c4963a11b76f9e1c0b0ed4cddf42193192b5",
+            "wordCount": 3
+          },
+          "preValidator": {
+            "address": "0xfffffe0045669dd4",
+            "bytes": "706df997",
+            "exact": true,
+            "sha256": "850c900b15d4c5e43655724f331536dd28ad40195ee8bc00e678095d0df0a224",
+            "wordCount": 1
+          },
+          "validator": {
+            "address": "0xfffffe00454c5394",
+            "bytes": "30423bd5b0053836104238d570050036109440f95f047ef2",
+            "exact": true,
+            "sha256": "adf4f11490aa7a48105d01e90c5be24b98c8929f0cfd09ae0b55b3714e69d6cb",
+            "wordCount": 6
+          }
+        },
+        "preValidator": "0xfffffe0045669dd4",
+        "validator": "0xfffffe00454c5394"
+      },
+      "classification": "VM-proved",
+      "debugger": {
+        "detachedCleanly": true,
+        "events": [
+          {
+            "currentPSTATE": "0x604003c5",
+            "daif": null,
+            "ignoredBreakpointHitsBeforeMatch": 20,
+            "irqMasked": true,
+            "jopHash": "0x4a32d55400000000",
+            "jopHashReadError": null,
+            "pc": "0xfffffe0045669dd4",
+            "savedState": "0xfffffe29de7ff610",
+            "schema": "com.zeroxjf.cyanide.lldb-validator-breakpoint",
+            "schemaVersion": 1,
+            "spsel": 1,
+            "stage": "pre-validator",
+            "stateCPSR": "0x60000000",
+            "stateLR": "0x0000000100ac53ec",
+            "statePC": "0x0000000100ac4eac",
+            "stateX16": "0x434e4456414c3136",
+            "stateX17": "0x0000000100ac80d0"
+          },
+          {
+            "currentPSTATE": "0x604003c5",
+            "daif": null,
+            "ignoredBreakpointHitsBeforeMatch": 0,
+            "irqMasked": true,
+            "jopHash": "0x4a32d55400000000",
+            "jopHashReadError": null,
+            "pc": "0xfffffe00454c5394",
+            "savedState": "0xfffffe29de7ff610",
+            "schema": "com.zeroxjf.cyanide.lldb-validator-breakpoint",
+            "schemaVersion": 1,
+            "spsel": 1,
+            "stage": "validator",
+            "stateCPSR": "0x60000000",
+            "stateLR": "0x0000000100ac53ec",
+            "statePC": "0x0000000100ac4eac",
+            "stateX16": "0x434e4456414c3136",
+            "stateX17": "0x0000000100ac80d0"
+          },
+          {
+            "currentPSTATE": "0x604003c5",
+            "daif": null,
+            "ignoredBreakpointHitsBeforeMatch": 0,
+            "irqMasked": true,
+            "jopHash": "0x4a32d55400000000",
+            "jopHashReadError": null,
+            "pc": "0xfffffe0045669dd8",
+            "savedState": "0xfffffe29de7ff610",
+            "schema": "com.zeroxjf.cyanide.lldb-validator-breakpoint",
+            "schemaVersion": 1,
+            "spsel": 1,
+            "stage": "after-check",
+            "stateCPSR": "0x40000000",
+            "stateLR": "0x0000000100ac53ec",
+            "statePC": "0x4a32d55400000000",
+            "stateX16": "0x434e4456414c3136",
+            "stateX17": "0x0000000100ac80d0"
+          }
+        ],
+        "port": 62139,
+        "transcriptSHA256": "cb3392cfc1993335b5f2d73dbcbb641e35a7374894638509f87bc55812c6a920"
+      },
+      "invariants": {
+        "childResumedWithMarkedRegisters": true,
+        "converterValidatorCallSiteMatched": true,
+        "jopHashStableAcrossValidation": true,
+        "sameSavedStateAtEntryAndReturn": true,
+        "targetSavedStateResolvedByReadOnlyKRW": true,
+        "validatorEnteredWithMarkedTuple": true,
+        "validatorIRQMasked": true,
+        "validatorReturnedToExpectedContinuation": true,
+        "validatorSPSelOne": true
+      },
+      "limits": [
+        "This proves legitimate exception-state application, validator acceptance, and subsequent EL0 resume; it does not prove an EL1 return or arbitrary kernel PC.",
+        "The LLDB observation and provider are VM facilities and do not transfer kcall or debugger access to physical hardware.",
+        "No SpringBoard thread was suspended, modified, or resumed by this experiment."
+      ],
+      "probe": {
+        "binarySHA256": "11d69391006ebf2a0bf137c1f8d4653d379dec8a0e89ef481ff8d1b32733f764",
+        "readyMarker": "CND_VALIDATOR_READY pid=1607 thread_port=0x1903 x17=0x0000000100ac80d0",
+        "resolverBinarySHA256": "b0f24b71442b1f883fabf9603b976617920ba0958061f12f4a3b47e5918e8708",
+        "result": {
+          "child_resumed": true,
+          "convert_kr": 0,
+          "converted_lr": "0x6539800100ac53ec",
+          "converted_pc": "0x0d0e800100ac4eac",
+          "debug_gate_used": true,
+          "descriptor_count": 2,
+          "direction_from_self": 2,
+          "exact_exception_identity_conversion": true,
+          "exception_state_identity": true,
+          "flavor": 6,
+          "identity_message_received": true,
+          "kernel_call_used": false,
+          "krw_used": false,
+          "mach_exception_codes": true,
+          "message_id": 2407,
+          "message_size": 364,
+          "old_state_count": 68,
+          "output_count": 68,
+          "output_flags": "0xe3000000",
+          "persistent_mutation": false,
+          "raw_fallback_lr": "0x0000000100ac53ec",
+          "raw_resume_pc": "0x0000000100ac4eac",
+          "receive_kr": 0,
+          "reply_kr": 0,
+          "resumed_x16": "0x434e4456414c3136",
+          "resumed_x17": "0x0000000100ac80d0",
+          "retained_x17": true,
+          "schema": "com.zeroxjf.cyanide.thread-state-pac-exception-identity-probe",
+          "schema_version": 1,
+          "task_descriptor_type": 0,
+          "task_port_received": true,
+          "thread_descriptor_type": 0,
+          "thread_port_received": true,
+          "validator_gate_used": true,
+          "validator_marker_x16": "0x434e4456414c3136",
+          "validator_marker_x17": "0x0000000100ac80d0",
+          "validator_markers_restored": true
+        },
+        "stateResolution": {
+          "capabilities": "0xf",
+          "contextData": "0xfffffe29de7ff610",
+          "ipcSpace": "0xfffffe1e46643c80",
+          "ipcTable": "0xfffffe2ea7b86b00",
+          "jopHashAddress": "0xfffffe29de7ff738",
+          "kernelBase": "0xfffffe0044a10000",
+          "layoutExact": true,
+          "pcAddress": "0xfffffe29de7ff718",
+          "pid": 1607,
+          "portName": "0x1903",
+          "portObject": "0xfffffe28da751ed0",
+          "process": "0xfffffe2ea76645a8",
+          "rawContextData": "0xfffffe29de7ff610",
+          "rawThread": "0x56c5fe28db066a88",
+          "rawUNeon": "0x24be7e29de7ff740",
+          "rawUPCB": "0x4ae47e29de7ff610",
+          "savedState": "0xfffffe29de7ff610",
+          "savedStateCount": 74,
+          "savedStateFlavor": 21,
+          "schema": "com.zeroxjf.cyanide.thread-saved-state-resolve",
+          "schemaVersion": 1,
+          "task": "0xfffffe2ea7664cf0",
+          "thread": "0xfffffe28db066a88",
+          "uNeon": "0xfffffe29de7ff740",
+          "usedKernelCall": false,
+          "usedKernelRead": true,
+          "usedKernelWrite": false,
+          "visitedProcesses": 3,
+          "x16Address": "0xfffffe29de7ff698",
+          "x17Address": "0xfffffe29de7ff6a0"
+        },
+        "stderr": ""
+      },
+      "result": "marked-state-validated-and-resumed",
+      "safety": {
+        "disposableChildOnly": true,
+        "persistentKernelMutation": false,
+        "springBoardThreadModified": false,
+        "usedKernelCall": false,
+        "usedKernelRead": true,
+        "usedKernelWrite": false
+      },
+      "schema": "com.zeroxjf.cyanide.thread-state-validator-resume",
+      "schemaVersion": 1,
+      "target": {
+        "environment": "vPhone VRESEARCH VM",
+        "kernelFilesetBase": "0xfffffe0044a10000",
+        "kernelSlide": "0x000000003da0c000",
+        "kernelText": "0xfffffe0044a14000",
+        "kernelUUID": "03A93373-6498-3F25-8975-04DED251AF1F",
+        "osBuild": "23A341"
+      }
+    },
+    "result": "passed",
+    "validatorInvoked": true
+  },
+  "capturedAt": "2026-10-14T18:49:48.614884+00:00",
+  "frida": {
+    "checkpoint": {
+      "arch": "arm64",
+      "label": "springboard-module-enumeration",
+      "mainModule": {
+        "base": "0x100194000",
+        "name": "SpringBoard",
+        "path": "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
+        "size": 16384
+      },
+      "moduleCount": 1682,
+      "pid": 39,
+      "platform": "darwin",
+      "pointerSize": 8,
+      "schema": "com.zeroxjf.cyanide.frida-krw-checkpoint",
+      "schemaVersion": 1,
+      "selectedModules": [
+        {
+          "base": "0x100194000",
+          "name": "SpringBoard",
+          "path": "/System/Library/CoreServices/SpringBoard.app/SpringBoard",
+          "size": 16384
+        },
+        {
+          "base": "0x22679d000",
+          "name": "SpringBoard",
+          "path": "/System/Library/PrivateFrameworks/SpringBoard.framework/SpringBoard",
+          "size": 16452704
+        },
+        {
+          "base": "0x1abaa9000",
+          "name": "FrontBoardServices",
+          "path": "/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices",
+          "size": 933152
+        },
+        {
+          "base": "0x1b161f000",
+          "name": "FrontBoard",
+          "path": "/System/Library/PrivateFrameworks/FrontBoard.framework/FrontBoard",
+          "size": 827680
+        },
+        {
+          "base": "0x1c3ca4000",
+          "name": "libdispatch.dylib",
+          "path": "/usr/lib/system/libdispatch.dylib",
+          "size": 287328
+        },
+        {
+          "base": "0x23431a000",
+          "name": "libsystem_kernel.dylib",
+          "path": "/usr/lib/system/libsystem_kernel.dylib",
+          "size": 240892
+        },
+        {
+          "base": "0x191bbb000",
+          "name": "UIKitCore",
+          "path": "/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore",
+          "size": 37386048
+        }
+      ]
+    },
+    "endpoint": "127.0.0.1:27042",
+    "serverPid": 849,
+    "target": "SpringBoard",
+    "targetPid": 39,
+    "tunnelStartedNow": false,
+    "version": "17.23.3"
+  },
+  "provider": {
+    "capabilities": "0xf",
+    "capabilityNames": [
+      "kernel-read-write",
+      "direct-task",
+      "process-resolve",
+      "kernel-call"
+    ],
+    "identity": {
+      "filesetBase": "0xfffffe0044a10000",
+      "filesetCommandBase": "0xfffffe0044a10000",
+      "innerFiletype": 2,
+      "kernelFileOffset": "0x4000",
+      "kernelText": "0xfffffe0044a14000",
+      "kernelUUID": "03A93373-6498-3F25-8975-04DED251AF1F",
+      "loadCommandsMode": "slid",
+      "outerFiletype": 12,
+      "slide": "0x000000003da0c000",
+      "staticFilesetBase": "0xfffffe0007004000"
+    },
+    "markerPid": 484,
+    "readOnlyRelay": "/var/tmp/cnd-frida-krw-relay-883cee23dff77c8a",
+    "socket": "/var/tmp/cyanide-kcall-research.sock"
+  },
+  "regions": [
+    {
+      "address": "0xfffffe0044a10000",
+      "afterHex": "cffaedfe0c000001020000c00c0000009e000000882c000000000000000000001b0000001800000010c76b412bad52ca8217ab748064c02b3200000018000000000000000000000000000000000000000500000020010000060000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "afterSHA256": "4f0b549e0e3d4440d51cc45768ef0e5a8d9275e9343cc6b9c3b9177617de0a39",
+      "beforeHex": "cffaedfe0c000001020000c00c0000009e000000882c000000000000000000001b0000001800000010c76b412bad52ca8217ab748064c02b3200000018000000000000000000000000000000000000000500000020010000060000004400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "beforeSHA256": "4f0b549e0e3d4440d51cc45768ef0e5a8d9275e9343cc6b9c3b9177617de0a39",
+      "changedAlignedWords": [],
+      "changedAlignedWordsTruncated": false,
+      "changedByteCount": 0,
+      "changedByteOffsets": [],
+      "changedByteOffsetsTruncated": false,
+      "expression": "kbase:0x100:fileset-header",
+      "label": "fileset-header",
+      "length": 256,
+      "unchanged": true
+    },
+    {
+      "address": "0xfffffe0044a14000",
+      "afterHex": "cffaedfe0c000001020000c0020000001b00000040150000010020800000000019000000d80100005f5f54455854000000000000000000000040a14400feffff00400e00000000000040000000000000c0220e0000000000010000000100000005000000000000005f5f636f6e73740000000000000000005f5f54455854000000000000000000000057a14400feffff804703000000000000570000050000000000000000000000000000000000000000000000000000005f5f636f7079696f5f766563746f72735f5f5445585400000000000000000000809ea44400fefffff000000000000000809e03000000000000000000000000000000000000000000",
+      "afterSHA256": "487ab410e3ff79c5ade698c9124677337869628ecb9c1f00dc178788e4578cc5",
+      "beforeHex": "cffaedfe0c000001020000c0020000001b00000040150000010020800000000019000000d80100005f5f54455854000000000000000000000040a14400feffff00400e00000000000040000000000000c0220e0000000000010000000100000005000000000000005f5f636f6e73740000000000000000005f5f54455854000000000000000000000057a14400feffff804703000000000000570000050000000000000000000000000000000000000000000000000000005f5f636f7079696f5f766563746f72735f5f5445585400000000000000000000809ea44400fefffff000000000000000809e03000000000000000000000000000000000000000000",
+      "beforeSHA256": "487ab410e3ff79c5ade698c9124677337869628ecb9c1f00dc178788e4578cc5",
+      "changedAlignedWords": [],
+      "changedAlignedWordsTruncated": false,
+      "changedByteCount": 0,
+      "changedByteOffsets": [],
+      "changedByteOffsetsTruncated": false,
+      "expression": "kernel:0x100:kernel-header",
+      "label": "kernel-header",
+      "length": 256,
+      "unchanged": true
+    }
+  ],
+  "result": "frida-krw-validator-resume-canary-proved",
+  "safety": {
+    "boundaryProbeUsesSeparateExistingHarness": true,
+    "bridgeAllowedOperations": [
+      "capabilities",
+      "kbase",
+      "read"
+    ],
+    "fridaMemoryWrites": false,
+    "installedHooks": false,
+    "persistentKernelMutation": false,
+    "possiblePACOrTaggedValueIsHeuristicOnly": true,
+    "usedKernelCall": false,
+    "usedKernelRead": true,
+    "usedKernelWrite": false
+  },
+  "schema": "com.zeroxjf.cyanide.frida-krw-correlation",
+  "schemaVersion": 1,
+  "summary": {
+    "changedByteCount": 0,
+    "changedRegionCount": 0,
+    "regionCount": 2
+  },
+  "target": {
+    "host": "192.168.64.116",
+    "kind": "vPhone-VRESEARCH",
+    "osBuild": "23A341",
+    "sshPort": 22222
+  }
+}

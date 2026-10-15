@@ -1,0 +1,35 @@
+{
+  "schema": "com.zeroxjf.cyanide.frida-vm-evidence",
+  "schemaVersion": 1,
+  "target": {
+    "environment": "vPhone jb research VM",
+    "build": "23A341",
+    "kernel": "VRESEARCH1"
+  },
+  "frida": {
+    "serverVersion": "17.23.3",
+    "clientVersion": "17.23.3",
+    "toolsVersion": "14.11.0",
+    "packageSHA256": "6bf24760fe29fdeb786af71ec689dac333f7dda8aa1fe93ed3dff594bf23531b",
+    "serverListen": "127.0.0.1:27042",
+    "transport": "SSH loopback tunnel"
+  },
+  "proof": {
+    "status": "VM-proved",
+    "operation": "read-only Frida attach and immediate detach",
+    "targetProcess": "SpringBoard",
+    "targetPidAtObservation": 39,
+    "agent": {
+      "arch": "arm64",
+      "platform": "darwin",
+      "pointerSize": 8,
+      "moduleCount": 1682
+    },
+    "hooksInstalled": false,
+    "writesPerformed": false
+  },
+  "limits": [
+    "This proves VM SpringBoard instrumentation, not physical-device injection.",
+    "Frida remains a userland observer and does not establish kcall, PAC bypass, or SPTM access."
+  ]
+}
