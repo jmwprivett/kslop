@@ -121,7 +121,7 @@ class HailMaryDataPageTests(unittest.TestCase):
     def test_settings_retains_the_data_page_diagnostic_without_exposing_it(self):
         settings = SETTINGS.read_text()
         header = SETTINGS_HEADER.read_text()
-        self.assertIn("case RootSectionActions:        return 4;", settings)
+        self.assertIn("case RootSectionActions:        return 6;", settings)
         self.assertIn('#import "CNDHailMaryDataPage.h"', settings)
         self.assertIn("Hail Mary Data-Page Write Probe", settings)
         self.assertIn("Hail Mary Data-Page Write Probe?", settings)

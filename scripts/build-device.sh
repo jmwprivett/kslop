@@ -14,6 +14,8 @@ IDENTITY="${CYANIDE_SIGNING_IDENTITY:-AD6C2216FF76B8581482BC09A86B07F76BAB84CC}"
 PROFILE="${CYANIDE_PROFILE:-$REPO_ROOT/build/PhysicalLockscreenGlyphsProduction30pt/Cyanide.app/embedded.mobileprovision}"
 ENTITLEMENTS="${CYANIDE_ENTITLEMENTS:-$REPO_ROOT/build/PhysicalLiveGlyph.entitlements}"
 LATEST_ARTIFACT_FILE="$REPO_ROOT/build/DirectDeviceUpdate-latest.txt"
+SPRINGBOARD_PROBE_SOURCE="$REPO_ROOT/scripts/lab/cnd_springboard_dylib_probe.c"
+SPRINGBOARD_PROBE_NAME="CNDSpringBoardDylibProbe.dylib"
 
 usage() {
     cat <<'EOF'
@@ -79,6 +81,7 @@ for command_name in xcodebuild xcrun security codesign ditto otool; do
 done
 require_file "$PROFILE"
 require_file "$ENTITLEMENTS"
+require_file "$SPRINGBOARD_PROBE_SOURCE"
 
 echo "==> checking signing identity and inputs"
 security find-identity -v -p codesigning \
@@ -129,10 +132,24 @@ APP_EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$
 [ -n "$APP_EXECUTABLE_NAME" ] || fail "built app has no CFBundleExecutable"
 APP_EXECUTABLE="$APP/$APP_EXECUTABLE_NAME"
 XPF_DYLIB="$APP/libxpf.dylib"
+SPRINGBOARD_PROBE_DYLIB="$APP/$SPRINGBOARD_PROBE_NAME"
 require_file "$APP_EXECUTABLE"
 require_file "$XPF_DYLIB"
 require_architectures "$APP_EXECUTABLE"
 require_architectures "$XPF_DYLIB"
+
+echo "==> building inert SpringBoard dylib boundary probe"
+xcrun --sdk iphoneos clang \
+    -arch arm64 -arch arm64e \
+    -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+    -miphoneos-version-min=17.0 \
+    -mbranch-protection=bti \
+    -dynamiclib -fvisibility=hidden \
+    -Wl,-install_name,"@rpath/$SPRINGBOARD_PROBE_NAME" \
+    -o "$SPRINGBOARD_PROBE_DYLIB" \
+    "$SPRINGBOARD_PROBE_SOURCE"
+require_file "$SPRINGBOARD_PROBE_DYLIB"
+require_architectures "$SPRINGBOARD_PROBE_DYLIB"
 
 # This is not the Sideloadly compatibility pre-sign used by scripts/build.sh.
 # Cyanide currently links @loader_path/libxpf.dylib, so iOS requires the
@@ -141,13 +158,16 @@ require_architectures "$XPF_DYLIB"
 otool -L "$APP_EXECUTABLE" | grep -F '@loader_path/libxpf.dylib' >/dev/null \
     || fail "Cyanide no longer links the embedded libxpf.dylib; update this signing contract"
 
-echo "==> signing embedded libxpf.dylib and Cyanide.app"
+echo "==> signing embedded dylibs and Cyanide.app"
 codesign --force --sign "$IDENTITY" --timestamp=none "$XPF_DYLIB"
+codesign --force --sign "$IDENTITY" --timestamp=none \
+    "$SPRINGBOARD_PROBE_DYLIB"
 codesign --force --sign "$IDENTITY" --timestamp=none \
     --entitlements "$ENTITLEMENTS" --generate-entitlement-der "$APP"
 
 echo "==> verifying signatures"
 codesign --verify --strict --verbose=2 "$XPF_DYLIB"
+codesign --verify --strict --verbose=2 "$SPRINGBOARD_PROBE_DYLIB"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 # Only publish a build after every build, signing, and verification step has

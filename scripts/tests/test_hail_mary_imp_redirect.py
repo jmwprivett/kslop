@@ -171,7 +171,7 @@ class HailMaryImpRedirectTests(unittest.TestCase):
         catalog = (ROOT / "Cyanide/installer/CNDQueuedActionCatalog.m").read_text()
         queue = (ROOT / "Cyanide/installer/PackageQueue.m").read_text()
 
-        self.assertIn('case RootSectionActions:        return 4;', settings)
+        self.assertIn('case RootSectionActions:        return 6;', settings)
         self.assertIn('action": @"sbl-queue-transparency-fix"', settings)
         self.assertIn('action": @"sbl-queue-transparency-fix-restore"', settings)
         self.assertIn("CNDQueuedTransparencyFixAction(YES)", settings)

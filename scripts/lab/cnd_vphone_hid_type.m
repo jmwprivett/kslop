@@ -2,7 +2,23 @@
 
 #import "../../../vphone-cli-1.0.13/scripts/vphoned/vphoned_hid.h"
 
+#include <errno.h>
+#include <limits.h>
+#include <stdlib.h>
 #include <string.h>
+
+static BOOL CNDParseUInt32(const char *text, uint32_t *valueOut)
+{
+    if (!text || !text[0] || !valueOut) return NO;
+    errno = 0;
+    char *end = NULL;
+    unsigned long value = strtoul(text, &end, 0);
+    if (errno != 0 || !end || end == text || *end != '\0' || value > UINT32_MAX) {
+        return NO;
+    }
+    *valueOut = (uint32_t)value;
+    return YES;
+}
 
 static uint32_t CNDHIDUsage(unichar character)
 {
@@ -19,6 +35,18 @@ static uint32_t CNDHIDUsage(unichar character)
 int main(int argc, const char *argv[])
 {
     @autoreleasepool {
+        if (argc == 4 && !strcmp(argv[1], "--press")) {
+            uint32_t page = 0;
+            uint32_t usage = 0;
+            if (!CNDParseUInt32(argv[2], &page) ||
+                !CNDParseUInt32(argv[3], &usage) ||
+                !vp_hid_load()) {
+                return 1;
+            }
+            vp_hid_press(page, usage);
+            usleep(500000);
+            return 0;
+        }
         if (argc != 2 || !vp_hid_load()) return 1;
         if (!strcmp(argv[1], "--paste")) {
             vp_hid_key(0x07U, 0xe3U, YES);

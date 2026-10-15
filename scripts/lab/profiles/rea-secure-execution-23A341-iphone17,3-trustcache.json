@@ -1,0 +1,356 @@
+{
+  "schema": "com.zeroxjf.cyanide.rea-secure-execution-bundle.observation-profile",
+  "schema_version": 1,
+  "identity": {
+    "build": "23A341",
+    "product": "iPhone17,3",
+    "kernel_uuid": "03A93373-6498-3F25-8975-04DED251AF1F",
+    "kernel_sha256": "7f363901ec119fc0f4ca4c48c938d468430eb3006d030a7eca0eb3afdde2ce5d",
+    "txm_sha256": "3b7b3ea5be86f169d945b6449a19867762a35e4bc8bf8de2a6c692d59feec321",
+    "sptm_sha256": "cabff7498ecedcfce51e96592a9d37631b511e95770b758caae1b7bdff309ca5"
+  },
+  "analysis_targets": [
+    {
+      "id": "kernel_secure_call_gateway",
+      "artifact": "kernel",
+      "operation": "function",
+      "address": "0xfffffe00082f2bbc",
+      "snapshot": "kernel-secure-call-gateway-rea-snapshot.json",
+      "purpose": "Recover the generic XNU GENTER argument and endpoint setup."
+    },
+    {
+      "id": "kernel_sptm_sign_stub",
+      "artifact": "kernel",
+      "operation": "function",
+      "address": "0xfffffe00082f3788",
+      "snapshot": "kernel-sptm-sign-stub-rea-snapshot.json",
+      "purpose": "Confirm XNU selector 0x10 preserves x0-x2 for SPTM."
+    },
+    {
+      "id": "kernel_sptm_auth_stub",
+      "artifact": "kernel",
+      "operation": "function",
+      "address": "0xfffffe00082f37a0",
+      "snapshot": "kernel-sptm-auth-stub-rea-snapshot.json",
+      "purpose": "Confirm XNU selector 0x11 preserves x0-x2 for SPTM."
+    },
+    {
+      "id": "kernel_sptm_batch_sign_stub",
+      "artifact": "kernel",
+      "operation": "function",
+      "address": "0xfffffe00082f3800",
+      "snapshot": "kernel-sptm-batch-sign-stub-rea-snapshot.json",
+      "purpose": "Confirm XNU selector 0x28 batch-sign entry."
+    },
+    {
+      "id": "kernel_pmap_sign_user_ptr",
+      "artifact": "kernel",
+      "operation": "function",
+      "address": "0xfffffe0007c418fc",
+      "snapshot": "kernel-pmap-sign-user-ptr-rea-snapshot.json",
+      "purpose": "Recover explicit JOP-key selection around selector 0x10."
+    },
+    {
+      "id": "kernel_pmap_batch_sign_user_ptr",
+      "artifact": "kernel",
+      "operation": "function",
+      "address": "0xfffffe0007c419c4",
+      "snapshot": "kernel-pmap-batch-sign-user-ptr-rea-snapshot.json",
+      "purpose": "Recover the per-CPU batch queue and explicit JOP-key selection."
+    },
+    {
+      "id": "kernel_pmap_auth_user_ptr",
+      "artifact": "kernel",
+      "operation": "function",
+      "address": "0xfffffe0007c41c08",
+      "snapshot": "kernel-pmap-auth-user-ptr-rea-snapshot.json",
+      "purpose": "Recover explicit JOP-key selection and poison-on-failure behavior."
+    },
+    {
+      "id": "kernel_current_thread",
+      "artifact": "kernel",
+      "artifact_file": "kernel-filesets/com.apple.kernel",
+      "artifact_sha256": "c32c7005fd8f702bf7f34730a512af5cb896a8c61b4a80b8400401f3897060ea",
+      "operation": "function",
+      "address": "0xfffffe0007c56714",
+      "snapshot": "kernel-current-thread-rea-snapshot.json",
+      "purpose": "Confirm the exact TPIDR_EL1 target-thread accessor used by the live consumer probe."
+    },
+    {
+      "id": "kernel_thread_state_convert_to_user",
+      "artifact": "kernel",
+      "artifact_file": "kernel-filesets/com.apple.kernel",
+      "artifact_sha256": "c32c7005fd8f702bf7f34730a512af5cb896a8c61b4a80b8400401f3897060ea",
+      "operation": "function",
+      "address": "0xfffffe0007c5de48",
+      "snapshot": "kernel-thread-state-converter-rea-snapshot.json",
+      "purpose": "Recover the normal arm64e PC discriminator, machine.jop_pid load, and pmap signing call."
+    },
+    {
+      "id": "sptm_dispatch_state_machine",
+      "artifact": "sptm",
+      "operation": "function",
+      "address": "0xfffffff0270b564c",
+      "snapshot": "sptm-dispatch-validation-rea-snapshot.json",
+      "purpose": "Recover dispatch state and permission validation."
+    },
+    {
+      "id": "sptm_register_dispatch_table",
+      "artifact": "sptm",
+      "operation": "function",
+      "address": "0xfffffff0270b51ec",
+      "snapshot": "sptm-register-dispatch-table-rea-snapshot.json",
+      "purpose": "Recover service-table registration constraints."
+    },
+    {
+      "id": "sptm_genter_dispatcher",
+      "artifact": "sptm",
+      "operation": "function",
+      "address": "0xfffffff0270b5c60",
+      "snapshot": "sptm-genter-dispatch-entry-rea-snapshot.json",
+      "purpose": "Recover endpoint, table, selector, and PAC-gated call dispatch."
+    },
+    {
+      "id": "sptm_pac_call_gate",
+      "artifact": "sptm",
+      "operation": "function",
+      "address": "0xfffffff02709034c",
+      "snapshot": "sptm-pac-call-gate-rea-snapshot.json",
+      "purpose": "Confirm authenticated service-pointer invocation."
+    },
+    {
+      "id": "sptm_sign_user_pointer",
+      "artifact": "sptm",
+      "operation": "function",
+      "address": "0xfffffff0270c23c8",
+      "snapshot": "sptm-sign-user-pointer-rea-snapshot.json",
+      "purpose": "Recover single-pointer signing keys and discriminator ABI."
+    },
+    {
+      "id": "sptm_auth_user_pointer",
+      "artifact": "sptm",
+      "operation": "function",
+      "address": "0xfffffff0270c2740",
+      "snapshot": "sptm-auth-user-pointer-rea-snapshot.json",
+      "purpose": "Recover authentication success and failure semantics."
+    },
+    {
+      "id": "sptm_batch_sign_user_pointer",
+      "artifact": "sptm",
+      "operation": "function",
+      "address": "0xfffffff0270c24e0",
+      "snapshot": "sptm-batch-sign-user-pointer-rea-snapshot.json",
+      "purpose": "Recover bounded batch record layout and validation."
+    },
+    {
+      "id": "sptm_batch_sign_trace",
+      "artifact": "sptm",
+      "operation": "trace",
+      "query": "sptm_batch_sign_user_pointer",
+      "snapshot": "sptm-batch-sign-trace-rea-snapshot.json",
+      "purpose": "Preserve the diagnostic-string-to-service linkage."
+    }
+  ],
+  "points": [
+    {
+      "id": "amfi_query",
+      "purpose": "Capture selector 6 after IOUserClient ABI validation.",
+      "static_address": "0xfffffe0008632afc",
+      "capture": {
+        "registers": ["x0", "x1", "x2"],
+        "memory": [
+          {"base_register": "x2", "size": 8, "count": 10}
+        ]
+      }
+    },
+    {
+      "id": "amfi_load",
+      "purpose": "Capture selectors 2 or 7 at the AMFI load handler.",
+      "static_address": "0xfffffe000863271c",
+      "capture": {
+        "registers": ["x0", "x1", "x2"],
+        "memory": [
+          {"base_register": "x2", "size": 8, "count": 10}
+        ]
+      }
+    },
+    {
+      "id": "trustcache_load_helper",
+      "purpose": "Capture validated kernel trust-cache and manifest ranges.",
+      "static_address": "0xfffffe0007ffc6a8",
+      "capture": {
+        "registers": ["x0", "x1", "x2", "x3", "x4", "x5", "x6"],
+        "memory": []
+      }
+    },
+    {
+      "id": "txm_dispatch_0c",
+      "purpose": "Capture the seven arguments immediately before operation 0x0c crosses the TXM gateway.",
+      "static_address": "0xfffffe0007ffe884",
+      "condition": "$w0 == 12",
+      "capture": {
+        "registers": ["x0", "x1", "x19"],
+        "memory": [
+          {"base_register": "x1", "size": 8, "count": 7},
+          {"base_register": "x19", "size": 4, "count": 8}
+        ]
+      }
+    }
+  ],
+  "abi": {
+    "amfi_query": {
+      "external_selector": 6,
+      "scalar_input_count": 1,
+      "structure_input_size": 20,
+      "scalar_output_count": 0,
+      "structure_output_size": 0
+    },
+    "amfi_load": {
+      "external_selectors": [2, 7],
+      "structure_input_size": "variable"
+    },
+    "txm_load": {
+      "operation": 12,
+      "argument_count": 7,
+      "arguments": [
+        "trust_cache_type",
+        "mapped_trust_cache_address",
+        "trust_cache_length",
+        "mapped_manifest_address",
+        "manifest_length",
+        "reserved_zero_0",
+        "reserved_zero_1"
+      ]
+    }
+  },
+  "dispatch_abi": {
+    "status": "static-confirmed-runtime-pending",
+    "kernel_fileset_static_base": "0xfffffe0007004000",
+    "kernel_inner_text_offset": 16384,
+    "token_register": "x16",
+    "endpoint_bits": "48..55",
+    "table_bits": "32..39",
+    "selector_bits": "0..31",
+    "sptm_pac_services": {
+      "endpoint": 0,
+      "table": 0,
+      "xnu_caller_permission_mask": 2,
+      "service_entry_size": 16,
+      "service_call_gate": "0xfffffff02709034c"
+    }
+  },
+  "thread_state_consumer": {
+    "status": "static-and-runtime-confirmed",
+    "converter": "0xfffffe0007c5de48",
+    "current_thread_accessor": "0xfffffe0007c56714",
+    "machine_jop_pid_offset": 432,
+    "pc_key_id": 0,
+    "pc_discriminator": "0x0000000000007481",
+    "consumer": "arm64e thread_get_state PC conversion"
+  },
+  "sptm_services": [
+    {
+      "selector": 16,
+      "name": "sign_user_pointer",
+      "kernel_stub": "0xfffffe00082f3788",
+      "kernel_context_wrapper": "0xfffffe0007c418fc",
+      "sptm_handler": "0xfffffff0270c23c8",
+      "arguments": ["pointer", "key_id", "discriminator"],
+      "allowed_key_ids": [0, 2],
+      "key_operations": {"0": "PACIA", "2": "PACDA"},
+      "result": "signed_pointer"
+    },
+    {
+      "selector": 17,
+      "name": "authenticate_user_pointer",
+      "kernel_stub": "0xfffffe00082f37a0",
+      "kernel_context_wrapper": "0xfffffe0007c41c08",
+      "sptm_handler": "0xfffffff0270c2740",
+      "arguments": ["signed_pointer", "key_id", "discriminator"],
+      "allowed_key_ids": [0, 2],
+      "result": "stripped_pointer_or_uint64_max"
+    },
+    {
+      "selector": 40,
+      "name": "batch_sign_user_pointer",
+      "kernel_stub": "0xfffffe00082f3800",
+      "kernel_context_wrapper": "0xfffffe0007c419c4",
+      "sptm_handler": "0xfffffff0270c24e0",
+      "arguments": ["operations_physical_page", "operation_count", "jop_key"],
+      "operation_count": {"minimum": 1, "maximum": 64},
+      "record_size": 24,
+      "record_layout": ["pointer_u64", "discriminator_u64", "key_id_u32", "padding_u32"],
+      "allowed_key_ids": [0, 2]
+    }
+  ],
+  "reconciliation": {
+    "status": "static-confirmed-runtime-pending",
+    "kernel_operation": 12,
+    "txm_dispatcher": "0xfffffff01702ae80",
+    "txm_dispatch_case": 12,
+    "txm_load_adapter": "0xfffffff01702b6f4",
+    "txm_load_handler": "0xfffffff01702627c"
+  },
+  "rea_evidence": [
+    {
+      "id": "ev_ac874d2e2cf6446349ba3e20fe5dc7d3ba4d1c2059ee150d8f9e9c3df78d247e",
+      "finding": "AMFI selector-6 handler"
+    },
+    {
+      "id": "ev_d113323ce61fd3d1c63e57957c4d00ce1dafd454dff2d79006dad5748313bfc0",
+      "finding": "AMFI query core and patched trust-cache lookup"
+    },
+    {
+      "id": "ev_4e989992f6d43d54e8ca72780a3027be89c5c1f5afb978b96e2799857e37170c",
+      "finding": "kernel trust-cache load boundary"
+    },
+    {
+      "id": "ev_266d06e60b70ec2d63c26560a9790339f8a320011385d3f002d31a2e61d158b4",
+      "finding": "TXM load adapter calling the trust-cache handler"
+    },
+    {
+      "id": "ev_5b79f98679e6413c7d4547701442651179e85162e12ed5f728e8055d339b7e1d",
+      "finding": "TXM dispatcher case 0x0c selects the load adapter"
+    },
+    {
+      "id": "ev_a441852990cbbc13705251f13e636909b99825cf4ec73d34fac20ee0bb6ee56a",
+      "finding": "XNU secure-call gateway constructs the x16 token and executes GENTER"
+    },
+    {
+      "id": "ev_8c7181788c168573c1a2c13964618fb5a206bc47d48858dbd5735aa6c32ccc97",
+      "finding": "SPTM dispatch permission and state validation"
+    },
+    {
+      "id": "ev_9c781ab83b8b74d66a06e64b8cfc86a80e928b3050a1353e9c02ed059406a4eb",
+      "finding": "SPTM service-table registration"
+    },
+    {
+      "id": "ev_816351f14ec4db2e47314a8c7aa0d2f05e726d7901c37f19ca2149ea7ea8bdcf",
+      "finding": "SPTM GENTER dispatcher decodes the service token"
+    },
+    {
+      "id": "ev_ad145dc99dff79732699ebcc7b5467d4b9395d113e222f3f948ddf418bd1b098",
+      "finding": "SPTM invokes registered services through a PAC-authenticated call gate"
+    },
+    {
+      "id": "ev_36e983d51b517e4500526a3e1a409a456a8d9efed227f62338d8b3c55a24bd6e",
+      "finding": "SPTM selector 0x10 signs one user pointer with key ID 0 or 2"
+    },
+    {
+      "id": "ev_9720c140d009111ae4c143ab4ddb6516cc2331c69f0539c8e0591bf0827964e5",
+      "finding": "SPTM selector 0x11 authenticates and strips one user pointer"
+    },
+    {
+      "id": "ev_12a638277c3f8663ac774d2dec21465f267de6c1071b8d3359de49a4fc8e5643",
+      "finding": "SPTM selector 0x28 validates and signs one to 64 records"
+    },
+    {
+      "id": "ev_7565369dea3255b13f35a093874402cc0553965f99e0f8db4e62cb50b98a55bb",
+      "finding": "SPTM batch-sign diagnostic string resolves to selector 0x28 handler"
+    },
+    {
+      "id": "ev_99f8f9a0fa0e7e6c37495ea6378faa0557383a457cfb234d40df2d7254f61805",
+      "finding": "XNU selector-0x10 stub has a code caller at pmap_sign_user_ptr"
+    }
+  ]
+}

@@ -27,28 +27,47 @@ int main(int argc, char *argv[]) {
 				NULL,
 				NULL,
 				NULL,
+				NULL,
+				NULL,
 			};
 
 			uint32_t idx = 0;
-			while (sets[idx] != NULL) idx++;
+			if (argc > 2) {
+				for (int i = 2; i < argc; i++) {
+					if (idx + 1 >= sizeof(sets) / sizeof(sets[0])) {
+						fprintf(stderr, "Too many requested XPF sets\n");
+						xpf_stop();
+						return 2;
+					}
+					sets[idx++] = argv[i];
+				}
+				sets[idx] = NULL;
+			}
+			else {
+				while (sets[idx] != NULL) idx++;
 
-			if (xpf_set_is_supported("sandbox")) {
-				sets[idx++] = "sandbox";
-			}
-			if (xpf_set_is_supported("perfkrw")) {
-				sets[idx++] = "perfkrw";
-			}
-			if (xpf_set_is_supported("devmode")) {
-				sets[idx++] = "devmode"; 
-			}
-			if (xpf_set_is_supported("badRecovery")) {
-				sets[idx++] = "badRecovery"; 
-			}
-			if (xpf_set_is_supported("arm64kcall")) {
-				sets[idx++] = "arm64kcall"; 
-			}
-			if (xpf_set_is_supported("trigon")) {
-				sets[idx++] = "trigon"; 
+				if (xpf_set_is_supported("sandbox")) {
+					sets[idx++] = "sandbox";
+				}
+				if (xpf_set_is_supported("perfkrw")) {
+					sets[idx++] = "perfkrw";
+				}
+				if (xpf_set_is_supported("devmode")) {
+						sets[idx++] = "devmode";
+				}
+				if (xpf_set_is_supported("threadStatePAC")) {
+					sets[idx++] = "threadStatePAC";
+				}
+				if (xpf_set_is_supported("badRecovery")) {
+						sets[idx++] = "badRecovery";
+				}
+				if (xpf_set_is_supported("arm64kcall")) {
+						sets[idx++] = "arm64kcall";
+				}
+				if (xpf_set_is_supported("trigon")) {
+						sets[idx++] = "trigon";
+				}
+				sets[idx] = NULL;
 			}
 
 			xpc_object_t serializedSystemInfo = xpf_construct_offset_dictionary((const char **)sets);

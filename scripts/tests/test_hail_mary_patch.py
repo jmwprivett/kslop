@@ -232,7 +232,7 @@ class HailMaryPatchTests(unittest.TestCase):
         self.assertIn("does not respring automatically", settings)
         self.assertIn("Apply Hail Mary Patch", settings)
         self.assertIn("Restore Hail Mary Patch", settings)
-        self.assertIn("case RootSectionActions:        return 4;", settings)
+        self.assertIn("case RootSectionActions:        return 6;", settings)
         self.assertIn("settings_run_hail_mary_patch_apply_action", settings_header)
         self.assertIn("settings_run_hail_mary_patch_restore_action", settings_header)
 

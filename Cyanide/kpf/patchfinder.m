@@ -105,6 +105,8 @@ int init_xpf(void) {
             NULL,
             NULL,
             NULL,
+            NULL,
+            NULL,
         };
 
         uint32_t idx = 0;
@@ -118,6 +120,9 @@ int init_xpf(void) {
         }
         if (xpf_set_is_supported("devmode")) {
             sets[idx++] = "devmode";
+        }
+        if (xpf_set_is_supported("threadStatePAC")) {
+            sets[idx++] = "threadStatePAC";
         }
         if (xpf_set_is_supported("badRecovery")) {
             sets[idx++] = "badRecovery";

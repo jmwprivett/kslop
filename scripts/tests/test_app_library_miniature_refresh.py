@@ -115,7 +115,7 @@ class AppLibraryMiniatureRefreshTests(unittest.TestCase):
     def test_refresh_helper_is_retained_but_removed_from_quick_actions(self):
         self.assertRegex(
             self.settings,
-            re.compile(r"case RootSectionActions:\s+return 4;"),
+            re.compile(r"case RootSectionActions:\s+return 6;"),
         )
         self.assertIn('cell.textLabel.text = @"Check for Updates";', self.settings)
         self.assertIn(

@@ -25,6 +25,17 @@ bool xpf_bad_recovery_supported(void)
 	return false;
 }
 
+bool xpf_thread_state_pac_supported(void)
+{
+	/*
+	 * The signed saved-state ABI is not itself the old badRecovery exploit.
+	 * Keep its discovery available on current arm64e kernels so callers can
+	 * reason about the signer/validator boundary without claiming that the
+	 * removed recovery-pointer primitive still exists.
+	 */
+	return gXPF.kernelIsArm64e;
+}
+
 static uint64_t xpf_find_hw_lck_ticket_reserve_orig_allow_invalid_signed(void)
 {
 	uint32_t strX10X16Any = 0, strX10X16AnyMask = 0;
@@ -212,7 +223,7 @@ static uint64_t xpf_find_pacda_gadget(void)
 
 static uint64_t xpf_find_ml_sign_thread_state(void)
 {
-	uint32_t inst[] = (uint32_t[]){
+	uint32_t legacyInst[] = (uint32_t[]){
 		0x9ac03021, // pacga x1, x1, x0
 		0x9262f842, // and x2, x2, #0xffffffffdfffffff
 		0x9ac13041, // pacga x1, x2, x1
@@ -223,14 +234,79 @@ static uint64_t xpf_find_ml_sign_thread_state(void)
 		0xd65f03c0  // ret
 	};
 
-	PFPatternMetric *metric = pfmetric_pattern_init(inst, NULL, sizeof(inst), sizeof(uint32_t));
+	PFPatternMetric *metric = pfmetric_pattern_init(
+		legacyInst, NULL, sizeof(legacyInst), sizeof(uint32_t));
 	__block uint64_t ml_sign_thread_state = 0;
 	pfmetric_run(gXPF.kernelTextSection, metric, ^(uint64_t vmaddr, bool *stop) {
 		ml_sign_thread_state = vmaddr;
 		*stop = true;
 	});
 	pfmetric_free(metric);
+	if (ml_sign_thread_state) return ml_sign_thread_state;
+
+	/*
+	 * XNU 12377 / iOS 26 binds the saved-state address and a rolling low-32
+	 * state value into every PACGA step.  These instructions are the complete
+	 * shipped ml_sign_thread_state body recovered from the exact 23A341 VM
+	 * kernel with REA.  Retaining the complete body makes this fail closed if
+	 * Apple changes either the hash construction or the signed-state offset.
+	 */
+	uint32_t xnu12377Inst[] = (uint32_t[]){
+		0xf27e045f, // tst x2, #0xc
+		0x54000041, // b.ne +0x8
+		0x9262f842, // and x2, x2, #0xffffffffdfffffff
+		0xd37cec11, // lsl x17, x0, #4
+		0xb27f0231, // orr x17, x17, #2
+		0x9ac13231, // pacga x17, x17, x1
+		0xd37ef421, // lsl x1, x1, #2
+		0xb3420c41, // bfxil x1, x2, #2, #2
+		0xd37df021, // lsl x1, x1, #3
+		0xb27f0021, // orr x1, x1, #2
+		0xb3407c31, // bfxil x17, x1, #0, #32
+		0x9ac23231, // pacga x17, x17, x2
+		0xb3407c31, // bfxil x17, x1, #0, #32
+		0x9ac33231, // pacga x17, x17, x3
+		0xb3407c31, // bfxil x17, x1, #0, #32
+		0x9ac43231, // pacga x17, x17, x4
+		0xb3407c31, // bfxil x17, x1, #0, #32
+		0x9ac53221, // pacga x1, x17, x5
+		0xf9009401, // str x1, [x0, #0x128]
+		0xd65f03c0, // ret
+	};
+	metric = pfmetric_pattern_init(
+		xnu12377Inst, NULL, sizeof(xnu12377Inst), sizeof(uint32_t));
+	pfmetric_run(gXPF.kernelTextSection, metric, ^(uint64_t vmaddr, bool *stop) {
+		ml_sign_thread_state = vmaddr;
+		*stop = true;
+	});
+	pfmetric_free(metric);
 	return ml_sign_thread_state;
+}
+
+static uint64_t xpf_find_ml_check_signed_state(void)
+{
+	/*
+	 * Current validator prologue: interrupts must be masked, SPSel must select
+	 * SP_EL1, and the expected rolling JOP hash is loaded from saved-state
+	 * +0x128 before the same PACGA chain is recomputed.
+	 */
+	uint32_t inst[] = (uint32_t[]){
+		0xd53b4230, // mrs x16, daif
+		0x363805b0, // tbz w16, #7, interrupt-state panic
+		0xd5384210, // mrs x16, spsel
+		0x36000570, // tbz w16, #0, interrupt-state panic
+		0xf9409410, // ldr x16, [x0, #0x128]
+		0xf27e045f, // tst x2, #0xc
+	};
+	PFPatternMetric *metric = pfmetric_pattern_init(
+		inst, NULL, sizeof(inst), sizeof(uint32_t));
+	__block uint64_t ml_check_signed_state = 0;
+	pfmetric_run(gXPF.kernelTextSection, metric, ^(uint64_t vmaddr, bool *stop) {
+		ml_check_signed_state = vmaddr;
+		*stop = true;
+	});
+	pfmetric_free(metric);
+	return ml_check_signed_state;
 }
 
 static uint64_t xpf_find_thread_recover(void)
@@ -295,17 +371,21 @@ static uint64_t xpf_find_thread_machine_kstackptr(void)
 
 void xpf_bad_recovery_init(void)
 {
+	if (xpf_thread_state_pac_supported()) {
+		xpf_item_register("kernelGadget.exception_return_after_check", xpf_find_exception_return_after_check, NULL);
+		xpf_item_register("kernelGadget.exception_return_after_check_no_restore", xpf_find_exception_return_after_check_no_restore, NULL);
+		xpf_item_register("kernelSymbol.ml_sign_thread_state", xpf_find_ml_sign_thread_state, NULL);
+		xpf_item_register("kernelSymbol.ml_check_signed_state", xpf_find_ml_check_signed_state, NULL);
+	}
+
 	if (gXPF.kernelIsArm64e && xpf_bad_recovery_supported()) {
 		xpf_item_register("kernelSymbol.hw_lck_ticket_reserve_orig_allow_invalid", xpf_find_hw_lck_ticket_reserve_orig_allow_invalid, NULL);
 		xpf_item_register("kernelGadget.hw_lck_ticket_reserve_orig_allow_invalid_signed", xpf_find_hw_lck_ticket_reserve_orig_allow_invalid_signed, NULL);
 		xpf_item_register("kernelGadget.br_x22", xpf_find_br_x22_gadget, NULL);
-		xpf_item_register("kernelGadget.exception_return_after_check", xpf_find_exception_return_after_check, NULL);
-		xpf_item_register("kernelGadget.exception_return_after_check_no_restore", xpf_find_exception_return_after_check_no_restore, NULL);
 		xpf_item_register("kernelGadget.ldp_x0_x1_x8", xpf_find_ldp_x0_x1_x8_gadget, NULL);
 		xpf_item_register("kernelGadget.str_x8_x9", xpf_find_str_x8_x9_gadget, NULL);
 		xpf_item_register("kernelGadget.str_x0_x19_ldr_x20", xpf_find_str_x0_x19_ldr_x20_gadget, NULL);
 		xpf_item_register("kernelGadget.pacda", xpf_find_pacda_gadget, NULL);
-		xpf_item_register("kernelSymbol.ml_sign_thread_state", xpf_find_ml_sign_thread_state, NULL);
 		xpf_item_register("kernelStruct.thread.recover", xpf_find_thread_recover, NULL);
 	}
 }

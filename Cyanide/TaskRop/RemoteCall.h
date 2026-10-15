@@ -61,6 +61,21 @@ typedef struct {
     uint64_t shmemUsed;
     uint64_t shmemEvictions;
     uint64_t shmemClock;
+    bool identityBootstrapRequested;
+    bool identityMessageValid;
+    bool identityThreadRightExact;
+    bool identityTaskRightExact;
+    bool identityHandlerDowngraded;
+    bool identityHandlerRetained;
+    bool identityInitialConversionSucceeded;
+    bool identityInitialReplySucceeded;
+    uint64_t identityThreadAddr;
+    uint64_t identityTrapAddress;
+    uint64_t identityConversionCount;
+    uint64_t identityConversionFailures;
+    bool identityConverterUnavailable;
+    uint64_t identityPACFallbackCount;
+    uint64_t identityPACFallbackFailures;
     char lastStableCall[64];
     char lastStableFailure[64];
     char lastStableFailureReason[96];
@@ -107,9 +122,18 @@ extern uint64_t g_RC_targetProcOverride;
 int init_remote_call(const char* process, bool useMigFilterBypass);
 int init_remote_call_with_first_exception_timeout(const char* process, bool useMigFilterBypass, int firstExceptionTimeoutMS);
 int init_remote_call_original_thread_only_with_first_exception_timeout(const char* process, bool useMigFilterBypass, int firstExceptionTimeoutMS);
+/* Physical cross-process PAC boundary: the first target exception requests
+ * identity delivery, validates the kernel-minted target task/thread rights,
+ * and retains the exact thread right as the PC/LR converter for the bounded
+ * original-thread session. Physical iOS 26 does not permit the delivered
+ * cross-task thread right to replace the exception policy, so the bounded
+ * session keeps identity delivery and releases each subsequent message's
+ * duplicate task/thread rights after replying. */
+int init_remote_call_identity_bootstrap_original_thread_only(
+    const char *process, int firstExceptionTimeoutMS);
 uint64_t do_remote_call_stable(int timeout, const char *name, uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3, uint64_t x4, uint64_t x5, uint64_t x6, uint64_t x7);
 uint64_t do_remote_call_stable_addr(int timeout, uint64_t pcAddr, const char *name, uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3, uint64_t x4, uint64_t x5, uint64_t x6, uint64_t x7);
-void sign_state(uint64_t signingThread, arm_thread_state64_internal *state, uint64_t pc, uint64_t lr);
+bool sign_state(uint64_t signingThread, arm_thread_state64_internal *state, uint64_t pc, uint64_t lr);
 uint64_t remote_pac(uint64_t remoteThreadAddr, uint64_t address, uint64_t modifier);
 bool remote_read(uint64_t src, void *dst, uint64_t size);
 uint64_t remote_read64(uint64_t src);
@@ -181,6 +205,12 @@ const char *remote_call_init_failure_description(RemoteCallInitFailure failure);
 - (instancetype)initWithProcess:(NSString *)process
               useMigFilterBypass:(BOOL)useMigFilterBypass
          firstExceptionTimeoutMS:(int)firstExceptionTimeoutMS;
+/// Physical original-thread transport proven on iPhone17,2 / 23A341. The
+/// first target exception carries kernel-minted task/thread rights and PC/LR
+/// signing falls back to the existing KRW PAC-context borrower when the
+/// public cross-task converter rejects that right.
+- (instancetype)initWithIdentityBootstrapProcess:(NSString *)process
+                          firstExceptionTimeoutMS:(int)firstExceptionTimeoutMS;
 - (instancetype)initWithProcess:(NSString *)process
               useMigFilterBypass:(BOOL)useMigFilterBypass
          firstExceptionTimeoutMS:(int)firstExceptionTimeoutMS

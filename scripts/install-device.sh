@@ -93,10 +93,13 @@ APP_EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$
 [ -n "$APP_EXECUTABLE_NAME" ] || fail "artifact has no CFBundleExecutable"
 APP_EXECUTABLE="$APP/$APP_EXECUTABLE_NAME"
 XPF_DYLIB="$APP/libxpf.dylib"
+SPRINGBOARD_PROBE_DYLIB="$APP/CNDSpringBoardDylibProbe.dylib"
 require_file "$APP_EXECUTABLE"
 require_file "$XPF_DYLIB"
+require_file "$SPRINGBOARD_PROBE_DYLIB"
 require_architectures "$APP_EXECUTABLE"
 require_architectures "$XPF_DYLIB"
+require_architectures "$SPRINGBOARD_PROBE_DYLIB"
 otool -L "$APP_EXECUTABLE" | grep -F '@loader_path/libxpf.dylib' >/dev/null \
     || fail "Cyanide does not link its embedded libxpf.dylib"
 security cms -D -i "$APP/embedded.mobileprovision" >/dev/null 2>&1 \
@@ -104,6 +107,7 @@ security cms -D -i "$APP/embedded.mobileprovision" >/dev/null 2>&1 \
 cmp -s "$PROFILE" "$APP/embedded.mobileprovision" \
     || fail "artifact does not contain the configured provisioning profile"
 codesign --verify --strict --verbose=2 "$XPF_DYLIB"
+codesign --verify --strict --verbose=2 "$SPRINGBOARD_PROBE_DYLIB"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 echo "==> checking paired device $DEVICE_NAME ($DEVICE_ID)"

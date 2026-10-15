@@ -8,6 +8,8 @@
 #import "Thread.h"
 
 #import <Foundation/Foundation.h>
+#import <mach/arm/thread_status.h>
+#import <ptrauth.h>
 #import "../kexploit/kutils.h"
 #import "../kexploit/krw.h"
 #import "../kexploit/kexploit_opa334.h"
@@ -20,6 +22,13 @@
 
 // xnu-11417.140.69/bsd/sys/reason.h
 #define OS_REASON_GUARD         23
+
+#define CND_THREAD_STATE_NO_PTRAUTH       0x1U
+#define CND_THREAD_STATE_IB_SIGNED_LR     0x2U
+#define CND_THREAD_STATE_KERNEL_SIGNED_PC 0x4U
+#define CND_THREAD_STATE_KERNEL_SIGNED_LR 0x8U
+#define CND_THREAD_STATE_USER_DIVER_MASK  0xff000000U
+#define CND_USER_POINTER_MASK              0x0000007fffffffffULL
 
 bool inject_guard_exception(uint64_t thread, uint64_t code)
 {
@@ -95,6 +104,85 @@ bool thread_set_state_wrapper(mach_port_t machThread, uint64_t threadAddr, arm_t
         thread_set_options(threadAddr, options);
     }
     return true;
+}
+
+bool thread_convert_sign_state_for_target(
+    mach_port_t targetThread, arm_thread_state64_internal *state,
+    uint64_t pc, uint64_t lr)
+{
+    if (!MACH_PORT_VALID(targetThread) || !state || (!pc && !lr)) {
+        return false;
+    }
+
+#if __has_feature(ptrauth_calls)
+    arm_thread_state64_t input;
+    arm_thread_state64_t output;
+    memset(&input, 0, sizeof(input));
+    memset(&output, 0, sizeof(output));
+
+    uint32_t flags = state->__flags & ~CND_THREAD_STATE_NO_PTRAUTH;
+    if (pc) flags &= ~CND_THREAD_STATE_KERNEL_SIGNED_PC;
+    if (lr) {
+        flags &= ~(CND_THREAD_STATE_KERNEL_SIGNED_LR |
+                   CND_THREAD_STATE_IB_SIGNED_LR);
+    }
+    input.__opaque_flags = flags;
+
+    /* machine_thread_state_convert_from_user() is entered with
+     * TSSF_FLAGS_NONE by thread_convert_thread_state().  Its input must use
+     * the plain pc/lr discriminator even when preserved flags contain a user
+     * diversifier.  convert_to_user() then applies that diversifier while it
+     * signs for targetThread. */
+    if (pc) {
+        void *localPC = ptrauth_sign_unauthenticated(
+            (void *)(uintptr_t)(pc & CND_USER_POINTER_MASK),
+            ptrauth_key_process_independent_code,
+            ptrauth_string_discriminator("pc"));
+        arm_thread_state64_set_pc_presigned_fptr(input, localPC);
+    }
+    if (lr) {
+        void *localLR = ptrauth_sign_unauthenticated(
+            (void *)(uintptr_t)(lr & CND_USER_POINTER_MASK),
+            ptrauth_key_process_independent_code,
+            ptrauth_string_discriminator("lr"));
+        arm_thread_state64_set_lr_presigned_fptr(input, localLR);
+    }
+
+    mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
+    kern_return_t kr = thread_convert_thread_state(
+        targetThread, THREAD_CONVERT_THREAD_STATE_FROM_SELF,
+        ARM_THREAD_STATE64, (thread_state_t)&input,
+        ARM_THREAD_STATE64_COUNT, (thread_state_t)&output, &count);
+    if (kr != KERN_SUCCESS || count != ARM_THREAD_STATE64_COUNT ||
+        output.__opaque_flags != input.__opaque_flags) {
+        printf("[%s:%d] thread state conversion failed: 0x%x count=%u "
+               "flags=%#x/%#x\n", __FUNCTION__, __LINE__, kr, count,
+               input.__opaque_flags, output.__opaque_flags);
+        return false;
+    }
+
+    uint64_t signedPC = (uint64_t)(uintptr_t)output.__opaque_pc;
+    uint64_t signedLR = (uint64_t)(uintptr_t)output.__opaque_lr;
+    if ((pc && (!signedPC ||
+                (signedPC & CND_USER_POINTER_MASK) !=
+                    (pc & CND_USER_POINTER_MASK))) ||
+        (lr && (!signedLR ||
+                (signedLR & CND_USER_POINTER_MASK) !=
+                    (lr & CND_USER_POINTER_MASK)))) {
+        printf("[%s:%d] thread state conversion returned malformed "
+               "PC/LR\n", __FUNCTION__, __LINE__);
+        return false;
+    }
+
+    if (pc) state->__pc = signedPC;
+    if (lr) state->__lr = signedLR;
+    state->__flags = output.__opaque_flags;
+    return true;
+#else
+    if (pc) state->__pc = pc;
+    if (lr) state->__lr = lr;
+    return true;
+#endif
 }
 
 bool thread_resume_wrapper(mach_port_t machThread)

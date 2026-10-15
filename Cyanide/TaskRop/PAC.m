@@ -8,6 +8,8 @@
 #import "RemoteCall.h"
 #import "Thread.h"
 #import "Exception.h"
+#import "../kexploit/CNDLabKernelPAC.h"
+#import "../kexploit/CNDLabKernelProvider.h"
 #import "../kexploit/kexploit_opa334.h"
 #import "../kexploit/kutils.h"
 
@@ -94,6 +96,26 @@ void pac_cleanup(mach_port_t pacThread, mach_port_t exceptionPort, void *stack)
 uint64_t remote_pac(uint64_t remoteThreadAddr, uint64_t address, uint64_t modifier) {
     if(!gIsPACSupported)
         return address;
+
+    /*
+     * The vPhone lab provider already owns a validated post-KRW kcall. Route
+     * user instruction-pointer signing through the exact normal pmap/SPTM
+     * consumer recovered by REA instead of rewriting thread PAC contexts.
+     * A live UUID/stub mismatch fails closed and never changes physical-device
+     * behavior or its global offset table.
+     */
+    if (cnd_lab_krw_ready() && cnd_lab_kernel_call_active()) {
+        uint64_t signedAddress = 0;
+        int result = cnd_lab_pac_sign_user_pointer(
+            remoteThreadAddr, native_strip(address),
+            CNDLabPACKeyInstructionA, modifier, &signedAddress);
+        if (result != 0) {
+            printf("[%s:%d] VM pmap/SPTM PAC failed: %d\n",
+                   __FUNCTION__, __LINE__, result);
+            return UINT64_MAX;
+        }
+        return signedAddress;
+    }
     
     if(!g_RC_gadgetPacia) {
         uint64_t gadgetAddr = find_pacia_gadget();

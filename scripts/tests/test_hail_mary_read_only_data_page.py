@@ -116,7 +116,7 @@ class HailMaryReadOnlyDataPageTests(unittest.TestCase):
         settings = SETTINGS.read_text()
         header = SETTINGS_HEADER.read_text()
         for token in (
-            'case RootSectionActions:        return 4;',
+            'case RootSectionActions:        return 6;',
             '#import "CNDHailMaryReadOnlyDataPage.h"',
             'Hail Mary .34 RO-Data Write Probe',
             'settings_run_hail_mary_read_only_data_page_action',

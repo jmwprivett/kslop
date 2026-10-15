@@ -164,6 +164,33 @@ void settings_present_system_edit_respring_prompt(UIViewController *host,
 void settings_run_actions(void);
 void settings_run_pending_actions(void);
 void settings_run_pending_actions_for_queue_token(NSString *completionToken);
+/// Runs the exact-build SpringBoard identity-bound self-trace/dylib probe.
+/// This is exported for the one-shot `--springboard-rx-probe` physical launch
+/// path; after persisting its marker result the probe replaces SpringBoard to
+/// clear its temporary exception and tracing state.
+void settings_run_physical_rx_probe_action(void);
+/// VM-only REA/KRW boundary probe. Exposed for the lab Darwin-notification
+/// trigger so KDP can observe the authenticated IOUserServer method entry
+/// without UI automation.
+void settings_run_lab_pm_cross_class_action(void);
+/// VM-only no-provider trigger for the AppleM68Buttons/UPA carrier test.
+/// Invoked through a Darwin notification; it has no Settings UI dependency.
+void settings_run_lab_pm_m68_action(void);
+/// Exact iPhone17,2 / 23A341 physical validator-consumption canary.  It
+/// acquires validated KRW, resumes one sacrificial worker through the stock
+/// exception-state path, and records before/after saved-state reads.  Exposed
+/// for the `--physical-pac-validator` launch path; no button is required.
+void settings_run_physical_pac_identity_canary_action(void);
+/// Exact physical cross-process boundary probe. Targets only the stock
+/// Calculator process, executes getpid through an identity-delivered,
+/// converter-signed original thread, and restores that thread before return.
+/// Exposed for the `--calculator-pac-probe` launch path.
+void settings_run_physical_calculator_pac_probe_action(void);
+/// Exact physical SpringBoard execution boundary. Executes only getpid with
+/// the identity/KRW PAC signer, then terminates that exact SpringBoard
+/// incarnation and proves its replacement so the retained exception policy
+/// cannot survive the experiment.
+void settings_run_physical_springboard_pac_probe_action(void);
 /// Runs the same exact-device, observation-only diagnostic as the Settings
 /// quick action. Exposed so a physical lab launch can pass
 /// `--hail-mary-probe` and retrieve the JSON report without UI automation.

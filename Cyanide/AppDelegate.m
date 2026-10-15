@@ -9,6 +9,8 @@
 #import "SettingsViewController.h"
 #import "DSKeepAlive.h"
 #import "LogTextView.h"
+#import "CNDPhysicalIOUserEthernetSignerProbe.h"
+#import <notify.h>
 #import <signal.h>
 #import <sys/stat.h>
 #import <sys/utsname.h>
@@ -19,6 +21,8 @@
 @end
 
 static dispatch_source_t g_sigterm_source;
+static int g_lab_pm_cross_class_notification_token;
+static int g_lab_pm_m68_notification_token;
 
 @implementation AppDelegate
 
@@ -35,28 +39,74 @@ static dispatch_source_t g_sigterm_source;
     ds_keepalive_apply_enabled([[NSUserDefaults standardUserDefaults] boolForKey:kSettingsKeepAlive]);
     [self installTerminationHandlers];
     [self installBarAppearances];
-    NSArray<NSString *> *arguments = NSProcessInfo.processInfo.arguments;
-    void (^hailMaryLaunchAction)(void) = nil;
-    if ([arguments containsObject:@"--hail-mary-apply"]) {
-        hailMaryLaunchAction = ^{ settings_run_hail_mary_patch_apply_action(); };
-    } else if ([arguments containsObject:@"--hail-mary-restore"]) {
-        hailMaryLaunchAction = ^{ settings_run_hail_mary_patch_restore_action(); };
-    } else if ([arguments containsObject:@"--hail-mary-verify-patched"]) {
-        hailMaryLaunchAction = ^{ settings_run_hail_mary_patch_verify_patched_action(); };
-    } else if ([arguments containsObject:@"--hail-mary-verify-original"]) {
-        hailMaryLaunchAction = ^{ settings_run_hail_mary_patch_verify_original_action(); };
-    } else if ([arguments containsObject:@"--hail-mary-probe"]) {
-        hailMaryLaunchAction = ^{ settings_run_hail_mary_probe_action(); };
-    } else if ([arguments containsObject:@"--hail-mary-imp-apply"]) {
-        hailMaryLaunchAction = ^{ settings_run_hail_mary_imp_redirect_apply_action(); };
-    } else if ([arguments containsObject:@"--hail-mary-imp-restore"]) {
-        hailMaryLaunchAction = ^{ settings_run_hail_mary_imp_redirect_restore_action(); };
+    int labNotifyStatus = notify_register_dispatch(
+        "com.zeroxjf.cyanide.lab.pm-cross-class",
+        &g_lab_pm_cross_class_notification_token,
+        dispatch_get_main_queue(), ^(int token) {
+            (void)token;
+            settings_run_lab_pm_cross_class_action();
+        });
+    if (labNotifyStatus != NOTIFY_STATUS_OK) {
+        log_user("[LAB_PM_CROSS_CLASS] notification registration failed status=%d\n",
+            labNotifyStatus);
     }
-    if (hailMaryLaunchAction) {
+    labNotifyStatus = notify_register_dispatch(
+        "com.zeroxjf.cyanide.lab.pm-m68",
+        &g_lab_pm_m68_notification_token,
+        dispatch_get_main_queue(), ^(int token) {
+            (void)token;
+            settings_run_lab_pm_m68_action();
+        });
+    if (labNotifyStatus != NOTIFY_STATUS_OK) {
+        log_user("[LAB_PM_M68] notification registration failed status=%d\n",
+            labNotifyStatus);
+    }
+    NSArray<NSString *> *arguments = NSProcessInfo.processInfo.arguments;
+    void (^physicalLaunchAction)(void) = nil;
+    if ([arguments containsObject:@"--hail-mary-apply"]) {
+        physicalLaunchAction = ^{ settings_run_hail_mary_patch_apply_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-restore"]) {
+        physicalLaunchAction = ^{ settings_run_hail_mary_patch_restore_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-verify-patched"]) {
+        physicalLaunchAction = ^{ settings_run_hail_mary_patch_verify_patched_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-verify-original"]) {
+        physicalLaunchAction = ^{ settings_run_hail_mary_patch_verify_original_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-probe"]) {
+        physicalLaunchAction = ^{ settings_run_hail_mary_probe_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-imp-apply"]) {
+        physicalLaunchAction = ^{ settings_run_hail_mary_imp_redirect_apply_action(); };
+    } else if ([arguments containsObject:@"--hail-mary-imp-restore"]) {
+        physicalLaunchAction = ^{ settings_run_hail_mary_imp_redirect_restore_action(); };
+    } else if ([arguments containsObject:@"--springboard-rx-probe"]) {
+        physicalLaunchAction = ^{ settings_run_physical_rx_probe_action(); };
+    } else if ([arguments containsObject:@"--physical-pac-validator"]) {
+        physicalLaunchAction = ^{
+            settings_run_physical_pac_identity_canary_action();
+        };
+    } else if ([arguments containsObject:@"--calculator-pac-probe"]) {
+        physicalLaunchAction = ^{
+            settings_run_physical_calculator_pac_probe_action();
+        };
+    } else if ([arguments containsObject:@"--springboard-pac-probe"]) {
+        physicalLaunchAction = ^{
+            settings_run_physical_springboard_pac_probe_action();
+        };
+    } else if ([arguments containsObject:
+                @"--iouserethernet-signer-probe"]) {
+        physicalLaunchAction = ^{
+            CNDPhysicalIOUserEthernetSignerProbeRun(
+                ^(NSDictionary<NSString *, id> *report) {
+                    log_user("[IOUSERETHERNET_SIGNER] result=%s report=%s\n",
+                        [report[@"result"] UTF8String] ?: "unknown-result",
+                        [report[@"reportPath"] UTF8String] ?: "unavailable");
+                });
+        };
+    }
+    if (physicalLaunchAction) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
                                      (int64_t)(1.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            hailMaryLaunchAction();
+            physicalLaunchAction();
         });
     }
     return YES;

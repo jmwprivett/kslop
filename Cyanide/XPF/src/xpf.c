@@ -168,6 +168,19 @@ XPFSet gBadRecoverySet = {
 	}
 };
 
+XPFSet gThreadStatePACSet = {
+	.name="threadStatePAC",
+	.supported=xpf_thread_state_pac_supported,
+	.metrics={
+		"kernelSymbol.exception_return",
+		"kernelGadget.exception_return_after_check",
+		"kernelGadget.exception_return_after_check_no_restore",
+		"kernelSymbol.ml_sign_thread_state",
+		"kernelSymbol.ml_check_signed_state",
+		NULL
+	}
+};
+
 XPFSet gSandboxSet = {
 	.name="sandbox",
 	.supported=xpf_supported_15up,
@@ -239,6 +252,7 @@ XPFSet *gSets[] = {
 	&gStructSet,
 	&gTrustcache15Set,
 	&gTrustcache16Set,
+	&gThreadStatePACSet,
 	&gBadRecoverySet,
 	&gPhysRWSet,
 	&gPerfKRWSet,
