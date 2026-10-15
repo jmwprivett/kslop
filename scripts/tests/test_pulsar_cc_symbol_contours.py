@@ -165,19 +165,29 @@ class PulsarSymbolContourTests(unittest.TestCase):
 
     def test_explicit_control_scales_cover_all_states_and_leave_nonconnectivity_unchanged(self):
         expected = {"wifi": 1.60, "airdrop": 1.60, "bluetooth": 1.60,
-                    "cellular": 2.00, "hotspot": 2.15, "satellite": 2.15,
+                    "cellular": 2.00, "hotspot": 2.00, "satellite": 2.15,
                     "vpn": 1.27, "airplane": .90}
         self.assertEqual(GENERATOR.CONNECTIVITY_CONTROL_ARTWORK_SCALES, expected)
         self.assertEqual(set(GENERATOR.CONNECTIVITY_SYMBOL_CONTROLS), GENERATOR.CONNECTIVITY_SYMBOL_NAMES)
         for name, control in GENERATOR.CONNECTIVITY_SYMBOL_CONTROLS.items():
             self.assertEqual(GENERATOR.symbol_artwork_scale(name), expected[control])
         for name in (set(GENERATOR.PULSAR_SYMBOLS) - GENERATOR.CONNECTIVITY_SYMBOL_NAMES -
-                     GENERATOR.FLASHLIGHT_SYMBOL_NAMES):
+                     GENERATOR.FLASHLIGHT_SYMBOL_NAMES - GENERATOR.CAMERA_SYMBOL_NAMES):
             self.assertEqual(GENERATOR.symbol_artwork_scale(name), 1.0)
+        for name in GENERATOR.CAMERA_SYMBOL_NAMES:
+            self.assertEqual(
+                GENERATOR.symbol_artwork_scale(name),
+                GENERATOR.CAMERA_ARTWORK_SCALE,
+            )
         for name in GENERATOR.FLASHLIGHT_SYMBOL_NAMES:
-            self.assertEqual(GENERATOR.symbol_artwork_scale(name), 1.50)
+            self.assertEqual(
+                GENERATOR.symbol_artwork_scale(name),
+                GENERATOR.FLASHLIGHT_ARTWORK_SCALE,
+            )
             layout = GENERATOR.symbol_optical_layout(
-                GENERATOR.ARTWORK / GENERATOR.PULSAR_SYMBOLS[name], 1.50)
+                GENERATOR.ARTWORK / GENERATOR.PULSAR_SYMBOLS[name],
+                GENERATOR.FLASHLIGHT_ARTWORK_SCALE,
+            )
             self.assertTrue(layout["completeAuthoredAlphaInsideSymbolMargins"])
 
     def test_ink_cropping_is_not_confused_with_truncated_artwork(self):

@@ -51,9 +51,10 @@ identical for unrelated consumers; targeted cache keys now resolve standalone
 Pulsar images. Base catalog block offsets are repacked within the original file
 capacity, preserving all block IDs. Private catalog targets fit existing slots.
 
-The base catalog covers Wi-Fi, cellular, hotspot, flashlight, QR, Camera, media AirPlay
-and the four media-volume identities (15 symbol names, 210 vector/cache values). Bluetooth, AirDrop, VPN,
-satellite, and Calculator resolve from the private catalog (eight names, 88 values). The base
+The base catalog covers Wi-Fi, cellular, hotspot, all native flashlight off/on
+identities, QR, Camera, media AirPlay, the four level symbols, and every public
+output-device identity returned by MediaRemote. Bluetooth, AirDrop, VPN,
+satellite, Calculator, and the private CarPlay/Bluetooth-speaker output identities resolve from the private catalog. The base
 replacement remains exactly 150,914,088 bytes with 313,467 unrelated live blocks
 preserved; the private replacement remains 24,963,464 bytes with 44,751 unrelated
 blocks preserved. Their preservation proofs are hashed in the installation
@@ -113,10 +114,11 @@ The October 6 device-feedback pass uses explicit per-control constants in
 | AirDrop | Private CoreGlyphs `airdrop` | 1.60× |
 | Bluetooth | Private CoreGlyphs `bluetooth`, `bluetooth.slash` | 1.60× |
 | Cellular | Public CoreGlyphs `cellularbars` | 2.00× |
-| Personal Hotspot | Public CoreGlyphs `personalhotspot`, `personalhotspot.slash` | 2.15× |
+| Personal Hotspot | Public CoreGlyphs `personalhotspot`, `personalhotspot.slash` | 2.00× |
 | Satellite | Private CoreGlyphs `satellite.slash.fill`, `satellite.wave.2`, `satellite.wave.2.fill` | 2.15× |
 | Airplane | ConnectivityModule `AirplaneGlyph` | 0.90× |
-| Flashlight | Public CoreGlyphs `flashlight.off.fill`, `flashlight.on.fill` | 1.50× |
+| Flashlight | Public CoreGlyphs `flashlight.off.fill`, `flashlight.off.circle`, `flashlight.off.circle.fill`, and the matching three `flashlight.on…` identities | 1.25× |
+| Camera | Public CoreGlyphs `camera.fill` | 1.30× |
 | VPN | Private CoreGlyphs `network.connected.to.line.below.fill` | 1.27× |
 
 Compact and expanded Connectivity share these resources. Native disassembly
@@ -131,7 +133,7 @@ guides, state identities, alpha planes, and all unrelated CAR blocks remain
 unchanged.
 
 Both CoreGlyph preservation proofs record the per-control/identity scales and
-host-render every native Connectivity vector/cache key plus both Flashlight states. Cached keys retain their
+host-render every native Connectivity vector/cache key plus every Flashlight off/on identity. Cached keys retain their
 native 15/17/20-point and 1x/2x/3x combinations; vectors retain native size/weight
 keys. The complete authored line-art/backing bounds must fit the unchanged
 symbol template's margins and size guide regions. Host rendering then verifies
@@ -202,10 +204,15 @@ symbol constants resolve through native SFSymbols aliases:
 Those four canonical symbols now receive the host-rendered, full-extent Pulsar
 Volume vector artwork (`MediaVolume.png`) in all 56 native vector/cache values.
 Native volume levels/actions are untouched; the visual level variants all use
-the supplied Pulsar earbuds. This closes a file-provider coverage gap that can
-show stock artwork when the consumer selects generated symbols instead of its
-CAML path. It is not evidence that a disk file had been restored or that the
-reported timed physical reversion has already been reproduced and verified.
+the supplied Pulsar earbuds. `MRUVolumeViewController.updateSliderAsset` can
+also replace that package/symbol after its output-device route resolves; the
+MediaControls asks `MRAVOutputDeviceSymbolProvider` for a route-specific symbol.
+The complete canonicalized provider set—including CarPlay, Bluetooth speaker,
+headphones, iPhone, MacBook, hearing-device, Apple TV, HomePod, Hi-Fi speaker,
+and media-box identities—therefore receives the same artwork. The expanded stepper's
+`speaker.minus.fill` and `speaker.plus.fill` actions remain stock. This closes
+the file-provider gaps that can show stock artwork when the shared compact /
+expanded slider changes providers after initial construction.
 
 Brightness/Volume source drawing colors are normalized during CAML preflight to
 the exact native white/template contract, rather than preserving upstream black

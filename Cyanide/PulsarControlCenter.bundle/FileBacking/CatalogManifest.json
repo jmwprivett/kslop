@@ -10,9 +10,9 @@
       "nativeAuthoringRuntimeBuild": "23A343",
       "nativeHeaderPreserved": true,
       "payloadLength": 150914088,
-      "payloadSHA256": "33295ba558b49d0fee1453effe2a92ec9c8e8431e10f9f78cec57bd41cdf8e83",
+      "payloadSHA256": "63361a20973b08a0a874f911212649b0a3ef92dc033a46968816d04ef270ace6",
       "preservationProofResource": "CoreGlyphsPreservation-23A341.json",
-      "preservationProofSHA256": "935be4046f72f5dc7837522ce5a38e3d6343ba7aa0951e7922aad4ba2ca37be5",
+      "preservationProofSHA256": "e3b32b1b8af4a26f613f7070e561bee80278aa85aabbb28b00a04369bcd1b8ae",
       "resourceName": "CoreGlyphs-23A341.car",
       "stockLength": 150914088,
       "stockSHA256": "64a1699915cf947bc961bc37949b907cffb804ea7e7b8dc810ee8d73c3482553",
@@ -27,10 +27,10 @@
           "sourceMainSHA256": "25f3acba533310abb168ab10396a8fee5cbadf05dfbe742480d151a92db551a8",
           "symbolName": "airplay.audio"
         },
-        "speaker.fill": {
+        "headphones": {
           "artworkResource": "MediaVolume.png",
           "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
-          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
           "nativeAliases": {
             "volume.1.fill": "speaker.wave.1.fill",
             "volume.2.fill": "speaker.wave.2.fill",
@@ -38,13 +38,289 @@
             "volume.fill": "speaker.fill"
           },
           "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "hearingdevice.ear": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "hifispeaker.2.fill": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "hifispeaker.and.appletv.fill": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "hifispeaker.and.homepod.fill": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "hifispeaker.and.homepod.mini.fill": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "hifispeaker.fill": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "iphone": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "macbook": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "speaker.fill": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
           "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
           "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
         },
         "speaker.wave.1.fill": {
           "artworkResource": "MediaVolume.png",
           "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
-          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
           "nativeAliases": {
             "volume.1.fill": "speaker.wave.1.fill",
             "volume.2.fill": "speaker.wave.2.fill",
@@ -52,13 +328,28 @@
             "volume.fill": "speaker.fill"
           },
           "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
           "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
           "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
         },
         "speaker.wave.2.fill": {
           "artworkResource": "MediaVolume.png",
           "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
-          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
           "nativeAliases": {
             "volume.1.fill": "speaker.wave.1.fill",
             "volume.2.fill": "speaker.wave.2.fill",
@@ -66,13 +357,28 @@
             "volume.fill": "speaker.fill"
           },
           "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
           "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
           "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
         },
         "speaker.wave.3.fill": {
           "artworkResource": "MediaVolume.png",
           "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
-          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
           "nativeAliases": {
             "volume.1.fill": "speaker.wave.1.fill",
             "volume.2.fill": "speaker.wave.2.fill",
@@ -80,6 +386,50 @@
             "volume.fill": "speaker.fill"
           },
           "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "tv.and.mediabox": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
           "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
           "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
         }
@@ -89,8 +439,21 @@
         "airplay.audio",
         "camera.fill",
         "cellularbars",
+        "flashlight.off.circle",
+        "flashlight.off.circle.fill",
         "flashlight.off.fill",
+        "flashlight.on.circle",
+        "flashlight.on.circle.fill",
         "flashlight.on.fill",
+        "headphones",
+        "hearingdevice.ear",
+        "hifispeaker.2.fill",
+        "hifispeaker.and.appletv.fill",
+        "hifispeaker.and.homepod.fill",
+        "hifispeaker.and.homepod.mini.fill",
+        "hifispeaker.fill",
+        "iphone",
+        "macbook",
         "personalhotspot",
         "personalhotspot.slash",
         "qrcode.viewfinder",
@@ -98,6 +461,7 @@
         "speaker.wave.1.fill",
         "speaker.wave.2.fill",
         "speaker.wave.3.fill",
+        "tv.and.mediabox",
         "wifi",
         "wifi.badge.lock",
         "wifi.slash"
@@ -114,22 +478,84 @@
       "nativeAuthoringRuntimeBuild": "23A343",
       "nativeHeaderPreserved": true,
       "payloadLength": 24963464,
-      "payloadSHA256": "1143cee3a9ab005bccdc8510a775b5dc8093935e4e5babe737150f5b4de9142b",
+      "payloadSHA256": "8b6d8fc70a32d102f1819bc29b84fd367330f9bde43531d516d341a365c71e89",
       "preservationProofResource": "CoreGlyphsPrivatePreservation-23A341.json",
-      "preservationProofSHA256": "92f159f7458eb29940ad210d1c5854651ddd973a809106cd767432794c5773bd",
+      "preservationProofSHA256": "a34171ca1d7ce7a56ca288b04fc2d1fc273a649e23e4edbadc253ea2acb0473a",
       "resourceName": "CoreGlyphsPrivate-23A341.car",
       "stockLength": 24963464,
       "stockSHA256": "413d22dbd800236f46e32004ce9e8b1ed65bcdbbcd34f8094c04c07a04840365",
+      "symbolArtworkProvenance": {
+        "carplay": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        },
+        "speaker.bluetooth.fill": {
+          "artworkResource": "MediaVolume.png",
+          "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+          "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+          "nativeAliases": {
+            "volume.1.fill": "speaker.wave.1.fill",
+            "volume.2.fill": "speaker.wave.2.fill",
+            "volume.3.fill": "speaker.wave.3.fill",
+            "volume.fill": "speaker.fill"
+          },
+          "nativeButtonTintAndBackgroundPreserved": true,
+          "outputDeviceProviderAliases": {
+            "carplay": "carplay",
+            "headphones": "headphones",
+            "hearingdevice.ear": "hearingdevice.ear",
+            "hifispeaker.2.fill": "hifispeaker.2.fill",
+            "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+            "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+            "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+            "hifispeaker.fill": "hifispeaker.fill",
+            "iphone": "iphone",
+            "macbook": "macbook",
+            "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+            "speaker.wave.2.fill": "speaker.wave.2.fill",
+            "tv.and.mediabox": "tv.and.mediabox"
+          },
+          "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+          "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+        }
+      },
       "targetPath": "/System/Library/PrivateFrameworks/SFSymbols.framework/CoreGlyphsPrivate.bundle/Assets.car",
       "themedSymbolNames": [
         "airdrop",
         "bluetooth",
         "bluetooth.slash",
         "calculator.fill",
+        "carplay",
         "network.connected.to.line.below.fill",
         "satellite.slash.fill",
         "satellite.wave.2",
-        "satellite.wave.2.fill"
+        "satellite.wave.2.fill",
+        "speaker.bluetooth.fill"
       ],
       "unrelatedNamedRenditionsPreserved": true
     },

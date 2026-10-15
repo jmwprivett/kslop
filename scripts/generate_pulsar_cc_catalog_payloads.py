@@ -110,7 +110,11 @@ PULSAR_SYMBOLS = {
     "satellite.wave.2": "StaticSatelliteAvailable.ca/standard.png",
     "satellite.wave.2.fill": "StaticSatelliteConnected.ca/standard.png",
     "flashlight.off.fill": "StaticFlashlight.ca/standard.png",
+    "flashlight.off.circle": "StaticFlashlight.ca/standard.png",
+    "flashlight.off.circle.fill": "StaticFlashlight.ca/standard.png",
     "flashlight.on.fill": "StaticFlashlight.ca/selected.png",
+    "flashlight.on.circle": "StaticFlashlight.ca/selected.png",
+    "flashlight.on.circle.fill": "StaticFlashlight.ca/selected.png",
     "camera.fill": "StaticCamera.ca/standard.png",
     "calculator.fill": "StaticCalculator.ca/standard.png",
     "qrcode.viewfinder": "StaticQrCode.ca/standard.png",
@@ -121,16 +125,38 @@ PULSAR_SYMBOLS = {
     "speaker.wave.1.fill": "MediaVolume.png",
     "speaker.wave.2.fill": "MediaVolume.png",
     "speaker.wave.3.fill": "MediaVolume.png",
+    # MRUVolumeViewController can replace its Volume*.ca package after the
+    # output-device route resolves.  MediaControls carries these exact fallback
+    # identities for the same primary/expanded slider asset.
+    "hifispeaker.fill": "MediaVolume.png",
+    "hifispeaker.2.fill": "MediaVolume.png",
+    # MRAVOutputDeviceSymbolProvider selects these additional identities for
+    # CarPlay, Bluetooth and the remaining external/local output-device types.
+    "hifispeaker.and.appletv.fill": "MediaVolume.png",
+    "hifispeaker.and.homepod.fill": "MediaVolume.png",
+    "hifispeaker.and.homepod.mini.fill": "MediaVolume.png",
+    "tv.and.mediabox": "MediaVolume.png",
+    "macbook": "MediaVolume.png",
+    "headphones": "MediaVolume.png",
+    "speaker.bluetooth.fill": "MediaVolume.png",
+    "carplay": "MediaVolume.png",
+    "iphone": "MediaVolume.png",
+    "hearingdevice.ear": "MediaVolume.png",
 }
 
 # Kept for historical priority-overlay diagnostics. Production donors declare
 # all sizes and weights, then preserve each native provider's existing key set.
-PULSAR_FULL_SIZE_SYMBOLS = set(PULSAR_SYMBOLS) - {
-    "flashlight.off.fill",
-    "flashlight.on.fill",
+FLASHLIGHT_OFF_SYMBOL_NAMES = {
+    "flashlight.off.fill", "flashlight.off.circle", "flashlight.off.circle.fill",
 }
-FLASHLIGHT_SYMBOL_NAMES = {"flashlight.off.fill", "flashlight.on.fill"}
-FLASHLIGHT_ARTWORK_SCALE = 1.50
+FLASHLIGHT_ON_SYMBOL_NAMES = {
+    "flashlight.on.fill", "flashlight.on.circle", "flashlight.on.circle.fill",
+}
+FLASHLIGHT_SYMBOL_NAMES = FLASHLIGHT_OFF_SYMBOL_NAMES | FLASHLIGHT_ON_SYMBOL_NAMES
+PULSAR_FULL_SIZE_SYMBOLS = set(PULSAR_SYMBOLS) - FLASHLIGHT_SYMBOL_NAMES
+FLASHLIGHT_ARTWORK_SCALE = 1.25
+CAMERA_SYMBOL_NAMES = {"camera.fill"}
+CAMERA_ARTWORK_SCALE = 1.30
 SYMBOL_MASK_MAXIMUM_DIMENSION = 160
 ARTWORK_CONTOUR_TOLERANCE = 0.75
 HIGH_FIDELITY_CONTOUR_SUPERSAMPLING = 8
@@ -146,7 +172,7 @@ CONNECTIVITY_CONTROL_ARTWORK_SCALES = {
     "airdrop": 1.60,
     "bluetooth": 1.60,
     "cellular": 2.00,
-    "hotspot": 2.15,
+    "hotspot": 2.00,
     "satellite": 2.15,
     "vpn": 1.27,
     "airplane": 0.90,
@@ -166,7 +192,26 @@ HIGH_FIDELITY_CONTOUR_SYMBOL_NAMES = FLASHLIGHT_SYMBOL_NAMES | {
     name for name, control in CONNECTIVITY_SYMBOL_CONTROLS.items()
     if control in HIGH_FIDELITY_CONTOUR_CONTROLS
 }
-VOLUME_SYMBOL_NAMES = {"speaker.fill", "speaker.wave.1.fill", "speaker.wave.2.fill", "speaker.wave.3.fill"}
+VOLUME_LEVEL_SYMBOL_NAMES = {
+    "speaker.fill", "speaker.wave.1.fill", "speaker.wave.2.fill", "speaker.wave.3.fill",
+}
+VOLUME_OUTPUT_DEVICE_PROVIDER_ALIASES = {
+    "speaker.wave.2.fill": "speaker.wave.2.fill",
+    "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+    "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+    "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+    "hifispeaker.2.fill": "hifispeaker.2.fill",
+    "hifispeaker.fill": "hifispeaker.fill",
+    "tv.and.mediabox": "tv.and.mediabox",
+    "macbook": "macbook",
+    "headphones": "headphones",
+    "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+    "carplay": "carplay",
+    "iphone": "iphone",
+    "hearingdevice.ear": "hearingdevice.ear",
+}
+VOLUME_OUTPUT_DEVICE_SYMBOL_NAMES = set(VOLUME_OUTPUT_DEVICE_PROVIDER_ALIASES.values())
+VOLUME_SYMBOL_NAMES = VOLUME_LEVEL_SYMBOL_NAMES | VOLUME_OUTPUT_DEVICE_SYMBOL_NAMES
 
 CONNECTIVITY_RENDITIONS = {
     "AirplaneGlyph": "StaticAirplaneMode.ca/standard.png",
@@ -831,6 +876,8 @@ def write_symbol_set(catalog: Path, name: str, png: Path, all_sizes: bool = Fals
 def symbol_artwork_scale(name: str) -> float:
     if name in FLASHLIGHT_SYMBOL_NAMES:
         return FLASHLIGHT_ARTWORK_SCALE
+    if name in CAMERA_SYMBOL_NAMES:
+        return CAMERA_ARTWORK_SCALE
     control = CONNECTIVITY_SYMBOL_CONTROLS.get(name)
     return CONNECTIVITY_CONTROL_ARTWORK_SCALES[control] if control else 1.0
 
@@ -1066,8 +1113,11 @@ def prepare_volume_artwork(renderer: Path) -> dict[str, object]:
         "nativeButtonTintAndBackgroundPreserved": True,
         "nativeAliases": {"volume.fill": "speaker.fill", "volume.1.fill": "speaker.wave.1.fill",
                           "volume.2.fill": "speaker.wave.2.fill", "volume.3.fill": "speaker.wave.3.fill"},
+        "outputDeviceProviderAliases": VOLUME_OUTPUT_DEVICE_PROVIDER_ALIASES,
         "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;"
-                            "MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings",
+                            "MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;"
+                            "MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->"
+                            "MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
     }
 
 

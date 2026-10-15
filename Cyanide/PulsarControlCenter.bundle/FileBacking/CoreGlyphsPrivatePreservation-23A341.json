@@ -1927,7 +1927,7 @@
     }
   },
   "donorCoreUIVersion": 970,
-  "donorSHA256": "b47b3d4f5849a52f432cd2acfe893462605e9c397e8e51bb1b1e29b5d46855f6",
+  "donorSHA256": "3cfcaa71e03b80dc4fd14043d232d17d5d0b215832c80a2e5cef70e802643090",
   "exactNativeFileLengthPreserved": true,
   "flashlightContourMethod": "bilinear-subpixel-opacity-plane-trace",
   "flashlightContourSupersampling": 8,
@@ -1949,7 +1949,7 @@
   "nativeStorageVersion": 17,
   "nativeSymbolCaplineAndBaselineGuidesChanged": false,
   "payloadLength": 24963464,
-  "payloadSHA256": "1143cee3a9ab005bccdc8510a775b5dc8093935e4e5babe737150f5b4de9142b",
+  "payloadSHA256": "8b6d8fc70a32d102f1819bc29b84fd367330f9bde43531d516d341a365c71e89",
   "productBuildVersion": "23A341",
   "schemaVersion": 1,
   "sourceAlphaPlanes": {
@@ -1969,6 +1969,10 @@
       122,
       255
     ],
+    "carplay": [
+      128,
+      255
+    ],
     "network.connected.to.line.below.fill": [
       122,
       255
@@ -1984,6 +1988,10 @@
     "satellite.wave.2.fill": [
       122,
       255
+    ],
+    "speaker.bluetooth.fill": [
+      128,
+      255
     ]
   },
   "sourceArtworkSHA256": {
@@ -1991,28 +1999,118 @@
     "bluetooth": "3a7e53d3614179eee49d92ba4fa30a097a80346273d25e18cdc393dba4e304b6",
     "bluetooth.slash": "3a7e53d3614179eee49d92ba4fa30a097a80346273d25e18cdc393dba4e304b6",
     "calculator.fill": "f9b2592a568f2776c1184a600dd9ef120e0022bc63372706dc2e89270160a447",
+    "carplay": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
     "network.connected.to.line.below.fill": "2c19e5b2e62cc0925fc4f86a2dbadf777c436f0208afbc074009d2b37e7a1860",
     "satellite.slash.fill": "365451829726c0f26e70df31eaacc82ada038ff39ac2dc4f478882ea86d14be2",
     "satellite.wave.2": "5dea1639f5ebcc4eb8e2ca3b3c0204ffc31dab9d718b13fb489e2bf9b63f6410",
-    "satellite.wave.2.fill": "4c0d02d695a1f9116d6652bbe6fa7d18732e4003d041be87c36fffa8986a9a01"
+    "satellite.wave.2.fill": "4c0d02d695a1f9116d6652bbe6fa7d18732e4003d041be87c36fffa8986a9a01",
+    "speaker.bluetooth.fill": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e"
   },
   "standaloneCachedImages": true,
   "stockLength": 24963464,
   "stockSHA256": "413d22dbd800236f46e32004ce9e8b1ed65bcdbbcd34f8094c04c07a04840365",
+  "symbolArtworkProvenance": {
+    "carplay": {
+      "artworkResource": "MediaVolume.png",
+      "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+      "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+      "nativeAliases": {
+        "volume.1.fill": "speaker.wave.1.fill",
+        "volume.2.fill": "speaker.wave.2.fill",
+        "volume.3.fill": "speaker.wave.3.fill",
+        "volume.fill": "speaker.fill"
+      },
+      "nativeButtonTintAndBackgroundPreserved": true,
+      "outputDeviceProviderAliases": {
+        "carplay": "carplay",
+        "headphones": "headphones",
+        "hearingdevice.ear": "hearingdevice.ear",
+        "hifispeaker.2.fill": "hifispeaker.2.fill",
+        "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+        "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+        "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+        "hifispeaker.fill": "hifispeaker.fill",
+        "iphone": "iphone",
+        "macbook": "macbook",
+        "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+        "speaker.wave.2.fill": "speaker.wave.2.fill",
+        "tv.and.mediabox": "tv.and.mediabox"
+      },
+      "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+    },
+    "speaker.bluetooth.fill": {
+      "artworkResource": "MediaVolume.png",
+      "artworkSHA256": "e4d5d202b7326db5342fb15a05e8410e89439564b25bb12690b2de7475b7632e",
+      "consumerEvidence": "MediaControls.NowPlayingVolumeControlsView.slider:MediaControls.Slider;MediaControls-Swift-volume-symbol-constants-and-native-name_aliases.strings;MRUVolumeViewController.updateSliderAsset->MRUOutputDeviceAsset->MRAVOutputDeviceSymbolProvider.symbolNameForOutputDevices",
+      "nativeAliases": {
+        "volume.1.fill": "speaker.wave.1.fill",
+        "volume.2.fill": "speaker.wave.2.fill",
+        "volume.3.fill": "speaker.wave.3.fill",
+        "volume.fill": "speaker.fill"
+      },
+      "nativeButtonTintAndBackgroundPreserved": true,
+      "outputDeviceProviderAliases": {
+        "carplay": "carplay",
+        "headphones": "headphones",
+        "hearingdevice.ear": "hearingdevice.ear",
+        "hifispeaker.2.fill": "hifispeaker.2.fill",
+        "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+        "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+        "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+        "hifispeaker.fill": "hifispeaker.fill",
+        "iphone": "iphone",
+        "macbook": "macbook",
+        "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+        "speaker.wave.2.fill": "speaker.wave.2.fill",
+        "tv.and.mediabox": "tv.and.mediabox"
+      },
+      "source": "bundled-upstream-Pulsar-Volume-vector-layer-graph",
+      "sourceMainSHA256": "8057b160e77f47e4331e41c4f5229674c1c8b522f8f4b025f2ad14454a5a27e5"
+    }
+  },
   "symbolArtworkScale": {
     "airdrop": 1.6,
     "bluetooth": 1.6,
     "bluetooth.slash": 1.6,
     "calculator.fill": 1.0,
+    "carplay": 1.0,
     "network.connected.to.line.below.fill": 1.27,
     "satellite.slash.fill": 2.15,
     "satellite.wave.2": 2.15,
-    "satellite.wave.2.fill": 2.15
+    "satellite.wave.2.fill": 2.15,
+    "speaker.bluetooth.fill": 1.0
   },
   "symbolOpacityEncoding": "native-monochrome-multicolor-hierarchical-CSS-annotations",
   "targetPath": "/System/Library/PrivateFrameworks/SFSymbols.framework/CoreGlyphsPrivate.bundle/Assets.car",
-  "targetRenditionCount": 88,
+  "targetRenditionCount": 110,
   "targetRenditions": [
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 4363,
+      "donorBlock": 142,
+      "name": "carplay",
+      "nativeLayout": 1017,
+      "originalLength": 1095,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
     {
       "attributes": {
         "1": 85,
@@ -2032,7 +2130,7 @@
         "27": 1
       },
       "block": 3627,
-      "donorBlock": 78,
+      "donorBlock": 114,
       "name": "calculator.fill",
       "nativeLayout": 1017,
       "originalLength": 947,
@@ -2058,7 +2156,7 @@
         "27": 1
       },
       "block": 5078,
-      "donorBlock": 104,
+      "donorBlock": 158,
       "name": "airdrop",
       "nativeLayout": 1017,
       "originalLength": 1779,
@@ -2084,7 +2182,7 @@
         "27": 1
       },
       "block": 4113,
-      "donorBlock": 90,
+      "donorBlock": 140,
       "name": "bluetooth.slash",
       "nativeLayout": 1017,
       "originalLength": 1322,
@@ -2110,7 +2208,7 @@
         "27": 1
       },
       "block": 4771,
-      "donorBlock": 98,
+      "donorBlock": 154,
       "name": "satellite.slash.fill",
       "nativeLayout": 1017,
       "originalLength": 1561,
@@ -2136,7 +2234,7 @@
         "27": 1
       },
       "block": 4789,
-      "donorBlock": 102,
+      "donorBlock": 146,
       "name": "satellite.wave.2",
       "nativeLayout": 1017,
       "originalLength": 1842,
@@ -2162,7 +2260,7 @@
         "27": 1
       },
       "block": 5500,
-      "donorBlock": 110,
+      "donorBlock": 168,
       "name": "bluetooth",
       "nativeLayout": 1017,
       "originalLength": 950,
@@ -2188,7 +2286,7 @@
         "27": 1
       },
       "block": 4135,
-      "donorBlock": 92,
+      "donorBlock": 132,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1017,
       "originalLength": 2017,
@@ -2214,12 +2312,64 @@
         "27": 1
       },
       "block": 4109,
-      "donorBlock": 88,
+      "donorBlock": 128,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1017,
       "originalLength": 1706,
       "payloadLayout": 1017,
       "payloadLength": 3676
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 1,
+        "27": 1
+      },
+      "block": 6167,
+      "donorBlock": 150,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1141,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 7456,
+      "donorBlock": 838,
+      "name": "carplay",
+      "nativeLayout": 1017,
+      "originalLength": 1111,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
     },
     {
       "attributes": {
@@ -2240,7 +2390,7 @@
         "27": 1
       },
       "block": 6711,
-      "donorBlock": 488,
+      "donorBlock": 808,
       "name": "calculator.fill",
       "nativeLayout": 1017,
       "originalLength": 938,
@@ -2266,7 +2416,7 @@
         "27": 1
       },
       "block": 8167,
-      "donorBlock": 520,
+      "donorBlock": 862,
       "name": "airdrop",
       "nativeLayout": 1017,
       "originalLength": 1775,
@@ -2292,7 +2442,7 @@
         "27": 1
       },
       "block": 7254,
-      "donorBlock": 506,
+      "donorBlock": 826,
       "name": "bluetooth.slash",
       "nativeLayout": 1017,
       "originalLength": 1350,
@@ -2318,7 +2468,7 @@
         "27": 1
       },
       "block": 7866,
-      "donorBlock": 514,
+      "donorBlock": 858,
       "name": "satellite.slash.fill",
       "nativeLayout": 1017,
       "originalLength": 1584,
@@ -2344,7 +2494,7 @@
         "27": 1
       },
       "block": 7820,
-      "donorBlock": 512,
+      "donorBlock": 856,
       "name": "satellite.wave.2",
       "nativeLayout": 1017,
       "originalLength": 1866,
@@ -2370,7 +2520,7 @@
         "27": 1
       },
       "block": 8595,
-      "donorBlock": 526,
+      "donorBlock": 872,
       "name": "bluetooth",
       "nativeLayout": 1017,
       "originalLength": 985,
@@ -2396,7 +2546,7 @@
         "27": 1
       },
       "block": 7121,
-      "donorBlock": 498,
+      "donorBlock": 836,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1017,
       "originalLength": 2036,
@@ -2422,12 +2572,90 @@
         "27": 1
       },
       "block": 7207,
-      "donorBlock": 484,
+      "donorBlock": 832,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1017,
       "originalLength": 1723,
       "payloadLayout": 1017,
       "payloadLength": 3676
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 4,
+        "27": 1
+      },
+      "block": 9273,
+      "donorBlock": 854,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1191,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 11610,
+      "donorBlock": 958,
+      "name": "carplay",
+      "nativeLayout": 1017,
+      "originalLength": 1149,
+      "payloadLayout": 1017,
+      "payloadLength": 3558
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 11588,
+      "donorBlock": 956,
+      "name": "carplay",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 460
     },
     {
       "attributes": {
@@ -2448,7 +2676,7 @@
         "27": 2
       },
       "block": 10142,
-      "donorBlock": 540,
+      "donorBlock": 898,
       "name": "calculator.fill",
       "nativeLayout": 1017,
       "originalLength": 981,
@@ -2474,7 +2702,7 @@
         "27": 2
       },
       "block": 10140,
-      "donorBlock": 538,
+      "donorBlock": 896,
       "name": "calculator.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2500,7 +2728,7 @@
         "27": 2
       },
       "block": 13047,
-      "donorBlock": 586,
+      "donorBlock": 978,
       "name": "airdrop",
       "nativeLayout": 1017,
       "originalLength": 1823,
@@ -2526,7 +2754,7 @@
         "27": 2
       },
       "block": 13057,
-      "donorBlock": 604,
+      "donorBlock": 1006,
       "name": "airdrop",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2552,7 +2780,7 @@
         "27": 2
       },
       "block": 11218,
-      "donorBlock": 568,
+      "donorBlock": 950,
       "name": "bluetooth.slash",
       "nativeLayout": 1017,
       "originalLength": 1400,
@@ -2578,7 +2806,7 @@
         "27": 2
       },
       "block": 11226,
-      "donorBlock": 558,
+      "donorBlock": 948,
       "name": "bluetooth.slash",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2604,7 +2832,7 @@
         "27": 2
       },
       "block": 12439,
-      "donorBlock": 578,
+      "donorBlock": 982,
       "name": "satellite.slash.fill",
       "nativeLayout": 1017,
       "originalLength": 1613,
@@ -2630,7 +2858,7 @@
         "27": 2
       },
       "block": 12457,
-      "donorBlock": 478,
+      "donorBlock": 990,
       "name": "satellite.slash.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2656,7 +2884,7 @@
         "27": 2
       },
       "block": 12455,
-      "donorBlock": 592,
+      "donorBlock": 988,
       "name": "satellite.wave.2",
       "nativeLayout": 1017,
       "originalLength": 1908,
@@ -2682,7 +2910,7 @@
         "27": 2
       },
       "block": 12453,
-      "donorBlock": 590,
+      "donorBlock": 980,
       "name": "satellite.wave.2",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2708,7 +2936,7 @@
         "27": 2
       },
       "block": 13897,
-      "donorBlock": 584,
+      "donorBlock": 1018,
       "name": "bluetooth",
       "nativeLayout": 1017,
       "originalLength": 1027,
@@ -2734,7 +2962,7 @@
         "27": 2
       },
       "block": 13895,
-      "donorBlock": 616,
+      "donorBlock": 976,
       "name": "bluetooth",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2760,7 +2988,7 @@
         "27": 2
       },
       "block": 11156,
-      "donorBlock": 560,
+      "donorBlock": 936,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1017,
       "originalLength": 2120,
@@ -2786,7 +3014,7 @@
         "27": 2
       },
       "block": 11164,
-      "donorBlock": 570,
+      "donorBlock": 944,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2812,7 +3040,7 @@
         "27": 2
       },
       "block": 11081,
-      "donorBlock": 556,
+      "donorBlock": 926,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1017,
       "originalLength": 1762,
@@ -2838,12 +3066,90 @@
         "27": 2
       },
       "block": 11113,
-      "donorBlock": 554,
+      "donorBlock": 924,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
       "payloadLayout": 0,
       "payloadLength": 714
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 15259,
+      "donorBlock": 968,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1221,
+      "payloadLayout": 1017,
+      "payloadLength": 3558
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 15257,
+      "donorBlock": 966,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 460
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 16732,
+      "donorBlock": 1074,
+      "name": "carplay",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 478
     },
     {
       "attributes": {
@@ -2864,7 +3170,7 @@
         "27": 2
       },
       "block": 15998,
-      "donorBlock": 620,
+      "donorBlock": 1040,
       "name": "calculator.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2890,7 +3196,7 @@
         "27": 2
       },
       "block": 17441,
-      "donorBlock": 652,
+      "donorBlock": 1096,
       "name": "airdrop",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2916,7 +3222,7 @@
         "27": 2
       },
       "block": 16530,
-      "donorBlock": 640,
+      "donorBlock": 1070,
       "name": "bluetooth.slash",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2942,7 +3248,7 @@
         "27": 2
       },
       "block": 17148,
-      "donorBlock": 648,
+      "donorBlock": 1064,
       "name": "satellite.slash.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2968,7 +3274,7 @@
         "27": 2
       },
       "block": 17146,
-      "donorBlock": 646,
+      "donorBlock": 1092,
       "name": "satellite.wave.2",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -2994,7 +3300,7 @@
         "27": 2
       },
       "block": 17859,
-      "donorBlock": 656,
+      "donorBlock": 1098,
       "name": "bluetooth",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3020,7 +3326,7 @@
         "27": 2
       },
       "block": 16451,
-      "donorBlock": 642,
+      "donorBlock": 974,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3046,12 +3352,64 @@
         "27": 2
       },
       "block": 16485,
-      "donorBlock": 632,
+      "donorBlock": 1056,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
       "payloadLayout": 0,
       "payloadLength": 796
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 18544,
+      "donorBlock": 1080,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 478
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 19825,
+      "donorBlock": 796,
+      "name": "carplay",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 514
     },
     {
       "attributes": {
@@ -3072,7 +3430,7 @@
         "27": 2
       },
       "block": 19078,
-      "donorBlock": 668,
+      "donorBlock": 1118,
       "name": "calculator.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3098,7 +3456,7 @@
         "27": 2
       },
       "block": 20512,
-      "donorBlock": 700,
+      "donorBlock": 1176,
       "name": "airdrop",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3124,7 +3482,7 @@
         "27": 2
       },
       "block": 19615,
-      "donorBlock": 680,
+      "donorBlock": 1144,
       "name": "bluetooth.slash",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3150,7 +3508,7 @@
         "27": 2
       },
       "block": 20245,
-      "donorBlock": 694,
+      "donorBlock": 1158,
       "name": "satellite.slash.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3176,7 +3534,7 @@
         "27": 2
       },
       "block": 20243,
-      "donorBlock": 698,
+      "donorBlock": 1174,
       "name": "satellite.wave.2",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3202,7 +3560,7 @@
         "27": 2
       },
       "block": 20963,
-      "donorBlock": 706,
+      "donorBlock": 1188,
       "name": "bluetooth",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3228,7 +3586,7 @@
         "27": 2
       },
       "block": 19593,
-      "donorBlock": 682,
+      "donorBlock": 1130,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3254,12 +3612,64 @@
         "27": 2
       },
       "block": 19578,
-      "donorBlock": 678,
+      "donorBlock": 1132,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
       "payloadLayout": 0,
       "payloadLength": 936
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 21617,
+      "donorBlock": 1160,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 514
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 22914,
+      "donorBlock": 1390,
+      "name": "carplay",
+      "nativeLayout": 1017,
+      "originalLength": 1466,
+      "payloadLayout": 1017,
+      "payloadLength": 3534
     },
     {
       "attributes": {
@@ -3280,7 +3690,7 @@
         "27": 2
       },
       "block": 22177,
-      "donorBlock": 792,
+      "donorBlock": 1358,
       "name": "calculator.fill",
       "nativeLayout": 1017,
       "originalLength": 1660,
@@ -3306,7 +3716,7 @@
         "27": 2
       },
       "block": 23629,
-      "donorBlock": 830,
+      "donorBlock": 1394,
       "name": "airdrop",
       "nativeLayout": 1017,
       "originalLength": 1949,
@@ -3332,7 +3742,7 @@
         "27": 2
       },
       "block": 22720,
-      "donorBlock": 824,
+      "donorBlock": 1384,
       "name": "bluetooth.slash",
       "nativeLayout": 1017,
       "originalLength": 1841,
@@ -3358,7 +3768,7 @@
         "27": 2
       },
       "block": 23338,
-      "donorBlock": 826,
+      "donorBlock": 1398,
       "name": "satellite.slash.fill",
       "nativeLayout": 1017,
       "originalLength": 2441,
@@ -3384,7 +3794,7 @@
         "27": 2
       },
       "block": 23336,
-      "donorBlock": 816,
+      "donorBlock": 1396,
       "name": "satellite.wave.2",
       "nativeLayout": 1017,
       "originalLength": 2355,
@@ -3410,7 +3820,7 @@
         "27": 2
       },
       "block": 24062,
-      "donorBlock": 788,
+      "donorBlock": 1326,
       "name": "bluetooth",
       "nativeLayout": 1017,
       "originalLength": 1290,
@@ -3436,7 +3846,7 @@
         "27": 2
       },
       "block": 22675,
-      "donorBlock": 820,
+      "donorBlock": 1378,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1017,
       "originalLength": 2671,
@@ -3462,12 +3872,64 @@
         "27": 2
       },
       "block": 22663,
-      "donorBlock": 812,
+      "donorBlock": 1370,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1017,
       "originalLength": 2197,
       "payloadLayout": 1017,
       "payloadLength": 3646
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 5,
+        "27": 2
+      },
+      "block": 24728,
+      "donorBlock": 1392,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1621,
+      "payloadLayout": 1017,
+      "payloadLength": 3534
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 26007,
+      "donorBlock": 2244,
+      "name": "carplay",
+      "nativeLayout": 1017,
+      "originalLength": 1111,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
     },
     {
       "attributes": {
@@ -3488,7 +3950,7 @@
         "27": 1
       },
       "block": 25253,
-      "donorBlock": 1316,
+      "donorBlock": 2214,
       "name": "calculator.fill",
       "nativeLayout": 1017,
       "originalLength": 936,
@@ -3514,7 +3976,7 @@
         "27": 1
       },
       "block": 26722,
-      "donorBlock": 1348,
+      "donorBlock": 2268,
       "name": "airdrop",
       "nativeLayout": 1017,
       "originalLength": 1781,
@@ -3540,7 +4002,7 @@
         "27": 1
       },
       "block": 25817,
-      "donorBlock": 1334,
+      "donorBlock": 2232,
       "name": "bluetooth.slash",
       "nativeLayout": 1017,
       "originalLength": 1348,
@@ -3566,7 +4028,7 @@
         "27": 1
       },
       "block": 26423,
-      "donorBlock": 1342,
+      "donorBlock": 2264,
       "name": "satellite.slash.fill",
       "nativeLayout": 1017,
       "originalLength": 1605,
@@ -3592,7 +4054,7 @@
         "27": 1
       },
       "block": 26431,
-      "donorBlock": 1340,
+      "donorBlock": 2262,
       "name": "satellite.wave.2",
       "nativeLayout": 1017,
       "originalLength": 1854,
@@ -3618,7 +4080,7 @@
         "27": 1
       },
       "block": 27130,
-      "donorBlock": 1354,
+      "donorBlock": 2278,
       "name": "bluetooth",
       "nativeLayout": 1017,
       "originalLength": 970,
@@ -3644,7 +4106,7 @@
         "27": 1
       },
       "block": 25778,
-      "donorBlock": 1326,
+      "donorBlock": 2242,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1017,
       "originalLength": 2031,
@@ -3670,12 +4132,64 @@
         "27": 1
       },
       "block": 25754,
-      "donorBlock": 1312,
+      "donorBlock": 2238,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1017,
       "originalLength": 1766,
       "payloadLayout": 1017,
       "payloadLength": 3676
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 59,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 1,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 9,
+        "27": 1
+      },
+      "block": 27825,
+      "donorBlock": 2260,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1017,
+      "originalLength": 1185,
+      "payloadLayout": 1017,
+      "payloadLength": 3529
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 39249,
+      "donorBlock": 2717,
+      "name": "carplay",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1019
     },
     {
       "attributes": {
@@ -3696,7 +4210,7 @@
         "27": 2
       },
       "block": 38509,
-      "donorBlock": 1582,
+      "donorBlock": 2669,
       "name": "calculator.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3722,7 +4236,7 @@
         "27": 2
       },
       "block": 39959,
-      "donorBlock": 1512,
+      "donorBlock": 2554,
       "name": "airdrop",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3748,7 +4262,7 @@
         "27": 2
       },
       "block": 39042,
-      "donorBlock": 1603,
+      "donorBlock": 2703,
       "name": "bluetooth.slash",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3774,7 +4288,7 @@
         "27": 2
       },
       "block": 39661,
-      "donorBlock": 1609,
+      "donorBlock": 2727,
       "name": "satellite.slash.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3800,7 +4314,7 @@
         "27": 2
       },
       "block": 39653,
-      "donorBlock": 1607,
+      "donorBlock": 2725,
       "name": "satellite.wave.2",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3826,7 +4340,7 @@
         "27": 2
       },
       "block": 40383,
-      "donorBlock": 1629,
+      "donorBlock": 2745,
       "name": "bluetooth",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3852,7 +4366,7 @@
         "27": 2
       },
       "block": 39000,
-      "donorBlock": 1605,
+      "donorBlock": 2707,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3878,12 +4392,64 @@
         "27": 2
       },
       "block": 38994,
-      "donorBlock": 1597,
+      "donorBlock": 2701,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
       "payloadLayout": 0,
       "payloadLength": 1882
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 41065,
+      "donorBlock": 2721,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1019
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 42234,
+      "donorBlock": 2795,
+      "name": "carplay",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1157
     },
     {
       "attributes": {
@@ -3904,7 +4470,7 @@
         "27": 2
       },
       "block": 41576,
-      "donorBlock": 1621,
+      "donorBlock": 2763,
       "name": "calculator.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3930,7 +4496,7 @@
         "27": 2
       },
       "block": 43058,
-      "donorBlock": 1659,
+      "donorBlock": 2799,
       "name": "airdrop",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3956,7 +4522,7 @@
         "27": 2
       },
       "block": 42143,
-      "donorBlock": 1653,
+      "donorBlock": 2789,
       "name": "bluetooth.slash",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -3982,7 +4548,7 @@
         "27": 2
       },
       "block": 42756,
-      "donorBlock": 1655,
+      "donorBlock": 2803,
       "name": "satellite.slash.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4008,7 +4574,7 @@
         "27": 2
       },
       "block": 42754,
-      "donorBlock": 1645,
+      "donorBlock": 2801,
       "name": "satellite.wave.2",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4034,7 +4600,7 @@
         "27": 2
       },
       "block": 43478,
-      "donorBlock": 1617,
+      "donorBlock": 2731,
       "name": "bluetooth",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4060,7 +4626,7 @@
         "27": 2
       },
       "block": 42111,
-      "donorBlock": 1649,
+      "donorBlock": 2783,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4086,12 +4652,64 @@
         "27": 2
       },
       "block": 42037,
-      "donorBlock": 1641,
+      "donorBlock": 2775,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
       "payloadLayout": 0,
       "payloadLength": 2099
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 44162,
+      "donorBlock": 2797,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1157
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 0,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 26118,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 45423,
+      "donorBlock": 2869,
+      "name": "carplay",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1268
     },
     {
       "attributes": {
@@ -4112,7 +4730,7 @@
         "27": 2
       },
       "block": 44687,
-      "donorBlock": 1673,
+      "donorBlock": 2839,
       "name": "calculator.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4138,7 +4756,7 @@
         "27": 2
       },
       "block": 46043,
-      "donorBlock": 1711,
+      "donorBlock": 2891,
       "name": "airdrop",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4164,7 +4782,7 @@
         "27": 2
       },
       "block": 45228,
-      "donorBlock": 1669,
+      "donorBlock": 2861,
       "name": "bluetooth.slash",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4190,7 +4808,7 @@
         "27": 2
       },
       "block": 45855,
-      "donorBlock": 1697,
+      "donorBlock": 2879,
       "name": "satellite.slash.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4216,7 +4834,7 @@
         "27": 2
       },
       "block": 45853,
-      "donorBlock": 1705,
+      "donorBlock": 2877,
       "name": "satellite.wave.2",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4242,7 +4860,7 @@
         "27": 2
       },
       "block": 46567,
-      "donorBlock": 1715,
+      "donorBlock": 2899,
       "name": "bluetooth",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4268,7 +4886,7 @@
         "27": 2
       },
       "block": 45200,
-      "donorBlock": 1691,
+      "donorBlock": 2857,
       "name": "network.connected.to.line.below.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
@@ -4294,12 +4912,38 @@
         "27": 2
       },
       "block": 45174,
-      "donorBlock": 1687,
+      "donorBlock": 2851,
       "name": "satellite.wave.2.fill",
       "nativeLayout": 1003,
       "originalLength": 338,
       "payloadLayout": 0,
       "payloadLength": 2471
+    },
+    {
+      "attributes": {
+        "1": 85,
+        "2": 181,
+        "4": 5,
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 0,
+        "12": 3,
+        "13": 0,
+        "15": 0,
+        "16": 0,
+        "17": 28461,
+        "25": 5,
+        "26": 4,
+        "27": 2
+      },
+      "block": 46440,
+      "donorBlock": 2873,
+      "name": "speaker.bluetooth.fill",
+      "nativeLayout": 1003,
+      "originalLength": 338,
+      "payloadLayout": 0,
+      "payloadLength": 1268
     }
   ],
   "themedSymbolNames": [
@@ -4307,11 +4951,13 @@
     "bluetooth",
     "bluetooth.slash",
     "calculator.fill",
+    "carplay",
     "network.connected.to.line.below.fill",
     "satellite.slash.fill",
     "satellite.wave.2",
-    "satellite.wave.2.fill"
+    "satellite.wave.2.fill",
+    "speaker.bluetooth.fill"
   ],
-  "unrelatedBlockCount": 44740,
-  "unrelatedBlocksSHA256": "410ea660550152b4fb9b4c0d652b7fab7b681b5dd3922b88648a73021334a276"
+  "unrelatedBlockCount": 44718,
+  "unrelatedBlocksSHA256": "a73cdfaec48c21b9c2813819989d075ef4acdbb8472e464f2ff784f08d5b9155"
 }

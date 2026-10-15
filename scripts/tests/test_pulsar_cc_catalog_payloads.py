@@ -177,17 +177,64 @@ class PulsarCCCatalogPayloadTests(unittest.TestCase):
                     self.assertTrue(any(110 <= value <= 130 for row in actual for value in row))
 
     def test_swift_volume_symbols_and_connectivity_scale_are_file_backed(self):
-        public = next(catalog for catalog in self.catalog_manifest["catalogs"]
+        symbol_catalogs = [catalog for catalog in self.catalog_manifest["catalogs"]
+                           if catalog["targetPath"] in (
+                               GENERATOR.CORE_GLYPHS_TARGET,
+                               GENERATOR.CORE_GLYPHS_PRIVATE_TARGET)]
+        public = next(catalog for catalog in symbol_catalogs
                       if catalog["targetPath"] == GENERATOR.CORE_GLYPHS_TARGET)
-        proof = json.loads((GENERATOR.OUTPUT / public["preservationProofResource"]).read_text())
-        self.assertTrue(GENERATOR.VOLUME_SYMBOL_NAMES <= set(public["themedSymbolNames"]))
+        private = next(catalog for catalog in symbol_catalogs
+                       if catalog["targetPath"] == GENERATOR.CORE_GLYPHS_PRIVATE_TARGET)
+        proofs = {catalog["targetPath"]: json.loads(
+            (GENERATOR.OUTPUT / catalog["preservationProofResource"]).read_text())
+            for catalog in symbol_catalogs}
+        self.assertEqual(
+            GENERATOR.VOLUME_OUTPUT_DEVICE_PROVIDER_ALIASES,
+            {
+                "speaker.wave.2.fill": "speaker.wave.2.fill",
+                "hifispeaker.and.appletv.fill": "hifispeaker.and.appletv.fill",
+                "hifispeaker.and.homepod.fill": "hifispeaker.and.homepod.fill",
+                "hifispeaker.and.homepodmini.fill": "hifispeaker.and.homepod.mini.fill",
+                "hifispeaker.2.fill": "hifispeaker.2.fill",
+                "hifispeaker.fill": "hifispeaker.fill",
+                "tv.and.mediabox": "tv.and.mediabox",
+                "macbook": "macbook",
+                "headphones": "headphones",
+                "speaker.bluetooth.fill": "speaker.bluetooth.fill",
+                "carplay": "carplay",
+                "iphone": "iphone",
+                "hearingdevice.ear": "hearingdevice.ear",
+            },
+        )
+        self.assertTrue(GENERATOR.VOLUME_LEVEL_SYMBOL_NAMES < GENERATOR.VOLUME_SYMBOL_NAMES)
+        self.assertEqual(
+            GENERATOR.VOLUME_OUTPUT_DEVICE_SYMBOL_NAMES,
+            set(GENERATOR.VOLUME_OUTPUT_DEVICE_PROVIDER_ALIASES.values()),
+        )
+        self.assertTrue(GENERATOR.VOLUME_SYMBOL_NAMES <= set().union(
+            *(set(catalog["themedSymbolNames"]) for catalog in symbol_catalogs)))
+        self.assertTrue({"speaker.bluetooth.fill", "carplay"} <= set(private["themedSymbolNames"]))
         for name in GENERATOR.VOLUME_SYMBOL_NAMES:
-            provenance = public["symbolArtworkProvenance"][name]
+            catalog = next(catalog for catalog in symbol_catalogs
+                           if name in catalog["themedSymbolNames"])
+            proof = proofs[catalog["targetPath"]]
+            provenance = proof["symbolArtworkProvenance"][name]
             self.assertEqual(provenance["sourceMainSHA256"], GENERATOR.sha256(ARTWORK / "Volume.ca/main.caml"))
             self.assertEqual(provenance["artworkSHA256"], GENERATOR.sha256(ARTWORK / "MediaVolume.png"))
             self.assertEqual(proof["symbolArtworkScale"][name], 1.0)
+        self.assertNotIn("speaker.minus.fill", public["themedSymbolNames"])
+        self.assertNotIn("speaker.plus.fill", public["themedSymbolNames"])
+        proof = proofs[GENERATOR.CORE_GLYPHS_TARGET]
         self.assertEqual(proof["symbolArtworkScale"]["wifi"], 1.60)
-        self.assertEqual(proof["symbolArtworkScale"]["flashlight.off.fill"], 1.50)
+        self.assertEqual(GENERATOR.FLASHLIGHT_ON_SYMBOL_NAMES, {
+            "flashlight.on.fill", "flashlight.on.circle", "flashlight.on.circle.fill"})
+        self.assertEqual(GENERATOR.FLASHLIGHT_OFF_SYMBOL_NAMES, {
+            "flashlight.off.fill", "flashlight.off.circle", "flashlight.off.circle.fill"})
+        for name in GENERATOR.FLASHLIGHT_SYMBOL_NAMES:
+            self.assertEqual(proof["symbolArtworkScale"][name], 1.25)
+        self.assertEqual(proof["symbolArtworkScale"]["camera.fill"], 1.30)
+        self.assertEqual(proof["symbolArtworkScale"]["personalhotspot"], 2.00)
+        self.assertEqual(proof["symbolArtworkScale"]["personalhotspot.slash"], 2.00)
         self.assertFalse(proof["nativeButtonGeometryChanged"])
 
     def test_per_control_optical_sizing_proofs_cover_every_native_connectivity_rendition(self):
@@ -253,7 +300,7 @@ class PulsarCCCatalogPayloadTests(unittest.TestCase):
                          {record.block for record in native_records})
         self.assertEqual(set(validation["templateLayouts"]), GENERATOR.FLASHLIGHT_SYMBOL_NAMES)
         for layout in validation["templateLayouts"].values():
-            self.assertEqual(layout["effectiveScale"], 1.50)
+            self.assertEqual(layout["effectiveScale"], GENERATOR.FLASHLIGHT_ARTWORK_SCALE)
             self.assertTrue(layout["completeAuthoredAlphaInsideSymbolMargins"])
 
     @unittest.skipUnless(HOST_ASSETS, "requires macOS CoreUI")
