@@ -62,6 +62,11 @@ static const uint64_t CNDUatUnslidIOGPUConstSize = 0x6f50ull;
 // so the table POINTER lives at __DATA_CONST + 0x7b0.
 static const uint64_t CNDUatUnslidIOGPUDispatchPtr = 0xfffffff0080667b0ull;
 static const uint32_t CNDUatIOGPUSelectorCount = 0x29;
+// Two user-client methods confirmed by disassembly (they read
+// IOExternalMethodArguments at [x2+0x20] / [x2+0x58]).  Their addresses, once
+// slid, identify the dispatch table inside __DATA_CONST by value.
+static const uint64_t CNDUatUnslidIOGPUHandlerA = 0xfffffff00a4ffb74ull;
+static const uint64_t CNDUatUnslidIOGPUHandlerB = 0xfffffff00a5002d4ull;
 
 // The driver's debug byte.  From commitUnmaps:
 //   adrp x8, 0xfffffff00b393000 ; add x8, x8, #0x4f8 ; ldrb w8, [x8, #0x10]
@@ -349,6 +354,58 @@ static void CNDUatObserverRunWithMode(int enable,
         report[@"dispatchRecords"] = records;
         report[@"dispatchRecordCount"] = @(records.count);
         report[@"dispatchConstAddress"] = @(constAddr);
+    }
+
+    // Find the user-client dispatch table by value: a fixed-up table must
+    // contain the slid address of a known handler.  This scans a known section
+    // for a known value, not speculative kernel addresses.
+    {
+        uint64_t constAddr = CNDUatUnslidIOGPUConst + slide;
+        size_t constSize = (size_t)CNDUatUnslidIOGPUConstSize;
+        uint8_t *blob = (uint8_t *)malloc(constSize);
+        if (blob != NULL && CNDUatRead(&api, constAddr, blob, constSize)) {
+            uint64_t targets[2] = {
+                CNDUatUnslidIOGPUHandlerA + slide,
+                CNDUatUnslidIOGPUHandlerB + slide,
+            };
+            NSInteger hitOffset = -1;
+            for (size_t off = 0; off + 8 <= constSize; off += 8) {
+                uint64_t v = 0;
+                memcpy(&v, blob + off, 8);
+                for (int t = 0; t < 2; t++) {
+                    if ((v & 0x0000FFFFFFFFFFFFull) ==
+                        (targets[t] & 0x0000FFFFFFFFFFFFull)) {
+                        hitOffset = (NSInteger)off;
+                        break;
+                    }
+                }
+                if (hitOffset >= 0) break;
+            }
+            report[@"handlerTableHitOffset"] = @(hitOffset);
+            if (hitOffset >= 0) {
+                // Assume 24-byte records; back up to the start of the table
+                // (the hit may be any selector), then dump generously.
+                size_t base = (size_t)hitOffset & ~7ull;
+                size_t start = base > 24 * 8 ? base - 24 * 8 : 0;
+                NSMutableArray *rows = [NSMutableArray array];
+                for (size_t off = start; off + 24 <= constSize; off += 24) {
+                    uint64_t fn = 0;
+                    uint32_t a = 0, b = 0, c = 0, d = 0;
+                    memcpy(&fn, blob + off, 8);
+                    memcpy(&a, blob + off + 8, 4);
+                    memcpy(&b, blob + off + 12, 4);
+                    memcpy(&c, blob + off + 16, 4);
+                    memcpy(&d, blob + off + 20, 4);
+                    if (fn == 0 && a == 0 && b == 0 && c == 0 && d == 0) continue;
+                    [rows addObject:@{ @"offset": @(off),
+                                       @"handler": @(fn & 0x0000FFFFFFFFFFFFull),
+                                       @"scalarIn": @(a), @"structIn": @(b),
+                                       @"scalarOut": @(c), @"structOut": @(d) }];
+                }
+                report[@"handlerTable"] = rows;
+            }
+        }
+        free(blob);
     }
 
     // Follow the dispatcher's table pointer and dump the table itself.
