@@ -41,6 +41,28 @@ static const uint64_t CNDUatUnslidCommitUnmaps = 0xfffffff0089f4ba4ull;
 static const uint32_t CNDUatPacibsp = 0xd503237full;
 // `IOUAT::prepareFWUnmap` - the deferred-firmware-unmap entry point.
 static const uint64_t CNDUatUnslidPrepareFwUnmap = 0xfffffff0089f6558ull;
+// AGXG17P: AGXSecureGart::unmapWithAddress - prologue is pacibsp; the
+// deferred-vs-direct decision below is inside this function.
+static const uint64_t CNDUatUnslidGartUnmapWithAddress = 0xfffffff008b2c024ull;
+// Global feature byte that selects the path:
+//   adrp x25, 0xfffffff00b429000 ; ... ldrb w9, [x25, #0xae0] ; tbz w9,#0
+// bit 0 set  -> vtable/queue path (deferred)
+// bit 0 clear-> direct AGXUAT::unmap call
+static const uint64_t CNDUatUnslidGartFeatureByte = 0xfffffff00b429ae0ull;
+
+// IOGPUFamily geometry in the pinned image.  The user-client dispatch table
+// lives in __DATA_CONST,__const and is only resolvable in the live kernel,
+// because the kernel-collection fixups that fill it in are not applied on disk.
+static const uint64_t CNDUatUnslidIOGPUText = 0xfffffff00a4f90a0ull;
+static const uint64_t CNDUatUnslidIOGPUTextSize = 0x42eccull;
+static const uint64_t CNDUatUnslidIOGPUConst = 0xfffffff0080669f0ull;
+static const uint64_t CNDUatUnslidIOGPUConstSize = 0x6f50ull;
+// Selector dispatcher found by code shape at unmap+0x...3128c:
+//   cmp w1, #0x29 ; ... ; ldr x1, [x1, #0x7b0]
+// so the table POINTER lives at __DATA_CONST + 0x7b0.
+static const uint64_t CNDUatUnslidIOGPUDispatchPtr = 0xfffffff0080667b0ull;
+static const uint32_t CNDUatIOGPUSelectorCount = 0x29;
+
 // The driver's debug byte.  From commitUnmaps:
 //   adrp x8, 0xfffffff00b393000 ; add x8, x8, #0x4f8 ; ldrb w8, [x8, #0x10]
 static const uint64_t CNDUatUnslidDebugByte = 0xfffffff00b393508ull;
@@ -249,6 +271,121 @@ static void CNDUatObserverRunWithMode(int enable,
             completion(report);
         }
         return;
+    }
+
+    // Witness 3: AGXG17P::AGXSecureGart::unmapWithAddress prologue.
+    uint64_t gartAddr = CNDUatUnslidGartUnmapWithAddress + slide;
+    uint32_t gartInsn = 0;
+    CNDUatReadU32(&api, gartAddr, &gartInsn);
+    report[@"gartUnmapWithAddressAddress"] = @(gartAddr);
+    report[@"gartUnmapWithAddressInsn"] = [NSString stringWithFormat:@"0x%08x", gartInsn];
+    report[@"gartWitnessOK"] = @(gartInsn == CNDUatPacibsp);
+
+    // The AGXUAT path selector, read only here.
+    uint64_t gartFeatureAddr = CNDUatUnslidGartFeatureByte + slide;
+    uint64_t fw = 0;
+    if (CNDUatReadU64(&api, gartFeatureAddr & ~7ull, &fw)) {
+        uint8_t fb = (uint8_t)((fw >> ((gartFeatureAddr & 7) * 8)) & 0xff);
+        report[@"gartFeatureAddress"] = @(gartFeatureAddr);
+        report[@"gartFeatureByte"] = [NSString stringWithFormat:@"0x%02x", fb];
+        report[@"agxuatDeferredPath"] = @((fb & 0x1) != 0);
+    }
+
+    // Dispatch-table recovery: read IOGPUFamily's __DATA_CONST,__const as the
+    // live kernel has it and pick out IOExternalMethodDispatch records
+    // (u64 handler, u32 scalarIn, u32 structIn, u32 scalarOut, u32 structOut).
+    {
+        // Handler pointers in kernel data are PAC-signed: compare only the
+        // canonical low 48 bits, which carry the actual address.
+        const uint64_t pacMask = 0x0000FFFFFFFFFFFFull;
+        uint64_t textLo = (CNDUatUnslidIOGPUText + slide) & pacMask;
+        uint64_t textHi = textLo + CNDUatUnslidIOGPUTextSize;
+        uint64_t constAddr = CNDUatUnslidIOGPUConst + slide;
+        size_t constSize = (size_t)CNDUatUnslidIOGPUConstSize;
+
+        uint8_t *blob = (uint8_t *)malloc(constSize);
+        NSMutableArray *records = [NSMutableArray array];
+        if (blob != NULL && CNDUatRead(&api, constAddr, blob, constSize)) {
+            for (size_t off = 0; off + 24 <= constSize; off += 8) {
+                uint64_t fn = 0;
+                memcpy(&fn, blob + off, 8);
+                uint64_t fnAddr = fn & pacMask;
+                if (fnAddr < textLo || fnAddr >= textHi) {
+                    continue;
+                }
+                uint32_t a = 0, b = 0, c = 0, d = 0;
+                memcpy(&a, blob + off + 8, 4);
+                memcpy(&b, blob + off + 12, 4);
+                memcpy(&c, blob + off + 16, 4);
+                memcpy(&d, blob + off + 20, 4);
+                if (a > 64 || b > 0x8000 || c > 64 || d > 0x8000) {
+                    continue;
+                }
+                [records addObject:@{
+                    @"recordAddress": @(constAddr + off),
+                    @"handler": @(fn),
+                    @"handlerOffsetFromText": @(fnAddr - textLo),
+                    @"handlerRaw": @(fn),
+                    @"scalarIn": @(a), @"structIn": @(b),
+                    @"scalarOut": @(c), @"structOut": @(d),
+                }];
+                if (records.count >= 64) {
+                    break;
+                }
+            }
+        }
+        // Head of the section, so the address itself can be checked offline
+        // against the on-disk image.
+        if (blob != NULL) {
+            NSMutableArray *head = [NSMutableArray array];
+            for (int i = 0; i < 8; i++) {
+                uint64_t w = 0;
+                memcpy(&w, blob + i * 8, 8);
+                [head addObject:@(w)];
+            }
+            report[@"dispatchSectionHead"] = head;
+        }
+        free(blob);
+        report[@"dispatchRecords"] = records;
+        report[@"dispatchRecordCount"] = @(records.count);
+        report[@"dispatchConstAddress"] = @(constAddr);
+    }
+
+    // Follow the dispatcher's table pointer and dump the table itself.
+    {
+        uint64_t ptrAddr = CNDUatUnslidIOGPUDispatchPtr + slide;
+        uint64_t tablePtr = 0;
+        if (CNDUatReadU64(&api, ptrAddr, &tablePtr)) {
+            // PAC leaves the signature in bits 63:48; the address itself is the
+            // low 48 bits with the kernel-space prefix implied.
+            uint64_t table = 0xffff000000000000ull |
+                (tablePtr & 0x0000FFFFFFFFFFFFull);
+            report[@"dispatchPointerAddress"] = @(ptrAddr);
+            report[@"dispatchTableRaw"] = @(tablePtr);
+            report[@"dispatchTable"] = @(table);
+            NSMutableArray *rows = [NSMutableArray array];
+            uint8_t *tbl = (uint8_t *)malloc((size_t)CNDUatIOGPUSelectorCount * 24);
+            if (tbl != NULL && table != 0 &&
+                CNDUatRead(&api, table, tbl, (size_t)CNDUatIOGPUSelectorCount * 24)) {
+                for (uint32_t i = 0; i < CNDUatIOGPUSelectorCount; i++) {
+                    uint64_t fn = 0;
+                    uint32_t a = 0, b = 0, c = 0, d = 0;
+                    memcpy(&fn, tbl + i * 24, 8);
+                    memcpy(&a, tbl + i * 24 + 8, 4);
+                    memcpy(&b, tbl + i * 24 + 12, 4);
+                    memcpy(&c, tbl + i * 24 + 16, 4);
+                    memcpy(&d, tbl + i * 24 + 20, 4);
+                    [rows addObject:@{ @"selector": @(i),
+                                       @"handlerRaw": @(fn),
+                                       @"handler": @(0xffff000000000000ull |
+                                           (fn & 0x0000FFFFFFFFFFFFull)),
+                                       @"scalarIn": @(a), @"structIn": @(b),
+                                       @"scalarOut": @(c), @"structOut": @(d) }];
+                }
+            }
+            free(tbl);
+            report[@"selectorTable"] = rows;
+        }
     }
 
     uint64_t debugAddr = CNDUatUnslidDebugByte + slide;
