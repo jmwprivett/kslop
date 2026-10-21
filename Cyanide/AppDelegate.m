@@ -9,7 +9,10 @@
 #import "SettingsViewController.h"
 #import "DSKeepAlive.h"
 #import "LogTextView.h"
+#import "CNDPhysicalEntitlementAuditProbe.h"
 #import "CNDPhysicalIOUserEthernetSignerProbe.h"
+#import "CNDPhysicalKCall1Probe.h"
+#import "CNDUatObserverProbe.h"
 #import <notify.h>
 #import <signal.h>
 #import <sys/stat.h>
@@ -63,7 +66,11 @@ static int g_lab_pm_m68_notification_token;
     }
     NSArray<NSString *> *arguments = NSProcessInfo.processInfo.arguments;
     void (^physicalLaunchAction)(void) = nil;
-    if ([arguments containsObject:@"--hail-mary-apply"]) {
+    if ([arguments containsObject:@"--snowboard-remix-reapply"]) {
+        physicalLaunchAction = ^{
+            settings_run_snowboard_remix_reapply_action();
+        };
+    } else if ([arguments containsObject:@"--hail-mary-apply"]) {
         physicalLaunchAction = ^{ settings_run_hail_mary_patch_apply_action(); };
     } else if ([arguments containsObject:@"--hail-mary-restore"]) {
         physicalLaunchAction = ^{ settings_run_hail_mary_patch_restore_action(); };
@@ -77,6 +84,77 @@ static int g_lab_pm_m68_notification_token;
         physicalLaunchAction = ^{ settings_run_hail_mary_imp_redirect_apply_action(); };
     } else if ([arguments containsObject:@"--hail-mary-imp-restore"]) {
         physicalLaunchAction = ^{ settings_run_hail_mary_imp_redirect_restore_action(); };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-class-probe"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_probe_action();
+        };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-class-apply"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_apply_action();
+        };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-class-restore"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_restore_action();
+        };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-class-verify-redirected"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_verify_redirected_action();
+        };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-class-verify-original"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_verify_original_action();
+        };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-dispatch-probe"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_dispatch_probe_action();
+        };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-dispatch-apply"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_dispatch_apply_action();
+        };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-dispatch-restore"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_dispatch_restore_action();
+        };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-dispatch-verify-redirected"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_dispatch_verify_redirected_action();
+        };
+    } else if ([arguments containsObject:
+                @"--hail-mary-special-icon-dispatch-verify-original"]) {
+        physicalLaunchAction = ^{
+            settings_run_hail_mary_special_icon_class_dispatch_verify_original_action();
+        };
+    } else if ([arguments containsObject:@"--icon-class-audit"]) {
+        physicalLaunchAction = ^{
+            settings_run_icon_class_audit_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-object-preflight"]) {
+        physicalLaunchAction = ^{
+            settings_run_special_icon_object_preflight_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-object-rebuild-static"]) {
+        physicalLaunchAction = ^{
+            settings_run_special_icon_object_rebuild_static_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-object-rebuild-live"]) {
+        physicalLaunchAction = ^{
+            settings_run_special_icon_object_rebuild_live_action();
+        };
+    } else if ([arguments containsObject:@"--hail-mary-page-wire"]) {
+        physicalLaunchAction = ^{ settings_run_hail_mary_page_wire_action(); };
     } else if ([arguments containsObject:@"--springboard-rx-probe"]) {
         physicalLaunchAction = ^{ settings_run_physical_rx_probe_action(); };
     } else if ([arguments containsObject:@"--physical-pac-validator"]) {
@@ -98,6 +176,52 @@ static int g_lab_pm_m68_notification_token;
                 ^(NSDictionary<NSString *, id> *report) {
                     log_user("[IOUSERETHERNET_SIGNER] result=%s report=%s\n",
                         [report[@"result"] UTF8String] ?: "unknown-result",
+                        [report[@"reportPath"] UTF8String] ?: "unavailable");
+                });
+        };
+    } else if ([arguments containsObject:@"--kcall1-probe"]) {
+        physicalLaunchAction = ^{
+            CNDPhysicalKCall1ProbeRun(
+                ^(NSDictionary<NSString *, id> *report) {
+                    log_user("[KCALL1] result=%s success=%s report=%s\n",
+                        [report[@"result"] UTF8String] ?: "unknown-result",
+                        [report[@"ifnetKCall1Success"] boolValue]
+                            ? "yes" : "no",
+                        [report[@"reportPath"] UTF8String] ?: "unavailable");
+                });
+        };
+    } else if ([arguments containsObject:@"--uat-observer"] ||
+               [arguments containsObject:@"--uat-observer-off"]) {
+        BOOL restore = [arguments containsObject:@"--uat-observer-off"];
+        physicalLaunchAction = ^{
+            void (^done)(NSDictionary<NSString *, id> *) =
+                ^(NSDictionary<NSString *, id> *report) {
+                    log_user("[UAT_OBSERVER] result=%s before=%s after=%s "
+                             "addr=%s report=%s\n",
+                        [report[@"result"] UTF8String] ?: "unknown-result",
+                        [report[@"debugByteBefore"] UTF8String] ?: "-",
+                        [report[@"debugByteAfter"] UTF8String] ?: "-",
+                        [[report[@"debugByteAddress"] description] UTF8String] ?: "-",
+                        [report[@"reportPath"] UTF8String] ?: "unavailable");
+                };
+            if (restore) {
+                CNDUatObserverProbeRestoreRun(done);
+            } else {
+                CNDUatObserverProbeRun(done);
+            }
+        };
+    } else if ([arguments containsObject:@"--entitlement-audit-probe"]) {
+        physicalLaunchAction = ^{
+            CNDPhysicalEntitlementAuditProbeRun(
+                ^(NSDictionary<NSString *, id> *report) {
+                    NSString *holders = [report[@"processesWithEntitlement"]
+                        componentsJoinedByString:@","];
+                    log_user("[ENTITLEMENT_AUDIT] result=%s donor=%s "
+                        "holders=%s report=%s\n",
+                        [report[@"result"] UTF8String] ?: "unknown-result",
+                        [report[@"donorHasEntitlement"] boolValue]
+                            ? "yes" : "no",
+                        holders.UTF8String ?: "none",
                         [report[@"reportPath"] UTF8String] ?: "unavailable");
                 });
         };
