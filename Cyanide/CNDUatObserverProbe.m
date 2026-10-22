@@ -587,6 +587,126 @@ static void CNDUatObserverRunWithMode(int enable,
         }
     }
 
+    // ANE dispatch tables.  The file image stores them with encoded handler
+    // pointers, so they only resolve live; a table is a run of 24-byte
+    // IOExternalMethodDispatch records whose handler lands in ANE text.  The
+    // four check fields are plain integers.
+    {
+        const uint64_t vaOr = 0xfffffff000000000ull;
+        const uint64_t t0 = 0xfffffff0091fba90ull + slide;
+        const uint64_t t1 = t0 + 0x105670ull;
+        struct { uint64_t addr, size; } ranges[5] = {
+            { 0xfffffff00739b7a0ull, 0xae8  },
+            { 0xfffffff007dfcc70ull, 0xc278 },
+            { 0xfffffff00b441c28ull, 0x3ed4 },
+            { 0xfffffff00b445b00ull, 0x658  },
+            { 0xfffffff00b446158ull, 0x628  },
+        };
+        NSMutableArray *tabs = [NSMutableArray array];
+        for (int r = 0; r < 5; r++) {
+            uint8_t *db = (uint8_t *)malloc((size_t)ranges[r].size);
+            if (!db) continue;
+            if (CNDUatRead(&api, ranges[r].addr + slide, db, (size_t)ranges[r].size)) {
+                size_t n = (size_t)ranges[r].size;
+                for (size_t off = 0; off + 24 <= n; off += 8) {
+                    size_t start = off, cnt = 0;
+                    while (start + 24 * (cnt + 1) <= n) {
+                        uint64_t q = 0; uint32_t a,b,c,d;
+                        memcpy(&q, db + start + cnt * 24, 8);
+                        memcpy(&a, db + start + cnt * 24 + 8, 4);
+                        memcpy(&b, db + start + cnt * 24 + 12, 4);
+                        memcpy(&c, db + start + cnt * 24 + 16, 4);
+                        memcpy(&d, db + start + cnt * 24 + 20, 4);
+                        uint64_t va = vaOr | (q & 0xFFFFFFFFull);
+                        if (q != 0 && !(va >= t0 && va < t1)) break;
+                        if (a > 8 || b > 0x100000 || c > 16 || d > 0x100000) break;
+                        cnt++;
+                    }
+                    if (cnt >= 8) {
+                        NSMutableArray *rows = [NSMutableArray array];
+                        for (size_t k = 0; k < cnt; k++) {
+                            uint64_t q = 0; uint32_t a,b,c,d;
+                            memcpy(&q, db + start + k * 24, 8);
+                            memcpy(&a, db + start + k * 24 + 8, 4);
+                            memcpy(&b, db + start + k * 24 + 12, 4);
+                            memcpy(&c, db + start + k * 24 + 16, 4);
+                            memcpy(&d, db + start + k * 24 + 20, 4);
+                            [rows addObject:@{ @"sel": @(k),
+                                               @"handler": @(vaOr | (q & 0xFFFFFFFFull)),
+                                               @"sic": @(a), @"sis": @(b),
+                                               @"soc": @(c), @"sos": @(d) }];
+                        }
+                        [tabs addObject:@{ @"where": @(r),
+                                           @"unslid": @(ranges[r].addr + start),
+                                           @"count": @(cnt),
+                                           @"rows": rows }];
+                        off = start + cnt * 24 - 8;
+                    }
+                }
+            }
+            free(db);
+        }
+        report[@"aneDispatchTables"] = tabs;
+    }
+
+    // AppleJPEGDriver dispatch table.  Same 24-byte IOExternalMethodDispatch
+    // records as the other clients; the handler pointers only resolve live.
+    {
+        const uint64_t vaOr = 0xfffffff000000000ull;
+        const uint64_t t0 = 0xfffffff008000000ull + slide;   // any kernel text
+        const uint64_t t1 = 0xfffffff00c000000ull + slide;
+        struct { uint64_t addr, size; } ranges[4] = {
+            { 0xfffffff007e773a8ull, 0x4700 },
+            { 0xfffffff00b44c700ull, 0x2208 },
+            { 0xfffffff00b44e908ull, 0x380  },
+            { 0xfffffff0074856c0ull, 0x3684 },
+        };
+        NSMutableArray *tabs = [NSMutableArray array];
+        for (int r = 0; r < 4; r++) {
+            uint8_t *db = (uint8_t *)malloc((size_t)ranges[r].size);
+            if (!db) continue;
+            if (CNDUatRead(&api, ranges[r].addr + slide, db, (size_t)ranges[r].size)) {
+                size_t n = (size_t)ranges[r].size;
+                for (size_t off = 0; off + 24 <= n; off += 8) {
+                    size_t start = off, cnt = 0;
+                    while (start + 24 * (cnt + 1) <= n) {
+                        uint64_t q = 0; uint32_t a,b,c,d;
+                        memcpy(&q, db + start + cnt*24, 8);
+                        memcpy(&a, db + start + cnt*24 + 8, 4);
+                        memcpy(&b, db + start + cnt*24 + 12, 4);
+                        memcpy(&c, db + start + cnt*24 + 16, 4);
+                        memcpy(&d, db + start + cnt*24 + 20, 4);
+                        uint64_t va = vaOr | (q & 0xFFFFFFFFull);
+                        if (q != 0 && !(va >= t0 && va < t1)) break;
+                        if (a > 8 || b > 0x100000 || c > 16 || d > 0x100000) break;
+                        cnt++;
+                    }
+                    if (cnt >= 6) {
+                        NSMutableArray *rows = [NSMutableArray array];
+                        for (size_t k = 0; k < cnt; k++) {
+                            uint64_t q = 0; uint32_t a,b,c,d;
+                            memcpy(&q, db + start + k*24, 8);
+                            memcpy(&a, db + start + k*24 + 8, 4);
+                            memcpy(&b, db + start + k*24 + 12, 4);
+                            memcpy(&c, db + start + k*24 + 16, 4);
+                            memcpy(&d, db + start + k*24 + 20, 4);
+                            [rows addObject:@{ @"sel": @(k),
+                                               @"handler": @(vaOr | (q & 0xFFFFFFFFull)),
+                                               @"sic": @(a), @"sis": @(b),
+                                               @"soc": @(c), @"sos": @(d) }];
+                        }
+                        [tabs addObject:@{ @"where": @(r),
+                                           @"unslid": @(ranges[r].addr + start),
+                                           @"count": @(cnt), @"rows": rows }];
+                        off = start + cnt * 24 - 8;
+                    }
+                }
+            }
+            free(db);
+        }
+        report[@"jpegDispatchTables"] = tabs;
+    }
+
     // Dump the ANE dispatch-table candidates (24-byte IOExternalMethodDispatch
     // records), so the map/unmap selectors can be identified by their handler.
     {
