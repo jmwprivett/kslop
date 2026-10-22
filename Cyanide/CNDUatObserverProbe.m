@@ -98,6 +98,9 @@ static const uint64_t CNDUatAneVtables[3] = {
     0xfffffff007e04680ull, 0xfffffff007e052f8ull, 0xfffffff007e04c70ull,
 };
 
+// IOGPUDeviceUserClient::externalMethod (function start, bti c at +4).
+static const uint64_t CNDUatIOGPUExternalMethod = 0xfffffff00a502aa8ull;
+
 // The driver's debug byte.  From commitUnmaps:
 //   adrp x8, 0xfffffff00b393000 ; add x8, x8, #0x4f8 ; ldrb w8, [x8, #0x10]
 static const uint64_t CNDUatUnslidDebugByte = 0xfffffff00b393508ull;
@@ -518,6 +521,72 @@ static void CNDUatObserverRunWithMode(int enable,
         report[@"gartInstanceCandidates"] = instances;
     }
 
+    // Vtable runs in the AGX data sections.  The file offsets are chained
+    // fixups, so pointers only resolve in the live kernel; a vtable is a run of
+    // at least ten consecutive qwords that canonicalise into kernel text.
+    {
+        const uint64_t low36 = 0x0000000FFFFFFFFFull;
+        const uint64_t vaOr  = 0xfffffff000000000ull;
+        const uint64_t lo = 0xfffffff008000000ull + slide;
+        const uint64_t hi = 0xfffffff00c000000ull + slide;
+        NSMutableArray *runs = [NSMutableArray array];
+        uint64_t ranges[2][3] = { { CNDUatAgxConst, CNDUatAgxConstSz, 0 },
+                                  { CNDUatAgxData,  CNDUatAgxDataSz,  1 } };
+        for (int r = 0; r < 2; r++) {
+            uint8_t *db = (uint8_t *)malloc((size_t)ranges[r][1]);
+            if (!db) continue;
+            if (CNDUatRead(&api, ranges[r][0] + slide, db, (size_t)ranges[r][1])) {
+                size_t n = (size_t)ranges[r][1] / 8;
+                size_t start = 0; BOOL in = NO;
+                for (size_t i = 0; i <= n; i++) {
+                    BOOL ok = NO;
+                    if (i < n) {
+                        uint64_t q = 0;
+                        memcpy(&q, db + i * 8, 8);
+                        uint64_t va = vaOr | (q & low36);
+                        ok = (va >= lo && va < hi);
+                    }
+                    if (ok && !in) { start = i; in = YES; }
+                    else if (!ok && in) {
+                        size_t len = i - start;
+                        if (len >= 10) {
+                            NSMutableArray *ents = [NSMutableArray array];
+                            for (size_t k = start; k < start + len && k < start + 8; k++) {
+                                uint64_t q = 0;
+                                memcpy(&q, db + k * 8, 8);
+                                [ents addObject:@(vaOr | (q & low36))];
+                            }
+                            [runs addObject:@{ @"section": r == 0 ? @"const" : @"data",
+                                               @"unslid": @(ranges[r][0] + start * 8),
+                                               @"length": @(len),
+                                               @"head": ents }];
+                        }
+                        in = NO;
+                    }
+                }
+            }
+            free(db);
+        }
+        report[@"agxVtableRuns"] = runs;
+    }
+
+    // AGXDeviceUserClient's own vtable.  Address derived statically: the
+    // metaclass constructor at 0x8ab04e0 signs 0x7cd43b0+0x10 and stores it in
+    // the new metaclass; instance size 0x138, name string "AGXDeviceUserClient".
+    {
+        uint64_t addr = 0xfffffff007cd43b0ull + slide;
+        uint64_t words[96] = {0};
+        if (CNDUatRead(&api, addr, words, sizeof(words))) {
+            NSMutableArray *w = [NSMutableArray array];
+            for (int i = 0; i < 96; i++) {
+                uint64_t v = words[i];
+                uint64_t canon = 0xfffffff000000000ull | (v & 0x0000000FFFFFFFFFull);
+                [w addObject:@{ @"i": @(i), @"raw": @(v), @"va": @(canon) }];
+            }
+            report[@"agxUserClientVtable"] = @{ @"vtable": @(addr), @"entries": w };
+        }
+    }
+
     // Dump the ANE dispatch-table candidates (24-byte IOExternalMethodDispatch
     // records), so the map/unmap selectors can be identified by their handler.
     {
@@ -527,7 +596,7 @@ static void CNDUatObserverRunWithMode(int enable,
             uint8_t *blob = (uint8_t *)malloc(24 * 32);
             if (!blob) continue;
             if (CNDUatRead(&api, addr, blob, 24 * 32)) {
-                for (int i = 0; i < 32; i++) {
+                for (int i = 0; i < 64; i++) {
                     uint64_t fn = 0; uint32_t a=0,b=0,c=0,d=0;
                     memcpy(&fn, blob + i*24, 8);
                     memcpy(&a, blob + i*24 + 8, 4);
@@ -551,10 +620,10 @@ static void CNDUatObserverRunWithMode(int enable,
         NSMutableArray *vts = [NSMutableArray array];
         for (int t = 0; t < 3; t++) {
             uint64_t addr = CNDUatAneVtables[t] + slide;
-            uint64_t words[32] = {0};
+            uint64_t words[64] = {0};
             if (CNDUatRead(&api, addr, words, sizeof(words))) {
                 NSMutableArray *w = [NSMutableArray array];
-                for (int i = 0; i < 32; i++) {
+                for (int i = 0; i < 64; i++) {
                     uint64_t v = words[i];
                     uint64_t canon = 0xfffffff000000000ull | (v & 0xFFFFFFFFull);
                     [w addObject:@{ @"i": @(i), @"raw": @(v), @"va": @(canon) }];
@@ -563,6 +632,39 @@ static void CNDUatObserverRunWithMode(int enable,
             }
         }
         report[@"aneVtables"] = vts;
+    }
+
+    // Slot index of externalMethod: find the IOGPU vtable entry that points at
+    // the known override, then read the same slot in the ANE vtables. Both
+    // classes derive from IOUserClient, so the slot index is shared.
+    {
+        uint64_t constAddr = CNDUatUnslidIOGPUConst + slide;
+        size_t constSize = (size_t)CNDUatUnslidIOGPUConstSize;
+        uint8_t *blob = (uint8_t *)malloc(constSize);
+        NSInteger slot = -1;
+        uint64_t wantLow = (CNDUatIOGPUExternalMethod + slide) & 0xFFFFFFFFull;
+        if (blob && CNDUatRead(&api, constAddr, blob, constSize)) {
+            for (size_t off = 0; off + 8 <= constSize; off += 8) {
+                uint64_t q = 0;
+                memcpy(&q, blob + off, 8);
+                if ((q & 0xFFFFFFFFull) == wantLow) { slot = (NSInteger)(off / 8); break; }
+            }
+        }
+        free(blob);
+        report[@"extMethodSlot"] = @(slot);
+        if (slot >= 0) {
+            NSMutableArray *rows = [NSMutableArray array];
+            for (int t = 0; t < 3; t++) {
+                uint64_t vt = CNDUatAneVtables[t] + slide;
+                uint64_t q = 0;
+                if (CNDUatRead(&api, vt + (uint64_t)slot * 8, &q, 8)) {
+                    [rows addObject:@{ @"vtable": @(vt), @"slot": @(slot),
+                                       @"entry": @(q),
+                                       @"va": @(0xfffffff000000000ull | (q & 0xFFFFFFFFull)) }];
+                }
+            }
+            report[@"aneExtMethod"] = rows;
+        }
     }
 
     uint64_t debugAddr = CNDUatUnslidDebugByte + slide;
