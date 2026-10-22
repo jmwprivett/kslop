@@ -76,6 +76,28 @@ static const uint64_t CNDUatUnslidIOGPUDispatchA = 0xfffffff0080682f0ull;
 static const uint64_t CNDUatUnslidIOGPUDispatchB = 0xfffffff008067db0ull;
 static const uint32_t CNDUatIOGPUUserSelectorCount = 0x38;
 
+// AGXG17P sections (pinned image) for the vtable-anchored instance search.
+static const uint64_t CNDUatAgxConst   = 0xfffffff007cd24f8ull;
+static const uint64_t CNDUatAgxConstSz = 0xf108ull;
+static const uint64_t CNDUatAgxData    = 0xfffffff00b424280ull;
+static const uint64_t CNDUatAgxDataSz  = 0x13c4ull;
+static const uint64_t CNDUatAgxBss     = 0xfffffff00b425660ull;
+static const uint64_t CNDUatAgxBssSz   = 0x4a30ull;
+// AGXSecureGart::unmapWithAddress (virtual, verified pacibsp at runtime).
+static const uint64_t CNDUatAgxUnmapWithAddress = 0xfffffff008b2c024ull;
+
+// ANE (H11ANE / AppleH16ANEInterface) dispatch-table candidates found by code
+// shape: small functions with `cmp w1,#N` and an adrp+add table pointer.
+static const uint64_t CNDUatAneTables[5] = {
+    0xfffffff007e02978ull, 0xfffffff007e038a8ull, 0xfffffff007e07f50ull,
+    0xfffffff007e08d88ull, 0xfffffff007e08da8ull,
+};
+
+// ANE user-client vtables found from the constructors that store them.
+static const uint64_t CNDUatAneVtables[3] = {
+    0xfffffff007e04680ull, 0xfffffff007e052f8ull, 0xfffffff007e04c70ull,
+};
+
 // The driver's debug byte.  From commitUnmaps:
 //   adrp x8, 0xfffffff00b393000 ; add x8, x8, #0x4f8 ; ldrb w8, [x8, #0x10]
 static const uint64_t CNDUatUnslidDebugByte = 0xfffffff00b393508ull;
@@ -437,6 +459,110 @@ static void CNDUatObserverRunWithMode(int enable,
             free(tbl);
             report[@"selectorTable"] = rows;
         }
+    }
+
+    // Vtable-anchored search for the AGXSecureGart/AGXUAT instance:
+    //  1. find qwords in __DATA_CONST equal to the slid unmapWithAddress,
+    //  2. find qwords in __DATA/__bss equal to those vtable addresses.
+    // Both scans are bounded to known sections of one kext.
+    {
+        const uint64_t pacMask = 0x0000FFFFFFFFFFFFull;
+        const uint64_t vaOr = 0xfffffff000000000ull;
+        uint64_t constAddr = CNDUatAgxConst + slide;
+        uint8_t *cb = (uint8_t *)malloc((size_t)CNDUatAgxConstSz);
+        NSMutableArray *vtableHits = [NSMutableArray array];
+        if (cb && CNDUatRead(&api, constAddr, cb, (size_t)CNDUatAgxConstSz)) {
+            uint64_t want = (CNDUatAgxUnmapWithAddress + slide) & pacMask;
+            for (size_t off = 0; off + 8 <= (size_t)CNDUatAgxConstSz; off += 8) {
+                uint64_t q = 0;
+                memcpy(&q, cb + off, 8);
+                if ((q & pacMask) == want) {
+                    [vtableHits addObject:@{ @"offset": @(off),
+                                             @"address": @(vaOr | (constAddr + off) & pacMask) }];
+                }
+            }
+        }
+        free(cb);
+        report[@"gartVtableHits"] = vtableHits;
+
+        NSMutableArray *instances = [NSMutableArray array];
+        uint64_t ranges[2][2] = { { CNDUatAgxData, CNDUatAgxDataSz },
+                                  { CNDUatAgxBss,  CNDUatAgxBssSz } };
+        for (int r = 0; r < 2; r++) {
+            uint8_t *db = (uint8_t *)malloc((size_t)ranges[r][1]);
+            if (!db) continue;
+            if (CNDUatRead(&api, ranges[r][0] + slide, db, (size_t)ranges[r][1])) {
+                for (size_t off = 0; off + 8 <= (size_t)ranges[r][1]; off += 8) {
+                    uint64_t q = 0;
+                    memcpy(&q, db + off, 8);
+                    uint64_t qa = vaOr | (q & pacMask);
+                    for (NSDictionary *hit in vtableHits) {
+                        if (qa == [hit[@"address"] unsignedLongLongValue]) {
+                            // Candidate instance: report the first 8 words.
+                            uint64_t objAddr = vaOr | ((ranges[r][0] + slide + off) & pacMask);
+                            uint64_t w[8] = {0};
+                            CNDUatRead(&api, objAddr, w, sizeof(w));
+                            NSMutableArray *words = [NSMutableArray array];
+                            for (int k = 0; k < 8; k++) [words addObject:@(w[k])];
+                            [instances addObject:@{ @"slot": @(objAddr),
+                                                    @"vtable": @(qa),
+                                                    @"section": r == 0 ? @"__data" : @"__bss",
+                                                    @"words": words }];
+                            break;
+                        }
+                    }
+                }
+            }
+            free(db);
+        }
+        report[@"gartInstanceCandidates"] = instances;
+    }
+
+    // Dump the ANE dispatch-table candidates (24-byte IOExternalMethodDispatch
+    // records), so the map/unmap selectors can be identified by their handler.
+    {
+        NSMutableArray *ane = [NSMutableArray array];
+        for (int t = 0; t < 5; t++) {
+            uint64_t addr = CNDUatAneTables[t] + slide;
+            uint8_t *blob = (uint8_t *)malloc(24 * 32);
+            if (!blob) continue;
+            if (CNDUatRead(&api, addr, blob, 24 * 32)) {
+                for (int i = 0; i < 32; i++) {
+                    uint64_t fn = 0; uint32_t a=0,b=0,c=0,d=0;
+                    memcpy(&fn, blob + i*24, 8);
+                    memcpy(&a, blob + i*24 + 8, 4);
+                    memcpy(&b, blob + i*24 + 12, 4);
+                    memcpy(&c, blob + i*24 + 16, 4);
+                    memcpy(&d, blob + i*24 + 20, 4);
+                    if (fn == 0) continue;
+                    [ane addObject:@{ @"table": @(t), @"selector": @(i),
+                                      @"handler": @(0xfffffff000000000ull | (fn & 0xFFFFFFFFull)),
+                                      @"scalarIn": @(a), @"structIn": @(b),
+                                      @"scalarOut": @(c), @"structOut": @(d) }];
+                }
+            }
+            free(blob);
+        }
+        report[@"aneTables"] = ane;
+    }
+
+    // Dump the ANE vtables; entries resolve only in the live kernel.
+    {
+        NSMutableArray *vts = [NSMutableArray array];
+        for (int t = 0; t < 3; t++) {
+            uint64_t addr = CNDUatAneVtables[t] + slide;
+            uint64_t words[32] = {0};
+            if (CNDUatRead(&api, addr, words, sizeof(words))) {
+                NSMutableArray *w = [NSMutableArray array];
+                for (int i = 0; i < 32; i++) {
+                    uint64_t v = words[i];
+                    uint64_t canon = 0xfffffff000000000ull | (v & 0xFFFFFFFFull);
+                    [w addObject:@{ @"i": @(i), @"raw": @(v), @"va": @(canon) }];
+                }
+                [vts addObject:@{ @"vtable": @(addr), @"entries": w }];
+            }
+        }
+        report[@"aneVtables"] = vts;
     }
 
     uint64_t debugAddr = CNDUatUnslidDebugByte + slide;
