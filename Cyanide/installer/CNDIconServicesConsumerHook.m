@@ -3916,3 +3916,156 @@ CNDIconServicesConsumerHookAuditSpringBoard(
     result[@"mutationsIssued"] = @NO;
     return result;
 }
+
+NSDictionary<NSString *, id> *
+CNDIconServicesConsumerHookRebuildSpecialIconClassesForPID(
+    pid_t pid,
+    NSString *expectedProcessName,
+    BOOL useStaticClasses,
+    BOOL dryRun)
+{
+    BOOL supportedProcess =
+        [expectedProcessName isEqualToString:@"SpringBoard"] ||
+        [expectedProcessName isEqualToString:@"Spotlight"];
+    if (pid <= 1 || !supportedProcess) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"process-identity",
+            @"message": @"An exact SpringBoard or Spotlight PID is required.",
+            @"process": expectedProcessName ?: @"",
+            @"expectedPID": @(pid),
+            @"dryRun": @(dryRun),
+            @"mutationsIssued": @NO,
+            @"remoteCallUsed": @NO,
+        };
+    }
+    if (!kexploit_krw_ready() && !remote_call_lab_backend_opted_in()) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"krw-unavailable",
+            @"message": @"Validated kernel read/write is required to bind the exact consumer process.",
+            @"process": expectedProcessName,
+            @"expectedPID": @(pid),
+            @"dryRun": @(dryRun),
+            @"mutationsIssued": @NO,
+            @"remoteCallUsed": @NO,
+        };
+    }
+
+    BOOL usesLabRemoteCall = remote_call_lab_backend_opted_in();
+    uint64_t expectedProc = 0;
+    uint64_t expectedTask = 0;
+    BOOL initialIdentityValid = NO;
+    if (usesLabRemoteCall) {
+        pid_t livePID = 0;
+        initialIdentityValid =
+            cnd_lab_resolve_process_pid(
+                expectedProcessName.UTF8String, &livePID) == 0 &&
+            livePID == pid;
+    } else {
+        expectedProc = proc_find(pid);
+        expectedTask = is_kaddr_valid(expectedProc)
+            ? proc_task(expectedProc) : 0;
+        const char *kernelName = is_kaddr_valid(expectedProc)
+            ? proc_get_p_name(expectedProc) : NULL;
+        initialIdentityValid = is_kaddr_valid(expectedProc) &&
+            is_kaddr_valid(expectedTask) && kernelName &&
+            strcmp(kernelName, expectedProcessName.UTF8String) == 0;
+    }
+    if (!initialIdentityValid) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"process-identity",
+            @"message": @"The requested consumer PID no longer matches its exact proc/task identity.",
+            @"process": expectedProcessName,
+            @"expectedPID": @(pid),
+            @"dryRun": @(dryRun),
+            @"mutationsIssued": @NO,
+            @"remoteCallUsed": @NO,
+        };
+    }
+
+    if (!usesLabRemoteCall) g_RC_targetProcOverride = expectedProc;
+    RemoteCallSession *session = [[RemoteCallSession alloc]
+        initWithProcess:expectedProcessName
+        useMigFilterBypass:NO
+        firstExceptionTimeoutMS:10000];
+    g_RC_targetProcOverride = 0;
+    if (!session) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"consumer-session",
+            @"message": @"The bounded consumer RemoteCall session could not be opened.",
+            @"process": expectedProcessName,
+            @"expectedPID": @(pid),
+            @"dryRun": @(dryRun),
+            @"mutationsIssued": @NO,
+            @"remoteCallUsed": @YES,
+        };
+    }
+
+    BOOL identityBound = usesLabRemoteCall
+        ? session.pid == pid
+        : (session.pid == pid && session.taskAddr == expectedTask &&
+           proc_find(pid) == expectedProc &&
+           proc_task(expectedProc) == expectedTask);
+    __block NSDictionary<NSString *, id> *migration = nil;
+    __block BOOL remoteOK = NO;
+    NSString *exceptionText = nil;
+    if (identityBound) {
+        @try {
+            remote_call_with_session(session, ^{
+                migration =
+                    themer_rebuild_special_icon_class_objects_in_session(
+                        useStaticClasses, dryRun,
+                        [expectedProcessName isEqualToString:@"Spotlight"]);
+                remoteOK = remote_call_current_success();
+            });
+        } @catch (NSException *exception) {
+            exceptionText = [NSString stringWithFormat:@"%@:%@",
+                exception.name ?: @"exception",
+                exception.reason ?: @"unknown"];
+            remoteOK = NO;
+        }
+    }
+
+    if ([session hasLocalState] && ![session hasInFlightSyntheticCall]) {
+        (void)[session destroyRemoteCall];
+    }
+    BOOL teardownDeferred = NO;
+    if ([session hasInFlightSyntheticCall]) {
+        teardownDeferred = [session deferTeardownForInFlightSyntheticCall];
+    }
+    BOOL closed = ![session hasLocalState];
+    BOOL finalIdentityStable = NO;
+    if (usesLabRemoteCall) {
+        pid_t livePID = 0;
+        finalIdentityStable =
+            cnd_lab_resolve_process_pid(
+                expectedProcessName.UTF8String, &livePID) == 0 &&
+            livePID == pid;
+    } else {
+        finalIdentityStable = proc_find(pid) == expectedProc &&
+            proc_task(expectedProc) == expectedTask;
+    }
+    BOOL ok = identityBound && remoteOK && [migration[@"ok"] boolValue] &&
+        closed && !teardownDeferred && finalIdentityStable;
+    NSMutableDictionary<NSString *, id> *result =
+        [NSMutableDictionary dictionaryWithDictionary:migration ?: @{}];
+    result[@"ok"] = @(ok);
+    if (!ok && !result[@"stage"]) result[@"stage"] = @"consumer-migration";
+    if (!ok && !result[@"message"]) {
+        result[@"message"] =
+            @"The bounded canonical-object migration did not complete safely.";
+    }
+    result[@"process"] = expectedProcessName;
+    result[@"expectedPID"] = @(pid);
+    result[@"identityBound"] = @(identityBound);
+    result[@"finalIdentityStable"] = @(finalIdentityStable);
+    result[@"remoteOK"] = @(remoteOK);
+    result[@"closed"] = @(closed);
+    result[@"teardownDeferred"] = @(teardownDeferred);
+    result[@"exception"] = exceptionText ?: @"";
+    result[@"remoteCallUsed"] = @YES;
+    return result;
+}

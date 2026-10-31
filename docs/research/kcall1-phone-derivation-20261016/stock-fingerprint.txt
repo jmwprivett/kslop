@@ -1,0 +1,20 @@
+DIS 0 ldrb w8;x1,IMM0x1
+DIS 4 cbz w8;ADDR
+DIS 8 cmp w8;IMM0x12
+DIS 12 b.ne ADDR
+DIS 16 ldrb w8;x1,IMM0x5
+DIS 20 add x9;x1;IMM0xff
+DIS 24 add x8;x1;x8
+DIS 28 add x8;x8;IMM0x8
+DIS 32 cmp x8;x9
+DIS 36 ccmp x8;x1;IMM0x0;
+DIS 40 b.cs ADDR
+DIS 44 brk IMM0x5519
+DIS 48 add x8;x1;IMM0x2
+DIS 52 ldrb w8;x8
+DIS 56 tst w8;IMM0x1
+DIS 60 mov w8;IMM0x31
+DIS 64 csel w0;w8;wzr;
+DIS 68 ret
+DIS 72 mov w0;IMM0x2f
+DIS 76 ret

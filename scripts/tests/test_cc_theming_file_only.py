@@ -39,6 +39,31 @@ class CCThemingFileOnlyTests(unittest.TestCase):
             with self.subTest(operation=forbidden):
                 self.assertNotIn(forbidden, runner)
 
+    def test_installer_shows_cc_resource_state_instead_of_beta_badge(self):
+        packages = (ROOT / "Cyanide/installer/PackagesViewController.m").read_text()
+        detail = (ROOT / "Cyanide/installer/PackageDetailViewController.m").read_text()
+
+        accessory = packages.split(
+            "- (UIView *)accessoryViewForPackage:", 1
+        )[1].split("- (UIView *)pillWithText:", 1)[0]
+        cc = accessory.split(
+            "if (pkg.kind == PackageInstallKindControlCenterTheming)", 1
+        )[1].split("if (pkg.kind == PackageInstallKindDirectTool)", 1)[0]
+        self.assertIn("CNDCCThemingFileBackingHasJournaledState", cc)
+        self.assertIn('pillWithText:@"ACTIVE"', cc)
+        self.assertIn('pillWithText:@"STOCK"', cc)
+        self.assertIn('@"APPLY PENDING"', cc)
+        self.assertIn('@"RESTORE PENDING"', cc)
+        self.assertLess(
+            accessory.index("PackageInstallKindControlCenterTheming"),
+            accessory.index('caseInsensitiveCompare:@"Beta"'),
+        )
+
+        manual_state = detail.split("- (NSString *)manualStateText", 1)[1]
+        manual_state = manual_state.split("- (NSString *)toggleStateText", 1)[0]
+        self.assertIn("CNDCCThemingFileBackingHasJournaledState", manual_state)
+        self.assertIn('? @"Active" : @"Stock"', manual_state)
+
 
 if __name__ == "__main__":
     unittest.main()

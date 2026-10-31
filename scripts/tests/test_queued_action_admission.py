@@ -77,7 +77,32 @@ class QueuedActionAdmissionTests(unittest.TestCase):
         self.assertNotIn("PackageRequiresExclusiveRespringEdit", self.queue_m)
         self.assertNotIn("hasExplicitExclusiveRespringEditQueued", self.queue_m)
         self.assertNotIn("Run System Edit Alone", self.review)
-        self.assertIn("One shared respring", self.review)
+        self.assertNotIn("One shared respring", self.review)
+        self.assertNotIn("sharedRespringHeaderView", self.review)
+
+    def test_saved_run_reopens_for_new_queue_items(self) -> None:
+        helper = self.queue_method(
+            "- (BOOL)prepareTransactionForQueueEditing:",
+            "- (BOOL)transactionNeedsCoordinator",
+        )
+        self.assertIn("boundaryObserved", helper)
+        self.assertIn("finalizeTransientAppliedStateForTransaction", helper)
+        self.assertIn("CNDQueuedActionStateSucceeded", helper)
+        self.assertIn("CNDQueuedActionStatePending", helper)
+        self.assertIn("collectingTransactionWithActions", helper)
+        self.assertIn("CNDTransientAppliedStateCancelPreparedTransition", helper)
+
+        package_admission = self.queue_method(
+            "- (BOOL)canQueueIntent:",
+            "- (void)toggleForPackage:",
+        )
+        standalone_admission = self.queue_method(
+            "- (BOOL)queueStandaloneAction:",
+            "- (BOOL)removeStandaloneActionForConflictKey:",
+        )
+        self.assertIn("prepareTransactionForQueueEditing", package_admission)
+        self.assertIn("prepareTransactionForQueueEditing", standalone_admission)
+        self.assertNotIn("Finish or retry the saved respring plan", self.queue_m)
 
     def test_snowboard_buttons_admit_durable_actions(self) -> None:
         rows = self.settings_method(

@@ -707,6 +707,22 @@ static void CNDUatObserverRunWithMode(int enable,
         report[@"jpegDispatchTables"] = tabs;
     }
 
+    // AppleJPEGDriverUserClient vtable (from its metaclass constructor at
+    // 0x95caff8: instance size 0x110, vtable 0x7e78fd8).
+    {
+        uint64_t addr = 0xfffffff007e78fd8ull + slide;
+        uint64_t words[96] = {0};
+        if (CNDUatRead(&api, addr, words, sizeof(words))) {
+            NSMutableArray *w = [NSMutableArray array];
+            for (int i = 0; i < 96; i++) {
+                uint64_t v = words[i];
+                uint64_t canon = 0xfffffff000000000ull | (v & 0xFFFFFFFFull);
+                [w addObject:@{ @"i": @(i), @"raw": @(v), @"va": @(canon) }];
+            }
+            report[@"jpegUserClientVtable"] = @{ @"vtable": @(addr), @"entries": w };
+        }
+    }
+
     // Dump the ANE dispatch-table candidates (24-byte IOExternalMethodDispatch
     // records), so the map/unmap selectors can be identified by their handler.
     {

@@ -134,7 +134,6 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 - (void)refreshUI
 {
     [self.tableView reloadData];
-    [self updateSharedRespringHeader];
     NSInteger count = [PackageQueue sharedQueue].pendingCount;
     self.emptyLabel.hidden = (count > 0);
     self.tableView.hidden = (count == 0);
@@ -158,7 +157,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     self.confirmButton.configuration = cfg;
 }
 
-- (BOOL)queueRequiresSharedRespring
+- (BOOL)queueRequiresRespring
 {
     CNDQueuedTransaction *transaction =
         [PackageQueue sharedQueue].durableTransaction;
@@ -170,81 +169,6 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
         if (action.phase != CNDQueuedActionPhaseAutomatic) return YES;
     }
     return NO;
-}
-
-- (UIView *)sharedRespringHeaderView
-{
-    CGFloat width = self.tableView.bounds.size.width;
-    if (width <= 0.0) width = self.view.bounds.size.width;
-    if (width <= 0.0) width = UIScreen.mainScreen.bounds.size.width;
-
-    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, width, 1.0)];
-    container.backgroundColor = UIColor.systemGroupedBackgroundColor;
-
-    UIView *card = [[UIView alloc] init];
-    card.translatesAutoresizingMaskIntoConstraints = NO;
-    card.backgroundColor = [UIColor.systemIndigoColor colorWithAlphaComponent:0.12];
-    card.layer.cornerRadius = 16.0;
-    card.layer.borderWidth = 1.0;
-    card.layer.borderColor = [UIColor.systemIndigoColor colorWithAlphaComponent:0.25].CGColor;
-    [container addSubview:card];
-
-    UIImageView *icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath.circle.fill"]];
-    icon.translatesAutoresizingMaskIntoConstraints = NO;
-    icon.tintColor = UIColor.systemIndigoColor;
-    icon.contentMode = UIViewContentModeScaleAspectFit;
-    [card addSubview:icon];
-
-    UILabel *title = [[UILabel alloc] init];
-    title.translatesAutoresizingMaskIntoConstraints = NO;
-    title.text = @"One shared respring";
-    title.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightBold];
-    title.textColor = UIColor.labelColor;
-    [card addSubview:title];
-
-    UILabel *body = [[UILabel alloc] init];
-    body.translatesAutoresizingMaskIntoConstraints = NO;
-    body.text = @"Persistent icon and system-file changes run first. Cyanide then resprings once and resumes the remaining presentation actions from the saved queue.";
-    body.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightRegular];
-    body.textColor = UIColor.secondaryLabelColor;
-    body.numberOfLines = 0;
-    [card addSubview:body];
-
-    [NSLayoutConstraint activateConstraints:@[
-        [card.topAnchor constraintEqualToAnchor:container.topAnchor constant:12.0],
-        [card.leadingAnchor constraintEqualToAnchor:container.leadingAnchor constant:16.0],
-        [card.trailingAnchor constraintEqualToAnchor:container.trailingAnchor constant:-16.0],
-        [card.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-8.0],
-
-        [icon.topAnchor constraintEqualToAnchor:card.topAnchor constant:14.0],
-        [icon.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:14.0],
-        [icon.widthAnchor constraintEqualToConstant:24.0],
-        [icon.heightAnchor constraintEqualToConstant:24.0],
-
-        [title.topAnchor constraintEqualToAnchor:card.topAnchor constant:12.0],
-        [title.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:10.0],
-        [title.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-14.0],
-
-        [body.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:4.0],
-        [body.leadingAnchor constraintEqualToAnchor:title.leadingAnchor],
-        [body.trailingAnchor constraintEqualToAnchor:title.trailingAnchor],
-        [body.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-12.0],
-    ]];
-
-    CGSize size = [container systemLayoutSizeFittingSize:CGSizeMake(width, 0.0)
-                           withHorizontalFittingPriority:UILayoutPriorityRequired
-                                 verticalFittingPriority:UILayoutPriorityFittingSizeLevel];
-    container.frame = CGRectMake(0.0, 0.0, width, ceil(size.height));
-    return container;
-}
-
-- (void)updateSharedRespringHeader
-{
-    if (![self queueRequiresSharedRespring]) {
-        self.tableView.tableHeaderView = nil;
-        return;
-    }
-    self.tableView.tableHeaderView = [self sharedRespringHeaderView];
 }
 
 - (void)queueChanged:(NSNotification *)note
@@ -261,7 +185,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 
 - (NSArray<Package *> *)reApplyPackages
 {
-    if ([self queueRequiresSharedRespring]) return @[];
+    if ([self queueRequiresRespring]) return @[];
 
     PackageQueue *q = [PackageQueue sharedQueue];
     NSMutableArray<Package *> *out = [NSMutableArray array];
@@ -363,8 +287,8 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                 ? @"SnowBoard Apply/Restore, Transparency Fix, SpringBoard Fixes, and Spotlight Fixes are independent durable queue actions. Conflicting desired states replace one another."
                 : nil;
         case QueueReviewSectionInstall:
-            if (![self queueRequiresSharedRespring]) return nil;
-            return @"System-file changes run before the queue's single shared respring.";
+            if (![self queueRequiresRespring]) return nil;
+            return @"These changes are applied first, then Cyanide resprings because at least one queued item requires it.";
         case QueueReviewSectionReApply:
             if ([self reApplyPackages].count == 0) return nil;
             return @"These are already installed, not new pending changes. Confirming re-runs the chain so RemoteCall-backed tweaks come back after a force-quit. To stop one from running, deactivate it from the Installer tab, or use Reset All Packages in Settings → Quick Actions.";
@@ -476,7 +400,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
                     cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
                     break;
                 case PackageInstallKindHideHomeBar:
-                    cell.detailTextLabel.text = @"Before shared respring";
+                    cell.detailTextLabel.text = @"Pending hide before respring";
                     cell.detailTextLabel.textColor = UIColor.systemOrangeColor;
                     break;
                 case PackageInstallKindFontChanger:

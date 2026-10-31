@@ -10,6 +10,7 @@
 #import "../LogTextView.h"
 #import "../PatreonAuth.h"
 #import "../SettingsViewController.h"
+#import "../tweaks/CNDCCThemingFileBacking.h"
 
 
 static NSString * const kCallRecordingDisclosureAcceptedDefault =
@@ -160,7 +161,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     if (self.package.kind == PackageInstallKindControlCenterTheming) {
         if (intent == PackageQueueIntentInstall) return @"Apply Pending";
         if (intent == PackageQueueIntentUninstall) return @"Restore Pending";
-        return @"Manual Control";
+        return CNDCCThemingFileBackingHasJournaledState()
+            ? @"Active" : @"Stock";
     }
     if (self.package.kind == PackageInstallKindLockscreenGlyphs) {
         if (self.glyphOperationInProgress) return @"Updating live glyphs…";
@@ -221,6 +223,10 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
 {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:self.package];
     if (intent != PackageQueueIntentNone) return self.view.tintColor;
+    if (self.package.kind == PackageInstallKindControlCenterTheming &&
+        CNDCCThemingFileBackingHasJournaledState()) {
+        return UIColor.systemGreenColor;
+    }
     if (self.package.isAppliedForCurrentSystemEpoch) {
         return UIColor.systemGreenColor;
     }

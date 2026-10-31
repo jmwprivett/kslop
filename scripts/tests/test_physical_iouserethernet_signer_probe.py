@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "Cyanide/CNDPhysicalIOUserEthernetSignerProbe.m"
 APP_DELEGATE = ROOT / "Cyanide/AppDelegate.m"
+SETTINGS = ROOT / "Cyanide/SettingsViewController.m"
 
 
 class PhysicalIOUserEthernetSignerProbeTests(unittest.TestCase):
@@ -37,10 +38,49 @@ class PhysicalIOUserEthernetSignerProbeTests(unittest.TestCase):
         labels = source.index('report[@"labelResolvedAfterBaseline"]')
         self.assertLess(baseline, labels)
 
-    def test_launch_argument_runs_without_settings_button(self) -> None:
+    def test_launch_argument_also_runs_the_probe(self) -> None:
         source = APP_DELEGATE.read_text()
         self.assertIn('--iouserethernet-signer-probe', source)
         self.assertIn("CNDPhysicalIOUserEthernetSignerProbeRun", source)
+
+    def test_settings_exposes_the_probe_row(self) -> None:
+        settings = SETTINGS.read_text()
+        self.assertIn('"CNDPhysicalIOUserEthernetSignerProbe.h"', settings)
+        self.assertIn(
+            "CNDPhysicalIOUserEthernetSignerProbeIsSupported(&reason)", settings
+        )
+        self.assertIn("Run IOUserEthernet Signer Probe", settings)
+        # The Quick Actions row count stays pinned.
+        self.assertIn("case RootSectionActions:        return 6;", settings)
+
+    def test_finished_probe_does_not_read_as_still_running(self) -> None:
+        source = SOURCE.read_text()
+        # The flag is cleared and the run is over before completion fires, so
+        # the report must not keep its last in-flight state on disk.
+        run_once = source.index("CNDPhysicalSignerRunOnce();")
+        released = source.index(
+            "__sync_lock_release(&gCNDPhysicalSignerProbeRunning);")
+        terminal = source.index('@"state", @"finished"')
+        self.assertLess(run_once, released)
+        self.assertLess(released, terminal)
+
+        # And the completion has to stop the Activity sheet's footer, which
+        # only ends on the installer's completion notification, and rebuild the
+        # row, whose title otherwise keeps reading "… Running…".
+        settings = SETTINGS.read_text()
+        self.assertIn("- (void)finishProbeActivityForRow:(NSInteger)row",
+                      settings)
+        self.assertIn("settings_post_actions_complete_async(", settings)
+        self.assertIn('@"physical-krw-triggered-normal-signer-path";',
+                      settings)
+        self.assertRegex(
+            settings,
+            r"- \(void\)reloadProbeRows\s*\{[^}]*RootSectionProbes",
+        )
+        logged = settings.index('"[IOUSERETHERNET_SIGNER] result=%s report=%s\\n"')
+        finished = settings.index(
+            "[strongSelf finishProbeActivityForRow:row", logged)
+        self.assertLess(logged, finished)
 
 
 if __name__ == "__main__":

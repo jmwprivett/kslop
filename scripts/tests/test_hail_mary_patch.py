@@ -98,13 +98,16 @@ class HailMaryPatchTests(unittest.TestCase):
         wire = wire.split("CNDHailMaryPatchReadGuard", 1)[0]
         self.assertIn('context[@"springBoardTranslationPath"]', wire)
         self.assertGreaterEqual(
-            wire.count("CNDHailMaryPatchTranslationPathMatches("), 2
+            wire.count("CNDHailMaryPatchTranslationPathMatches("), 1
+        )
+        # The post-wire re-check tolerates exactly the private-leaf-entry bit
+        # the kernel sets when it unshares the page table for a wire.
+        self.assertIn(
+            "CNDHailMaryPatchTranslationPathMatchesAfterWire(", wire
         )
         self.assertIn("initialPathStable", wire)
         self.assertIn("translationPathStable", wire)
-        self.assertIn(
-            "finalPathTerminalAddress == springBoardLeafEntryAddress", wire
-        )
+        self.assertIn("kCNDHailMaryPatchPrivateLeafEntryBit", wire)
 
     def test_legacy_landing_and_durable_journals_precede_single_write(self):
         run = SOURCE.read_text().split("void CNDHailMaryPatchRun", 1)[1]

@@ -1,0 +1,159 @@
+{
+  "boundary": {
+    "forbiddenTarget": ".19 method-list IMP text page (level-3 write fault, panic 2026-10-20 23:18)",
+    "sameSubcacheFamilyPreviouslyProvedWritable": "docs/research/hail-mary-data-page-experiment.md",
+    "targetIsNonExecutableData": true,
+    "targetMaxProt": "rw-",
+    "targetSubcache": ".33.dylddata"
+  },
+  "build": "23A341",
+  "cache": {
+    "dataSubcache": {
+      "fileName": "dyld_shared_cache_arm64e.33.dylddata",
+      "sha256": "50aed49dc4a5a8d212a1054258d30f9cc5dfe784005708726af697e92b62f42e",
+      "uuid": "F193189E-840D-3569-816A-2102BCB0FFE5"
+    },
+    "main": {
+      "fileName": "dyld_shared_cache_arm64e",
+      "uuid": "DC5F2F67-1FC8-3905-873B-35D17D1A44E8"
+    }
+  },
+  "helper": {
+    "classCacheSlots": [
+      "0x1ebf517d8",
+      "0x1ebf51640"
+    ],
+    "disassemblyEvidence": [
+      "both special branches load x2 from SpringBoardHome __got",
+      "__got._OBJC_CLASS_$_SBHClockApplicationIcon at #0x298",
+      "__got._OBJC_CLASS_$_SBHCalendarApplicationIcon at #0x270",
+      "the tail loads __got._OBJC_CLASS_$_SBHApplicationIcon at #0x240 and calls applicationIconClass"
+    ],
+    "length": "0x150",
+    "symbol": "-[SBHIconModel iconClassForApplicationWithBundleIdentifier:]",
+    "unslidVMAddress": "0x1be19da24"
+  },
+  "kind": "data-only-clock-calendar-class-got-redirect",
+  "product": "iPhone17,2",
+  "redirect": {
+    "executableTextWritten": false,
+    "methodListWritten": false,
+    "perBoot": false,
+    "perProcess": true,
+    "postRespringObservation": {
+      "calendarValueAfter": "0x1ee45a568",
+      "clockPhysicalFrameAfter": "0x1018e82c000",
+      "clockPhysicalFrameBefore": "0x1016bf64000",
+      "clockValueAfter": "0x1ee45a180",
+      "kernelSlideAfter": "0x42ca0000",
+      "kernelSlideBefore": "0x42ca0000",
+      "observedOn": "2026-10-21T01:04:02Z",
+      "result": "GOT page re-created; both slots original after respring",
+      "spotlightPidAfter": 1283,
+      "spotlightPidBefore": 580,
+      "springBoardPidAfter": 1264,
+      "springBoardPidBefore": 563
+    },
+    "respringRequiredBeforeLiveIconRebuild": false,
+    "respringRevertsPatch": true,
+    "slotValues": [
+      {
+        "from": "0x1eda02180",
+        "label": "Clock",
+        "to": "0x1eda021a8"
+      },
+      {
+        "from": "0x1eda02568",
+        "label": "Calendar",
+        "to": "0x1eda021a8"
+      }
+    ],
+    "staticThemeRecordsTouched": false,
+    "survivesReboot": false,
+    "survivesRespring": false,
+    "writeKind": "two 8-byte class-pointer stores"
+  },
+  "replacement": {
+    "classUnslid": "0x1eda021a8",
+    "gotSlotMapping": {
+      "initProt": 1,
+      "maxProt": 3,
+      "segmentBase": "0x1e6b5c000",
+      "segmentFileOffset": "0x4000",
+      "segmentSize": "0x1e50000",
+      "slotFileOffset": "0x1720240",
+      "subcache": "dyld_shared_cache_arm64e.33.dylddata",
+      "uuid": "F193189E-840D-3569-816A-2102BCB0FFE5"
+    },
+    "gotSlotUnslid": "0x1e8278240",
+    "gotSlotValueUnslid": "0x1eda021a8",
+    "symbol": "_OBJC_CLASS_$_SBHApplicationIcon"
+  },
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "bundle": "com.apple.mobiletimer",
+      "classCacheInitialValue": "0x0000000000000000",
+      "classCacheMapping": {
+        "initProt": 3,
+        "maxProt": 3,
+        "segmentBase": "0x1ea9ac000",
+        "segmentFileOffset": "0x1e54000",
+        "segmentSize": "0x2920000",
+        "slotFileOffset": "0x33f97d8",
+        "subcache": "dyld_shared_cache_arm64e.33.dylddata",
+        "uuid": "F193189E-840D-3569-816A-2102BCB0FFE5"
+      },
+      "classCacheSlotUnslid": "0x1ebf517d8",
+      "label": "Clock",
+      "originalClassSymbol": "_OBJC_CLASS_$_SBHClockApplicationIcon",
+      "originalClassUnslid": "0x1eda02180",
+      "originalSlotValueUnslid": "0x1eda02180",
+      "redirectedClassSymbol": "_OBJC_CLASS_$_SBHApplicationIcon",
+      "redirectedClassUnslid": "0x1eda021a8",
+      "slotMapping": {
+        "initProt": 1,
+        "maxProt": 3,
+        "segmentBase": "0x1e6b5c000",
+        "segmentFileOffset": "0x4000",
+        "segmentSize": "0x1e50000",
+        "slotFileOffset": "0x1720298",
+        "subcache": "dyld_shared_cache_arm64e.33.dylddata",
+        "uuid": "F193189E-840D-3569-816A-2102BCB0FFE5"
+      },
+      "slotUnslid": "0x1e8278298"
+    },
+    {
+      "bundle": "com.apple.mobilecal",
+      "classCacheInitialValue": "0x0000000000000000",
+      "classCacheMapping": {
+        "initProt": 3,
+        "maxProt": 3,
+        "segmentBase": "0x1ea9ac000",
+        "segmentFileOffset": "0x1e54000",
+        "segmentSize": "0x2920000",
+        "slotFileOffset": "0x33f9640",
+        "subcache": "dyld_shared_cache_arm64e.33.dylddata",
+        "uuid": "F193189E-840D-3569-816A-2102BCB0FFE5"
+      },
+      "classCacheSlotUnslid": "0x1ebf51640",
+      "label": "Calendar",
+      "originalClassSymbol": "_OBJC_CLASS_$_SBHCalendarApplicationIcon",
+      "originalClassUnslid": "0x1eda02568",
+      "originalSlotValueUnslid": "0x1eda02568",
+      "redirectedClassSymbol": "_OBJC_CLASS_$_SBHApplicationIcon",
+      "redirectedClassUnslid": "0x1eda021a8",
+      "slotMapping": {
+        "initProt": 1,
+        "maxProt": 3,
+        "segmentBase": "0x1e6b5c000",
+        "segmentFileOffset": "0x4000",
+        "segmentSize": "0x1e50000",
+        "slotFileOffset": "0x1720270",
+        "subcache": "dyld_shared_cache_arm64e.33.dylddata",
+        "uuid": "F193189E-840D-3569-816A-2102BCB0FFE5"
+      },
+      "slotUnslid": "0x1e8278270"
+    }
+  ]
+}

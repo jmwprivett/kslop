@@ -194,6 +194,57 @@ class HailMaryImpRedirectTests(unittest.TestCase):
         self.assertIn('--hail-mary-imp-apply', app_delegate)
         self.assertIn('--hail-mary-imp-restore', app_delegate)
 
+    def test_transparency_fix_uses_springboard_only_proof(self):
+        remix = (ROOT / "Cyanide/installer/CNDSnowBoardRemix.m").read_text()
+        source = SOURCE.read_text()
+        resolver = RESOLVER.read_text()
+        probe = (ROOT / "Cyanide/CNDHailMaryProbe.m").read_text()
+        header = RESOLVER_HEADER.read_text()
+
+        fix = remix.split(
+            "CNDRemixRunTransparencyFixOperation", 1
+        )[1].split(
+            "@implementation CNDSnowBoardRemix", 1
+        )[0]
+        for banned in (
+            "spotlight-identity",
+            "spotlight-presentation",
+            'CNDKernelTaskBridgeResolveProcessPID(\n        @"Spotlight"',
+            "CNDIconServicesConsumerHookPresentSpotlight",
+        ):
+            self.assertNotIn(banned, fix, banned)
+        self.assertIn("CNDHailMaryProofModeSpringBoardOnly", fix)
+        self.assertIn(
+            "CNDHailMaryImpRedirectRunWithMode", fix
+        )
+        self.assertIn("CNDHailMaryReadOnlyDataPageRunWithMode", fix)
+
+        self.assertIn("CNDHailMaryProofModeSpringBoardOnly", header)
+        self.assertIn(
+            "CNDHailMaryReadOnlyDataPageResolveDispatchEntryWithMode",
+            resolver,
+        )
+        single = probe.split(
+            "CNDHailMaryProvePhysicalPageSpringBoardOnly", 1
+        )[1].split(
+            "void CNDHailMaryProbeRunWithMode", 1
+        )[0]
+        self.assertNotIn("Spotlight", single)
+        self.assertIn("singleProcess", single)
+        run = probe.split("void CNDHailMaryProbeRunWithMode", 1)[1]
+        self.assertIn("CNDHailMaryProofModeSpringBoardOnly", run)
+        self.assertIn("CNDHailMaryCompareSpringBoardOnly", run)
+
+        # The shared-pair experiment stays the default for every other caller.
+        self.assertIn(
+            "CNDHailMaryProbeRunWithMode(CNDHailMaryProofModeSharedPair",
+            probe,
+        )
+        self.assertIn(
+            "CNDHailMaryProofModeSharedPair, operation, completion",
+            source,
+        )
+
     def test_other_hail_mary_writers_refuse_while_redirect_runs(self):
         for path in LEGACY_WRITERS:
             source = path.read_text()

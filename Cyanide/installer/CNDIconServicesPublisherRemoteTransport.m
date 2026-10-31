@@ -110,6 +110,18 @@ _Static_assert(offsetof(CNDIconServicesStoreIndexValue23A341,
 @property (nonatomic, assign) uint64_t stockStoreUnitClass;
 @property (nonatomic, assign) BOOL auditABIReady;
 @property (nonatomic, assign) uint64_t auditSourceRegistry;
+@property (nonatomic, assign) int auditSourceRegistryFileDescriptor;
+@property (nonatomic, assign) uint64_t auditSourceRegistryFileLength;
+@property (nonatomic, assign) BOOL auditSourceRegistryFileWritable;
+@property (nonatomic, copy) NSString *auditApplicationBundleIdentifier;
+@property (nonatomic, assign) uint64_t auditApplicationTargetBundle;
+@property (nonatomic, assign) uint64_t auditApplicationLocalIcon;
+@property (nonatomic, assign) uint64_t auditApplicationCanonicalIcon;
+@property (nonatomic, assign) uint64_t auditApplicationCanonicalImageCache;
+@property (nonatomic, assign) BOOL stockApplicationContextABIReady;
+@property (nonatomic, copy) NSData *auditApplicationSourceIdentifierData;
+@property (nonatomic, copy) NSString *auditApplicationSourceResolution;
+@property (nonatomic, assign) NSUInteger auditApplicationContextSerial;
 @property (nonatomic, assign) uint64_t descriptorTemplate;
 @property (nonatomic, copy) NSString *descriptorTemplateKey;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *descriptorTemplates;
@@ -161,6 +173,9 @@ static CNDIconServicesPublisherBatchState *cnd_publisher_batch_state(void)
 {
     return g_cnd_publisher_current_transport.batchState;
 }
+
+static BOOL cnd_publisher_clear_audit_application_context(
+    CNDIconServicesPublisherBatchState *batch);
 
 static NSDictionary<NSString *, id> *cnd_remote_transport_call(
     CNDIconServicesPublisherRemoteTransport *transport,
@@ -2144,8 +2159,13 @@ cnd_publisher_run_stock_store(NSString *bundleIdentifier,
     __block BOOL storeVerified = NO;
     __block BOOL stagingRetained = NO;
     __block BOOL stagingUnmapped = !replacing;
+    __block BOOL applicationContextReused = NO;
+    __block BOOL applicationContextCreated = NO;
+    __block BOOL applicationContextOwnedByBatch = NO;
     __block NSUInteger releaseCount = 0;
     __block NSUInteger persistentIndexIdentityAttempts = 0;
+    __block NSUInteger applicationContextSerial = 0;
+    __block NSTimeInterval applicationContextSetupSeconds = 0;
     __block CNDIconServicesPersistentIndexTokenResult
         persistentIndexTokenResult = {0};
     __block CNDIconServicesSourceRegistryRepairResult
@@ -2264,23 +2284,93 @@ cnd_publisher_run_stock_store(NSString *bundleIdentifier,
                     batch, borrowedBatchSession, descriptorClass,
                     specification, YES,
                     &descriptorDiagnostics, &failure);
-                targetBundle = r_nsstr_retained(bundleIdentifier.UTF8String);
-                uint64_t iconAllocation = targetBundle
-                    ? r_msg2(iconClass, "alloc", 0, 0, 0, 0) : 0;
-                localIcon = iconAllocation
-                    ? r_msg2(iconAllocation, "initWithBundleIdentifier:",
-                             targetBundle, 0, 0, 0)
-                    : 0;
-                uint64_t canonicalIcon = localIcon
-                    ? r_msg2(manager, "findOrRegisterIcon:",
-                             localIcon, 0, 0, 0)
-                    : 0;
-                uint64_t canonicalCache = canonicalIcon
-                    ? r_msg2(canonicalIcon, "imageCache", 0, 0, 0, 0)
-                    : 0;
-                BOOL cacheABI = canonicalCache &&
-                    r_responds(canonicalCache, "setImage:forDescriptor:") &&
-                    r_responds(canonicalCache, "imageForDescriptor:");
+                CFAbsoluteTime contextStartedAt =
+                    CFAbsoluteTimeGetCurrent();
+                BOOL contextMatches = borrowedBatchSession &&
+                    batch.stockApplicationContextABIReady &&
+                    [batch.auditApplicationBundleIdentifier
+                        isEqualToString:bundleIdentifier] &&
+                    batch.auditApplicationTargetBundle &&
+                    batch.auditApplicationLocalIcon &&
+                    batch.auditApplicationCanonicalIcon &&
+                    batch.auditApplicationCanonicalImageCache;
+                uint64_t canonicalIcon = 0;
+                uint64_t canonicalCache = 0;
+                BOOL cacheABI = NO;
+                if (contextMatches) {
+                    targetBundle = batch.auditApplicationTargetBundle;
+                    localIcon = batch.auditApplicationLocalIcon;
+                    canonicalIcon = batch.auditApplicationCanonicalIcon;
+                    canonicalCache =
+                        batch.auditApplicationCanonicalImageCache;
+                    cacheABI = YES;
+                    applicationContextReused = YES;
+                    applicationContextOwnedByBatch = YES;
+                    applicationContextSerial =
+                        batch.auditApplicationContextSerial;
+                } else {
+                    BOOL hadContext = borrowedBatchSession &&
+                        (batch.auditApplicationTargetBundle ||
+                         batch.auditApplicationLocalIcon ||
+                         batch.auditApplicationCanonicalIcon);
+                    if (hadContext &&
+                        !cnd_publisher_clear_audit_application_context(batch)) {
+                        failure = @"stock-api-app-context-release";
+                        break;
+                    }
+                    targetBundle =
+                        r_nsstr_retained(bundleIdentifier.UTF8String);
+                    uint64_t iconAllocation = targetBundle
+                        ? r_msg2(iconClass, "alloc", 0, 0, 0, 0) : 0;
+                    localIcon = iconAllocation
+                        ? r_msg2(iconAllocation,
+                                 "initWithBundleIdentifier:",
+                                 targetBundle, 0, 0, 0)
+                        : 0;
+                    canonicalIcon = localIcon
+                        ? r_msg2(manager, "findOrRegisterIcon:",
+                                 localIcon, 0, 0, 0)
+                        : 0;
+                    canonicalCache = canonicalIcon
+                        ? r_msg2(canonicalIcon, "imageCache", 0, 0, 0, 0)
+                        : 0;
+                    cacheABI = canonicalCache &&
+                        r_responds(
+                            canonicalCache, "setImage:forDescriptor:") &&
+                        r_responds(
+                            canonicalCache, "imageForDescriptor:");
+                    if (borrowedBatchSession && descriptor && targetBundle &&
+                        localIcon && canonicalIcon && cacheABI &&
+                        remote_call_current_success()) {
+                        uint64_t retainedCanonicalIcon = r_msg2(
+                            canonicalIcon, "retain", 0, 0, 0, 0);
+                        if (retainedCanonicalIcon != canonicalIcon ||
+                            !remote_call_current_success()) {
+                            failure = @"stock-api-app-context-retain";
+                            break;
+                        }
+                        batch.auditApplicationBundleIdentifier =
+                            bundleIdentifier;
+                        batch.auditApplicationTargetBundle = targetBundle;
+                        batch.auditApplicationLocalIcon = localIcon;
+                        batch.auditApplicationCanonicalIcon =
+                            retainedCanonicalIcon;
+                        batch.auditApplicationCanonicalImageCache =
+                            canonicalCache;
+                        batch.auditApplicationSourceIdentifierData = nil;
+                        batch.auditApplicationSourceResolution = nil;
+                        batch.stockApplicationContextABIReady = YES;
+                        batch.auditApplicationContextSerial++;
+                        applicationContextCreated = YES;
+                        applicationContextOwnedByBatch = YES;
+                        applicationContextSerial =
+                            batch.auditApplicationContextSerial;
+                    }
+                }
+                if (!applicationContextReused) {
+                    applicationContextSetupSeconds =
+                        CFAbsoluteTimeGetCurrent() - contextStartedAt;
+                }
                 if (!descriptor || !targetBundle || !localIcon ||
                     !canonicalIcon || !cacheABI ||
                     !remote_call_current_success()) {
@@ -2708,7 +2798,8 @@ cnd_publisher_run_stock_store(NSString *bundleIdentifier,
 
             uint64_t ownedObjects[] = {
                 rollbackUnit, storeUnit, replacement, themedData, stockResponse,
-                localIcon, targetBundle,
+                applicationContextOwnedByBatch ? 0 : localIcon,
+                applicationContextOwnedByBatch ? 0 : targetBundle,
             };
             for (NSUInteger index = 0;
                  index < sizeof(ownedObjects) / sizeof(ownedObjects[0]);
@@ -2833,6 +2924,16 @@ cnd_publisher_run_stock_store(NSString *bundleIdentifier,
     report[@"observedDescriptorOptions"] = specification[@"options"];
     report[@"descriptorSpecification"] = specification;
     report[@"descriptorDiagnostics"] = descriptorDiagnostics ?: @{};
+    report[@"applicationContextReused"] = @(applicationContextReused);
+    report[@"applicationContextCreatedForVariant"] =
+        @(applicationContextCreated);
+    report[@"applicationContextOwnedByBatch"] =
+        @(applicationContextOwnedByBatch);
+    report[@"applicationContextSerial"] = @(applicationContextSerial);
+    report[@"applicationContextSetupSeconds"] =
+        @(applicationContextSetupSeconds);
+    report[@"applicationContextScope"] = borrowedBatchSession
+        ? @"application" : @"variant";
     report[@"stockUUIDPresentAtGeneration"] = @(stockCaptured);
     report[@"canonicalUUIDResolvedFromCache"] = @(cacheVerified);
     report[@"cacheIdentityBoundByDataAndToken"] = @(cacheVerified);
@@ -2932,6 +3033,10 @@ cnd_publisher_run_stock_store(NSString *bundleIdentifier,
         @(sourceRegistryRepairResult.writeVerified);
     report[@"sourceRegistryFreshReadbackVerified"] =
         @(sourceRegistryRepairResult.freshReadbackVerified);
+    report[@"sourceRegistryReadTransport"] =
+        @"validated-file-bounded-pread";
+    report[@"sourceRegistryFileLength"] =
+        @(batch.auditSourceRegistryFileLength);
     report[@"sourceRegistryReadbackStage"] =
         [failure hasPrefix:@"stock-api-source-registry-readback"]
         ? failure : (sourceRegistryRepairResult.freshReadbackVerified
@@ -4278,6 +4383,26 @@ static uint64_t cnd_publisher_audit_object_ivar(
         0, 0, 0, 0, 0, 0) : 0;
 }
 
+static BOOL cnd_publisher_close_source_registry_file(
+    CNDIconServicesPublisherBatchState *batch)
+{
+    if (!batch) return NO;
+    int fileDescriptor = batch.auditSourceRegistryFileDescriptor;
+    uint64_t fileLength = batch.auditSourceRegistryFileLength;
+    if (fileDescriptor < 0 && !fileLength) return YES;
+    if (fileDescriptor < 0 || !fileLength) return NO;
+    int result = (int)r_dlsym_call(
+        R_TIMEOUT, "close", (uint64_t)fileDescriptor,
+        0, 0, 0, 0, 0, 0, 0);
+    BOOL closed = result == 0 && remote_call_current_success();
+    if (closed) {
+        batch.auditSourceRegistryFileDescriptor = -1;
+        batch.auditSourceRegistryFileLength = 0;
+        batch.auditSourceRegistryFileWritable = NO;
+    }
+    return closed;
+}
+
 /* Open the daemon's existing persistent UUID -> LaunchServices source table.
  * ISIconManager.iconCache is an ISIconCache; the
  * unitSourceRegistry getter belongs to the daemon-only ISMutableIconCache
@@ -4285,19 +4410,37 @@ static uint64_t cnd_publisher_audit_object_ivar(
  * is an ownership error. iOS 26's verified ISMutableIconCache initializer
  * constructs this exact table at <cacheURL>/store-source-registry.map with
  * capacity 4000. This accessor first proves that file exists, then injects its
- * validated mapping into one retained ISStoreMapTable. It invokes no mutating
- * map selector itself; the AirDrop publication repair below is the sole writer
- * and always flushes and verifies a freshly reopened mapping. */
+ * validated mapping into one retained ISStoreMapTable. A separate bounded,
+ * read-only descriptor supplies bytes through pread(2) because the concrete
+ * mapped NSData's scalar CoreFoundation bridge does not return reliably across
+ * the physical arm64e synthetic-call boundary. Short reads fail closed rather
+ * than risking a mapping fault if the live file changes. It invokes no
+ * mutating map selector itself; the AirDrop publication repair below is the
+ * sole writer and always flushes and verifies a freshly reopened mapping. */
 static uint64_t cnd_publisher_source_registry_map(
     CNDIconServicesPublisherBatchState *batch,
-    uint64_t managerCache, uint64_t scratch, NSString **failureOut)
+    uint64_t managerCache, uint64_t scratch, BOOL writableFile,
+    NSString **failureOut)
 {
     if (failureOut) *failureOut = nil;
     if (!batch || !managerCache || !scratch) {
         if (failureOut) *failureOut = @"audit-source-registry-input";
         return 0;
     }
-    if (batch.auditSourceRegistry) return batch.auditSourceRegistry;
+    if (batch.auditSourceRegistry) {
+        if (batch.auditSourceRegistryFileDescriptor >= 0 &&
+            batch.auditSourceRegistryFileLength &&
+            (!writableFile || batch.auditSourceRegistryFileWritable)) {
+            return batch.auditSourceRegistry;
+        }
+        if (failureOut) *failureOut = @"audit-source-registry-mapping-state";
+        return 0;
+    }
+    if (batch.auditSourceRegistryFileDescriptor >= 0 ||
+        batch.auditSourceRegistryFileLength) {
+        if (failureOut) *failureOut = @"audit-source-registry-mapping-state";
+        return 0;
+    }
 
     uint64_t cacheClass = r_dlsym_call(
         R_TIMEOUT, "object_getClass", managerCache, 0, 0, 0, 0, 0, 0, 0);
@@ -4386,12 +4529,59 @@ static uint64_t cnd_publisher_source_registry_map(
         return 0;
     }
 
+    BOOL pathCopied = (r_dlsym_call(
+        R_TIMEOUT, "CFURLGetFileSystemRepresentation",
+        registryURL, 1, scratch, PATH_MAX,
+        0, 0, 0, 0) & 1U) != 0;
+    uint8_t pathBytes[PATH_MAX] = {0};
+    BOOL pathRead = pathCopied && remote_call_current_success() &&
+        remote_read(scratch, pathBytes, sizeof(pathBytes));
+    BOOL pathTerminated = pathRead &&
+        memchr(pathBytes, '\0', sizeof(pathBytes)) != NULL;
+    if (!pathTerminated) {
+        if (failureOut) *failureOut =
+            @"audit-source-registry-file-representation";
+        return 0;
+    }
+    int64_t fileDescriptor = (int64_t)r_dlsym_call(
+        R_TIMEOUT, "open", scratch,
+        (writableFile ? O_RDWR : O_RDONLY) | O_CLOEXEC,
+        0, 0, 0, 0, 0, 0);
+    if (fileDescriptor < 0 || !remote_call_current_success()) {
+        if (failureOut) *failureOut = @"audit-source-registry-file-open";
+        return 0;
+    }
+    int statResult = (int)r_dlsym_call(
+        R_TIMEOUT, "fstat", (uint64_t)fileDescriptor, scratch,
+        0, 0, 0, 0, 0, 0);
+    struct stat fileStatus = {0};
+    BOOL statusRead = statResult == 0 && remote_call_current_success() &&
+        remote_read(scratch, &fileStatus, sizeof(fileStatus));
+    uint64_t fileLength = statusRead && fileStatus.st_size > 0
+        ? (uint64_t)fileStatus.st_size : 0;
+    if (!statusRead || !S_ISREG(fileStatus.st_mode) ||
+        fileLength < 0x14 ||
+        fileLength > CNDIconServicesPublisherMaximumPersistentIndexLength) {
+        (void)r_dlsym_call(
+            R_TIMEOUT, "close", (uint64_t)fileDescriptor,
+            0, 0, 0, 0, 0, 0, 0);
+        if (failureOut) *failureOut = !statusRead
+            ? @"audit-source-registry-file-stat"
+            : (!S_ISREG(fileStatus.st_mode)
+                ? @"audit-source-registry-file-type"
+                : @"audit-source-registry-file-length");
+        return 0;
+    }
+
     uint64_t allocation = r_msg2(mapClass, "alloc", 0, 0, 0, 0);
     uint64_t map = allocation
         ? r_msg2(allocation, "initWithURL:capacity:",
                  registryURL, 4000, 0, 0)
         : 0;
     if (!map || !remote_call_current_success()) {
+        (void)r_dlsym_call(
+            R_TIMEOUT, "close", (uint64_t)fileDescriptor,
+            0, 0, 0, 0, 0, 0, 0);
         if (failureOut) *failureOut = @"audit-source-registry-open";
         return 0;
     }
@@ -4399,6 +4589,9 @@ static uint64_t cnd_publisher_source_registry_map(
         map, "_data", 0x10, scratch);
     if (!dataIvar) {
         (void)r_msg2(map, "release", 0, 0, 0, 0);
+        (void)r_dlsym_call(
+            R_TIMEOUT, "close", (uint64_t)fileDescriptor,
+            0, 0, 0, 0, 0, 0, 0);
         if (failureOut) *failureOut = @"audit-source-registry-data-ivar";
         return 0;
     }
@@ -4414,11 +4607,19 @@ static uint64_t cnd_publisher_source_registry_map(
         if (remote_call_current_success()) {
             (void)r_msg2(map, "release", 0, 0, 0, 0);
         }
+        if (remote_call_current_success()) {
+            (void)r_dlsym_call(
+                R_TIMEOUT, "close", (uint64_t)fileDescriptor,
+                0, 0, 0, 0, 0, 0, 0);
+        }
         if (failureOut) *failureOut =
             @"audit-source-registry-data-injection";
         return 0;
     }
     batch.auditSourceRegistry = map;
+    batch.auditSourceRegistryFileDescriptor = (int)fileDescriptor;
+    batch.auditSourceRegistryFileLength = fileLength;
+    batch.auditSourceRegistryFileWritable = writableFile;
     return batch.auditSourceRegistry;
 }
 
@@ -4538,14 +4739,20 @@ _Static_assert(sizeof(CNDIconServicesSourceRegistryNodeHeader23A341) == 0x24,
 
 static NSArray<NSData *> *cnd_publisher_source_registry_entries(
     uint64_t registry, uint64_t unitUUID, uint64_t scratch,
+    int fileDescriptor, uint64_t fileLength,
     NSString **failureOut)
 {
     if (failureOut) *failureOut = nil;
-    if (!registry || !unitUUID || !scratch) {
+    if (!registry || !unitUUID || !scratch || fileDescriptor < 0) {
         if (failureOut) *failureOut = @"stock-api-source-registry-input";
         return nil;
     }
-
+    if (fileLength < 0x14 ||
+        fileLength > CNDIconServicesPublisherMaximumPersistentIndexLength) {
+        if (failureOut) *failureOut =
+            @"stock-api-source-registry-readback-length";
+        return nil;
+    }
     uint64_t mapData = cnd_publisher_audit_object_ivar(
         registry, "_data", 0x10, scratch);
     uint64_t mapDataClass = mapData ? r_dlsym_call(
@@ -4553,11 +4760,7 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
         0, 0, 0, 0, 0, 0, 0) : 0;
     BOOL mapDataABI = mapDataClass &&
         cnd_publisher_remote_method_has_types(
-            mapDataClass, "_ISStoreIndex_isValid", "B16@0:8", NULL) &&
-        cnd_publisher_remote_method_has_types(
-            mapDataClass, "length", "Q16@0:8", NULL) &&
-        cnd_publisher_remote_method_has_types(
-            mapDataClass, "bytes", "r^v16@0:8", "^v16@0:8");
+            mapDataClass, "_ISStoreIndex_isValid", "B16@0:8", NULL);
     if (!mapDataABI || !remote_call_current_success()) {
         if (failureOut) *failureOut = @"stock-api-source-registry-readback-abi";
         return nil;
@@ -4568,52 +4771,52 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
         if (failureOut) *failureOut = @"stock-api-source-registry-readback-map";
         return nil;
     }
-    /* The mapped-data concrete class can return through a Foundation
-     * implementation whose PAC epilogue is not a reliable synthetic
-     * objc_msgSend completion boundary on physical arm64e. IconServices'
-     * immediately preceding _ISStoreIndex_isValid call reads the same length
-     * successfully inside the target. Keep the scalar/pointer access inside
-     * CoreFoundation for the same reason, then consume only its C return. */
-    int64_t signedMapLength = (int64_t)r_dlsym_call(
-        R_TIMEOUT, "CFDataGetLength", mapData,
-        0, 0, 0, 0, 0, 0, 0);
-    uint64_t mapLength = signedMapLength > 0
-        ? (uint64_t)signedMapLength : 0;
-    if (mapLength < 0x14 ||
-        mapLength > CNDIconServicesPublisherMaximumPersistentIndexLength ||
-        !remote_call_current_success()) {
-        if (failureOut) *failureOut = @"stock-api-source-registry-readback-length";
+    int statBeforeResult = (int)r_dlsym_call(
+        R_TIMEOUT, "fstat", (uint64_t)fileDescriptor, scratch,
+        0, 0, 0, 0, 0, 0);
+    struct stat statusBefore = {0};
+    BOOL statusBeforeRead = statBeforeResult == 0 &&
+        remote_call_current_success() &&
+        remote_read(scratch, &statusBefore, sizeof(statusBefore));
+    if (!statusBeforeRead || !S_ISREG(statusBefore.st_mode) ||
+        statusBefore.st_size < 0 ||
+        (uint64_t)statusBefore.st_size != fileLength) {
+        if (failureOut) *failureOut =
+            @"stock-api-source-registry-readback-file";
         return nil;
     }
-    uint64_t mapBytes = r_dlsym_call(
-        R_TIMEOUT, "CFDataGetBytePtr", mapData,
-        0, 0, 0, 0, 0, 0, 0);
-    if (!mapBytes || !remote_call_current_success()) {
-        if (failureOut) *failureOut = @"stock-api-source-registry-readback-bytes";
-        return nil;
-    }
-
-    uint64_t copiedHeader = r_dlsym_call(
-        R_TIMEOUT, "memcpy", scratch, mapBytes, 0x14,
-        0, 0, 0, 0, 0);
+    int64_t headerRead = (int64_t)r_dlsym_call(
+        R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
+        scratch, 0x14, 0,
+        0, 0, 0, 0);
     uint8_t headerBytes[0x14] = {0};
-    if (copiedHeader != scratch || !remote_call_current_success() ||
+    if (headerRead != sizeof(headerBytes) ||
+        !remote_call_current_success() ||
         !remote_read(scratch, headerBytes, sizeof(headerBytes))) {
         if (failureOut) *failureOut = @"stock-api-source-registry-readback-header-copy";
         return nil;
     }
     uint32_t bucketCount = 0;
     uint32_t nodeBytes = 0;
+    uint32_t format = 0;
+    uint32_t version = 0;
+    memcpy(&format, headerBytes, sizeof(format));
+    memcpy(&version, headerBytes + 0x4, sizeof(version));
     memcpy(&bucketCount, headerBytes + 0x0c, sizeof(bucketCount));
     memcpy(&nodeBytes, headerBytes + 0x10, sizeof(nodeBytes));
+    if (format != 11U || version != 1U) {
+        if (failureOut) *failureOut =
+            @"stock-api-source-registry-readback-header";
+        return nil;
+    }
     if (!bucketCount || bucketCount > (1U << 20)) {
         if (failureOut) *failureOut = @"stock-api-source-registry-readback-capacity";
         return nil;
     }
     uint64_t nodesOffset = 0x14 +
         (uint64_t)bucketCount * sizeof(uint64_t);
-    if (UINT64_MAX - mapBytes < mapLength ||
-        nodesOffset > mapLength || nodeBytes > mapLength - nodesOffset) {
+    if (nodesOffset > fileLength ||
+        nodeBytes > fileLength - nodesOffset) {
         if (failureOut) *failureOut = @"stock-api-source-registry-readback-extent";
         return nil;
     }
@@ -4628,20 +4831,20 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
     uint64_t uuidWords[2] = {0};
     memcpy(uuidWords, uuidBytes, sizeof(uuidWords));
     uint64_t bucketIndex = (uuidWords[0] ^ uuidWords[1]) % bucketCount;
-    uint64_t bucketReferenceAddress = mapBytes + 0x14 +
+    uint64_t bucketReferenceOffset = 0x14 +
         bucketIndex * sizeof(uint64_t);
-    uint64_t copiedReference = r_dlsym_call(
-        R_TIMEOUT, "memcpy", scratch + 0x80,
-        bucketReferenceAddress, sizeof(uint64_t), 0, 0, 0, 0, 0);
+    int64_t referenceRead = (int64_t)r_dlsym_call(
+        R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
+        scratch + 0x80, sizeof(uint64_t), bucketReferenceOffset,
+        0, 0, 0, 0);
     uint64_t reference = 0;
-    if (copiedReference != scratch + 0x80 ||
+    if (referenceRead != sizeof(reference) ||
         !remote_call_current_success() ||
         !remote_read(scratch + 0x80, &reference, sizeof(reference))) {
         if (failureOut) *failureOut = @"stock-api-source-registry-readback-bucket-copy";
         return nil;
     }
 
-    uint64_t nodesStart = mapBytes + nodesOffset;
     NSMutableArray<NSData *> *entries = [NSMutableArray array];
     NSUInteger nodesInspected = 0;
     while (reference && nodesInspected++ < 4096U) {
@@ -4655,12 +4858,13 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
             return nil;
         }
 
-        uint64_t nodeAddress = nodesStart + referencedOffset;
+        uint64_t nodeOffset = nodesOffset + referencedOffset;
         CNDIconServicesSourceRegistryNodeHeader23A341 node = {0};
-        uint64_t copiedNode = r_dlsym_call(
-            R_TIMEOUT, "memcpy", scratch + 0x100, nodeAddress,
-            sizeof(node), 0, 0, 0, 0, 0);
-        BOOL nodeRead = copiedNode == scratch + 0x100 &&
+        int64_t nodeByteCount = (int64_t)r_dlsym_call(
+            R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
+            scratch + 0x100, sizeof(node), nodeOffset,
+            0, 0, 0, 0);
+        BOOL nodeRead = nodeByteCount == sizeof(node) &&
             remote_call_current_success() &&
             remote_read(scratch + 0x100, &node, sizeof(node));
         if (!nodeRead) {
@@ -4686,13 +4890,13 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
                     @"stock-api-source-registry-readback-payload-bounds";
                 return nil;
             }
-            uint64_t copiedPayload = r_dlsym_call(
-                R_TIMEOUT, "memcpy", scratch + 0x200,
-                nodeAddress + sizeof(node), payloadLength,
-                0, 0, 0, 0, 0);
+            int64_t payloadByteCount = (int64_t)r_dlsym_call(
+                R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
+                scratch + 0x200, payloadLength,
+                nodeOffset + sizeof(node), 0, 0, 0, 0);
             NSMutableData *payload =
                 [NSMutableData dataWithLength:payloadLength];
-            if (copiedPayload != scratch + 0x200 ||
+            if (payloadByteCount != (int64_t)payloadLength ||
                 !remote_call_current_success() ||
                 !remote_read(scratch + 0x200,
                              payload.mutableBytes, payload.length)) {
@@ -4717,6 +4921,26 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
     }
     if (reference) {
         if (failureOut) *failureOut = @"stock-api-source-registry-readback-limit";
+        return nil;
+    }
+    int statAfterResult = (int)r_dlsym_call(
+        R_TIMEOUT, "fstat", (uint64_t)fileDescriptor, scratch,
+        0, 0, 0, 0, 0, 0);
+    struct stat statusAfter = {0};
+    BOOL statusAfterRead = statAfterResult == 0 &&
+        remote_call_current_success() &&
+        remote_read(scratch, &statusAfter, sizeof(statusAfter));
+    BOOL fileUnchanged = statusAfterRead &&
+        statusAfter.st_dev == statusBefore.st_dev &&
+        statusAfter.st_ino == statusBefore.st_ino &&
+        statusAfter.st_size == statusBefore.st_size &&
+        statusAfter.st_mtimespec.tv_sec == statusBefore.st_mtimespec.tv_sec &&
+        statusAfter.st_mtimespec.tv_nsec == statusBefore.st_mtimespec.tv_nsec &&
+        statusAfter.st_ctimespec.tv_sec == statusBefore.st_ctimespec.tv_sec &&
+        statusAfter.st_ctimespec.tv_nsec == statusBefore.st_ctimespec.tv_nsec;
+    if (!fileUnchanged) {
+        if (failureOut) *failureOut =
+            @"stock-api-source-registry-readback-changed";
         return nil;
     }
     return [entries copy];
@@ -4784,7 +5008,7 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
     if (!result.identifiersResolved) goto finish;
 
     uint64_t registry = cnd_publisher_source_registry_map(
-        batch, managerCache, scratch, NULL);
+        batch, managerCache, scratch, YES, NULL);
     uint64_t registryClass = registry ? r_dlsym_call(
         R_TIMEOUT, "object_getClass", registry,
         0, 0, 0, 0, 0, 0, 0) : 0;
@@ -4802,7 +5026,10 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
     }
 
     registered = cnd_publisher_source_registry_entries(
-        registry, unitUUID, scratch, &readbackFailure);
+        registry, unitUUID, scratch,
+        batch.auditSourceRegistryFileDescriptor,
+        batch.auditSourceRegistryFileLength,
+        &readbackFailure);
     if (!registered || readbackFailure) {
         failure = readbackFailure ?:
             @"stock-api-source-registry-readback";
@@ -4836,45 +5063,46 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
             }
         }
 
-        uint64_t mapData = cnd_publisher_audit_object_ivar(
-            registry, "_data", 0x10, scratch);
-        uint64_t mapDataClass = mapData ? r_dlsym_call(
-            R_TIMEOUT, "object_getClass", mapData,
-            0, 0, 0, 0, 0, 0, 0) : 0;
-        BOOL mapDataABI = mapDataClass &&
-            cnd_publisher_remote_method_has_types(
-                mapDataClass, "length", "Q16@0:8", NULL) &&
-            cnd_publisher_remote_method_has_types(
-                mapDataClass, "bytes", "r^v16@0:8", "^v16@0:8");
-        int64_t signedMapLength = mapDataABI
+        int fileDescriptor = batch.auditSourceRegistryFileDescriptor;
+        int statResult = fileDescriptor >= 0 &&
+            batch.auditSourceRegistryFileWritable
+            ? (int)r_dlsym_call(
+                R_TIMEOUT, "fstat", (uint64_t)fileDescriptor, scratch,
+                0, 0, 0, 0, 0, 0)
+            : -1;
+        struct stat fileStatus = {0};
+        BOOL statusRead = statResult == 0 &&
+            remote_call_current_success() &&
+            remote_read(scratch, &fileStatus, sizeof(fileStatus));
+        uint64_t fileLength = statusRead && fileStatus.st_size > 0
+            ? (uint64_t)fileStatus.st_size : 0;
+        if (!statusRead || !S_ISREG(fileStatus.st_mode) ||
+            fileLength < 0x14 ||
+            fileLength >
+                CNDIconServicesPublisherMaximumPersistentIndexLength) {
+            failure = @"stock-api-source-registry-write";
+            goto finish;
+        }
+        batch.auditSourceRegistryFileLength = fileLength;
+        uint64_t writableMap = r_dlsym_call(
+            R_TIMEOUT, "mmap", 0, fileLength,
+            PROT_READ | PROT_WRITE, MAP_SHARED,
+            (uint64_t)fileDescriptor, 0, 0, 0);
+        BOOL writableMapReady = writableMap &&
+            writableMap != UINT64_MAX && remote_call_current_success();
+        int64_t syncResult = writableMapReady
             ? (int64_t)r_dlsym_call(
-                R_TIMEOUT, "CFDataGetLength", mapData,
-                0, 0, 0, 0, 0, 0, 0)
-            : 0;
-        uint64_t mapLength = signedMapLength > 0
-            ? (uint64_t)signedMapLength : 0;
-        uint64_t mapBytes = mapLength > 0 &&
-            mapLength <= CNDIconServicesPublisherMaximumPersistentIndexLength
-            ? r_dlsym_call(
-                R_TIMEOUT, "CFDataGetBytePtr", mapData,
-                0, 0, 0, 0, 0, 0, 0)
-            : 0;
-        if (!mapDataABI || !mapBytes || UINT64_MAX - mapBytes < mapLength) {
-            failure = @"stock-api-source-registry-write";
-            goto finish;
-        }
-        uint64_t pageStart = mapBytes & ~(pageSize - 1);
-        uint64_t mapEnd = mapBytes + mapLength;
-        if (UINT64_MAX - mapEnd < pageSize - 1) {
-            failure = @"stock-api-source-registry-write";
-            goto finish;
-        }
-        uint64_t syncEnd = (mapEnd + pageSize - 1) & ~(pageSize - 1);
-        uint64_t syncLength = syncEnd - pageStart;
-        int64_t syncResult = (int64_t)r_dlsym_call(
-            R_TIMEOUT, "msync", pageStart, syncLength, MS_SYNC,
-            0, 0, 0, 0, 0);
-        result.writeFlushed = syncResult == 0 &&
+                R_TIMEOUT, "msync", writableMap, fileLength, MS_SYNC,
+                0, 0, 0, 0, 0)
+            : -1;
+        int64_t unmapResult = writableMapReady &&
+            remote_call_current_success()
+            ? (int64_t)r_dlsym_call(
+                R_TIMEOUT, "munmap", writableMap, fileLength,
+                0, 0, 0, 0, 0, 0)
+            : -1;
+        result.writeFlushed = writableMapReady && syncResult == 0 &&
+            unmapResult == 0 &&
             remote_call_current_success();
         if (!result.writeFlushed) {
             failure = @"stock-api-source-registry-write";
@@ -4882,7 +5110,8 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
         }
 
         immediate = cnd_publisher_source_registry_entries(
-            registry, unitUUID, scratch, &readbackFailure);
+            registry, unitUUID, scratch, fileDescriptor, fileLength,
+            &readbackFailure);
         result.writeVerified = immediate && !readbackFailure &&
             cnd_publisher_source_array_contains_all(
                 immediate, identifierData,
@@ -4900,15 +5129,20 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
      * batch copy forces the verifier through the on-disk mapper again. */
     (void)r_msg2(registry, "release", 0, 0, 0, 0);
     batch.auditSourceRegistry = 0;
-    if (!remote_call_current_success()) {
+    BOOL sourceFileClosed = remote_call_current_success() &&
+        cnd_publisher_close_source_registry_file(batch);
+    if (!sourceFileClosed || !remote_call_current_success()) {
         failure = @"stock-api-source-registry-readback";
         goto finish;
     }
     uint64_t freshRegistry = cnd_publisher_source_registry_map(
-        batch, managerCache, scratch, NULL);
+        batch, managerCache, scratch, YES, NULL);
     freshValues = freshRegistry
         ? cnd_publisher_source_registry_entries(
-            freshRegistry, unitUUID, scratch, &readbackFailure)
+            freshRegistry, unitUUID, scratch,
+            batch.auditSourceRegistryFileDescriptor,
+            batch.auditSourceRegistryFileLength,
+            &readbackFailure)
         : nil;
     result.freshReadbackVerified = freshRegistry && freshValues &&
         !readbackFailure &&
@@ -4927,6 +5161,40 @@ finish:
     return result.freshReadbackVerified && remote_call_current_success();
 }
 
+/* Must be called while the batch session is the active RemoteCall context.
+ * Publication and audit share only this application-scoped graph. The
+ * canonical icon owns its image cache; retaining that icon plus the local
+ * lookup icon and bundle string keeps it valid across descriptor calls
+ * without retaining descriptor/cache/store responses. Audit-only source
+ * identity data is populated lazily when a matrix audit needs it. */
+static BOOL cnd_publisher_clear_audit_application_context(
+    CNDIconServicesPublisherBatchState *batch)
+{
+    if (!batch) return NO;
+    uint64_t canonicalIcon = batch.auditApplicationCanonicalIcon;
+    uint64_t localIcon = batch.auditApplicationLocalIcon;
+    uint64_t targetBundle = batch.auditApplicationTargetBundle;
+    if (canonicalIcon && remote_call_current_success()) {
+        (void)r_msg2(canonicalIcon, "release", 0, 0, 0, 0);
+    }
+    if (localIcon && remote_call_current_success()) {
+        (void)r_msg2(localIcon, "release", 0, 0, 0, 0);
+    }
+    if (targetBundle && remote_call_current_success()) {
+        (void)r_msg2(targetBundle, "release", 0, 0, 0, 0);
+    }
+    BOOL released = remote_call_current_success();
+    batch.auditApplicationBundleIdentifier = nil;
+    batch.auditApplicationTargetBundle = 0;
+    batch.auditApplicationLocalIcon = 0;
+    batch.auditApplicationCanonicalIcon = 0;
+    batch.auditApplicationCanonicalImageCache = 0;
+    batch.stockApplicationContextABIReady = NO;
+    batch.auditApplicationSourceIdentifierData = nil;
+    batch.auditApplicationSourceResolution = nil;
+    return released;
+}
+
 /* Observation-only state classifier for an already-published descriptor. It
  * creates transient descriptor/icon/LaunchServices objects, reads the
  * persistent source-registry map, and invokes cache/store readers. The
@@ -4936,7 +5204,8 @@ finish:
  * generation, cache purge, presentation reload, persistent remove, or write. */
 static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
     NSString *bundleIdentifier,
-    NSDictionary<NSString *, NSNumber *> *descriptorSpecification)
+    NSDictionary<NSString *, NSNumber *> *descriptorSpecification,
+    BOOL retainApplicationContext)
 {
     CNDIconServicesPublisherBatchState *batch = cnd_publisher_batch_state();
     RemoteCallSession *session = batch.session;
@@ -4975,6 +5244,8 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
     __block BOOL sourceRegistryDataPresent = NO;
     __block BOOL currentSourceIdentifierPresent = NO;
     __block BOOL sourceIdentityMatchesCurrentRecord = NO;
+    __block BOOL applicationContextReused = NO;
+    __block NSUInteger applicationContextSerial = 0;
     __block NSUInteger sourceRegistryEntryCount = 0;
     __block uint64_t canonicalIconPointer = 0;
     __block uint64_t canonicalImageCachePointer = 0;
@@ -5003,8 +5274,6 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
     @try {
         remote_call_with_session_suppressing_result_logs(session, ^{
             uint64_t pool = r_autorelease_pool_push();
-            uint64_t targetBundle = 0;
-            uint64_t localIcon = 0;
             do {
                 if (!pool) { failure = @"audit-autorelease-pool"; break; }
 
@@ -5071,38 +5340,181 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
                 abiReady = abi && manager && managerCache && store;
                 if (!abiReady) { failure = @"audit-abi-or-store"; break; }
 
+                BOOL contextMatches =
+                    [batch.auditApplicationBundleIdentifier
+                        isEqualToString:bundleIdentifier] &&
+                    batch.auditApplicationTargetBundle &&
+                    batch.auditApplicationLocalIcon &&
+                    batch.auditApplicationCanonicalIcon &&
+                    batch.auditApplicationCanonicalImageCache &&
+                    batch.auditApplicationSourceIdentifierData.length > 0;
+                if (!contextMatches) {
+                    BOOL hadContext =
+                        batch.auditApplicationTargetBundle ||
+                        batch.auditApplicationLocalIcon ||
+                        batch.auditApplicationCanonicalIcon;
+                    if (hadContext &&
+                        !cnd_publisher_clear_audit_application_context(batch)) {
+                        failure = @"audit-app-context-release";
+                        break;
+                    }
+
+                    uint64_t newTargetBundle =
+                        r_nsstr_retained(bundleIdentifier.UTF8String);
+                    uint64_t iconAllocation = newTargetBundle
+                        ? r_msg2(iconClass, "alloc", 0, 0, 0, 0) : 0;
+                    uint64_t newLocalIcon = iconAllocation
+                        ? r_msg2(iconAllocation, "initWithBundleIdentifier:",
+                                 newTargetBundle, 0, 0, 0)
+                        : 0;
+                    uint64_t newCanonicalIcon = newLocalIcon
+                        ? r_msg2(manager, "findOrRegisterIcon:",
+                                 newLocalIcon, 0, 0, 0)
+                        : 0;
+                    uint64_t newCanonicalCache = newCanonicalIcon
+                        ? cnd_publisher_audit_object_ivar(
+                            newCanonicalIcon, "_imageCache", 0x20,
+                            auditScratch)
+                        : 0;
+                    BOOL newCacheReady = newCanonicalCache &&
+                        cnd_publisher_remote_method_has_types(
+                            r_dlsym_call(
+                                R_TIMEOUT, "object_getClass",
+                                newCanonicalCache, 0, 0, 0, 0, 0, 0, 0),
+                            "imageForDescriptor:", "@24@0:8@16", NULL);
+
+                    uint64_t currentRecord = 0;
+                    uint64_t currentIdentifierObject = 0;
+                    NSString *sourceResolution = @"application-record";
+                    BOOL airDropPseudoBundle = [bundleIdentifier
+                        isEqualToString:
+                            CNDIconServicesPublisherAirDropPseudoBundleIdentifier];
+                    if (newCacheReady && airDropPseudoBundle) {
+                        NSUInteger providerIdentifierCount = 0;
+                        uint64_t providerIdentifiers =
+                            cnd_publisher_resolve_airdrop_source_identifiers(
+                                newCanonicalIcon, auditScratch,
+                                &providerIdentifierCount, NULL, NULL);
+                        currentIdentifierObject =
+                            providerIdentifiers &&
+                            providerIdentifierCount == 1U
+                            ? r_msg2(providerIdentifiers, "objectAtIndex:",
+                                     0, 0, 0, 0)
+                            : 0;
+                        sourceResolution = @"resource-provider";
+                    } else if (newCacheReady) {
+                        uint64_t recordClass = r_class("LSApplicationRecord");
+                        BOOL recordABI = recordClass &&
+                            cnd_publisher_remote_method_has_types(
+                                recordClass,
+                                "initWithBundleIdentifier:allowPlaceholder:error:",
+                                "@36@0:8@16B24^@28", NULL) &&
+                            cnd_publisher_remote_method_has_types(
+                                recordClass, "persistentIdentifier",
+                                "@16@0:8", NULL);
+                        uint64_t recordAllocation = recordABI
+                            ? r_msg2(recordClass, "alloc", 0, 0, 0, 0)
+                            : 0;
+                        currentRecord = recordAllocation
+                            ? r_msg2(
+                                recordAllocation,
+                                "initWithBundleIdentifier:allowPlaceholder:error:",
+                                newTargetBundle, 1, 0, 0)
+                            : 0;
+                        currentIdentifierObject = currentRecord
+                            ? r_msg2(currentRecord, "persistentIdentifier",
+                                     0, 0, 0, 0)
+                            : 0;
+                        if (!recordABI) failure = @"audit-source-record-abi";
+                    }
+                    NSData *newSourceIdentifierData = currentIdentifierObject
+                        ? cnd_publisher_audit_copy_small_remote_data(
+                            currentIdentifierObject,
+                            CNDIconServicesPublisherMaximumPersistentIdentifierLength,
+                            auditScratch)
+                        : nil;
+                    if (currentRecord && remote_call_current_success()) {
+                        (void)r_msg2(currentRecord, "release", 0, 0, 0, 0);
+                    }
+                    uint64_t retainedCanonicalIcon =
+                        newCanonicalIcon &&
+                        newSourceIdentifierData.length > 0 &&
+                        remote_call_current_success()
+                        ? r_msg2(newCanonicalIcon, "retain", 0, 0, 0, 0)
+                        : 0;
+                    BOOL contextReady = newTargetBundle && newLocalIcon &&
+                        newCanonicalIcon && retainedCanonicalIcon ==
+                            newCanonicalIcon &&
+                        newCacheReady && newSourceIdentifierData.length > 0 &&
+                        remote_call_current_success();
+                    if (!contextReady) {
+                        if (retainedCanonicalIcon &&
+                            remote_call_current_success()) {
+                            (void)r_msg2(retainedCanonicalIcon, "release",
+                                         0, 0, 0, 0);
+                        }
+                        if (newLocalIcon && remote_call_current_success()) {
+                            (void)r_msg2(newLocalIcon, "release",
+                                         0, 0, 0, 0);
+                        }
+                        if (newTargetBundle && remote_call_current_success()) {
+                            (void)r_msg2(newTargetBundle, "release",
+                                         0, 0, 0, 0);
+                        }
+                        if (!failure) {
+                            failure = airDropPseudoBundle
+                                ? @"audit-current-source-provider"
+                                : @"audit-current-source-identifier";
+                        }
+                        break;
+                    }
+                    batch.auditApplicationBundleIdentifier = bundleIdentifier;
+                    batch.auditApplicationTargetBundle = newTargetBundle;
+                    batch.auditApplicationLocalIcon = newLocalIcon;
+                    batch.auditApplicationCanonicalIcon =
+                        retainedCanonicalIcon;
+                    batch.auditApplicationCanonicalImageCache =
+                        newCanonicalCache;
+                    batch.auditApplicationSourceIdentifierData =
+                        newSourceIdentifierData;
+                    batch.auditApplicationSourceResolution =
+                        sourceResolution;
+                    batch.auditApplicationContextSerial++;
+                } else {
+                    applicationContextReused = YES;
+                }
+
+                uint64_t targetBundle =
+                    batch.auditApplicationTargetBundle;
+                uint64_t localIcon = batch.auditApplicationLocalIcon;
+                uint64_t canonicalIcon =
+                    batch.auditApplicationCanonicalIcon;
+                uint64_t canonicalCache =
+                    batch.auditApplicationCanonicalImageCache;
+                currentSourceIdentifierData =
+                    batch.auditApplicationSourceIdentifierData;
+                currentSourceIdentifierResolution =
+                    batch.auditApplicationSourceResolution ?:
+                        @"application-record";
+                currentSourceIdentifierPresent =
+                    currentSourceIdentifierData.length > 0;
+                applicationContextSerial =
+                    batch.auditApplicationContextSerial;
+                canonicalIconPointer = canonicalIcon;
+                canonicalImageCachePointer = canonicalCache;
+                canonicalCacheReadReady = canonicalCache != 0;
+                if (!targetBundle || !localIcon || !canonicalIcon ||
+                    !canonicalCacheReadReady ||
+                    !currentSourceIdentifierPresent) {
+                    failure = @"audit-app-context";
+                    break;
+                }
+
                 uint64_t descriptor = cnd_publisher_stock_descriptor(
                     batch, YES, descriptorClass, descriptorSpecification,
                     NO, &descriptorDiagnostics, &failure);
                 descriptorReady = descriptor != 0;
                 if (!descriptorReady) break;
-
-                targetBundle = r_nsstr_retained(bundleIdentifier.UTF8String);
-                uint64_t iconAllocation = targetBundle
-                    ? r_msg2(iconClass, "alloc", 0, 0, 0, 0) : 0;
-                localIcon = iconAllocation
-                    ? r_msg2(iconAllocation, "initWithBundleIdentifier:",
-                             targetBundle, 0, 0, 0)
-                    : 0;
-                uint64_t canonicalIcon = localIcon
-                    ? r_msg2(manager, "findOrRegisterIcon:",
-                             localIcon, 0, 0, 0)
-                    : 0;
-                canonicalIconPointer = canonicalIcon;
-                uint64_t canonicalCache = canonicalIcon
-                    ? cnd_publisher_audit_object_ivar(
-                        canonicalIcon, "_imageCache", 0x20, auditScratch)
-                    : 0;
-                canonicalImageCachePointer = canonicalCache;
-                canonicalCacheReadReady = canonicalCache &&
-                    cnd_publisher_remote_method_has_types(
-                        r_dlsym_call(R_TIMEOUT, "object_getClass",
-                                     canonicalCache, 0, 0, 0, 0, 0, 0, 0),
-                        "imageForDescriptor:", "@24@0:8@16", NULL);
-                if (!canonicalCacheReadReady) {
-                    failure = @"audit-canonical-image-cache";
-                    break;
-                }
 
                 uint64_t response = r_msg2(
                     canonicalCache, "imageForDescriptor:",
@@ -5267,100 +5679,26 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
                     cnd_publisher_remote_objects_equal(
                         indexedUUID, storeUnitUUID);
 
-                uint64_t currentRecord = 0;
-                uint64_t currentIdentifierObject = 0;
-                BOOL airDropPseudoBundle = [bundleIdentifier
-                    isEqualToString:
-                        CNDIconServicesPublisherAirDropPseudoBundleIdentifier];
-                if (airDropPseudoBundle) {
-                    NSUInteger providerIdentifierCount = 0;
-                    uint64_t providerIdentifiers =
-                        cnd_publisher_resolve_airdrop_source_identifiers(
-                            canonicalIcon, auditScratch,
-                            &providerIdentifierCount, NULL, NULL);
-                    /* The 23A341 ISRecordResourceProvider constructor wraps
-                     * its LSRecord persistent identifier in a one-element
-                     * source array. Keep the pseudo-bundle audit exact rather
-                     * than silently choosing among unexpected identities. */
-                    currentIdentifierObject =
-                        providerIdentifiers && providerIdentifierCount == 1U
-                        ? r_msg2(providerIdentifiers, "objectAtIndex:",
-                                 0, 0, 0, 0)
-                        : 0;
-                    currentSourceIdentifierResolution =
-                        @"resource-provider";
-                } else {
-                    uint64_t recordClass = r_class("LSApplicationRecord");
-                    BOOL recordABI = recordClass &&
-                        cnd_publisher_remote_method_has_types(
-                            recordClass,
-                            "initWithBundleIdentifier:allowPlaceholder:error:",
-                            "@36@0:8@16B24^@28", NULL) &&
-                        cnd_publisher_remote_method_has_types(
-                            recordClass, "persistentIdentifier",
-                            "@16@0:8", NULL);
-                    if (!recordABI) {
-                        failure = @"audit-source-record-abi";
-                        break;
-                    }
-                    uint64_t recordAllocation = r_msg2(
-                        recordClass, "alloc", 0, 0, 0, 0);
-                    currentRecord = recordAllocation
-                        ? r_msg2(
-                            recordAllocation,
-                            "initWithBundleIdentifier:allowPlaceholder:error:",
-                            targetBundle, 1, 0, 0)
-                        : 0;
-                    currentIdentifierObject = currentRecord
-                        ? r_msg2(currentRecord, "persistentIdentifier",
-                                 0, 0, 0, 0)
-                        : 0;
-                }
-                currentSourceIdentifierData = currentIdentifierObject
-                    ? cnd_publisher_audit_copy_small_remote_data(
-                        currentIdentifierObject,
-                        CNDIconServicesPublisherMaximumPersistentIdentifierLength,
-                        auditScratch)
-                    : nil;
-                currentSourceIdentifierPresent =
-                    currentSourceIdentifierData.length > 0;
-                if ((!airDropPseudoBundle && !currentRecord) ||
-                    !currentSourceIdentifierPresent) {
-                    failure = airDropPseudoBundle
-                        ? @"audit-current-source-provider"
-                        : @"audit-current-source-identifier";
-                    if (currentRecord && remote_call_current_success()) {
-                        (void)r_msg2(currentRecord, "release", 0, 0, 0, 0);
-                    }
-                    break;
-                }
-
                 if (indexedUUID) {
                     NSString *sourceFailure = nil;
                     uint64_t sourceRegistry =
                         cnd_publisher_source_registry_map(
-                            batch, managerCache, auditScratch,
+                            batch, managerCache, auditScratch, NO,
                             &sourceFailure);
                     if (!sourceRegistry) {
                         failure = sourceFailure ?:
                             @"audit-source-registry";
-                        if (remote_call_current_success()) {
-                            (void)r_msg2(
-                                currentRecord, "release", 0, 0, 0, 0);
-                        }
                         break;
                     }
                     NSArray<NSData *> *sourceIdentifiers =
                         cnd_publisher_source_registry_entries(
                             sourceRegistry, indexedUUID, auditScratch,
+                            batch.auditSourceRegistryFileDescriptor,
+                            batch.auditSourceRegistryFileLength,
                             &sourceFailure);
                     if (!sourceIdentifiers || sourceFailure) {
                         failure = sourceFailure ?:
                             @"audit-source-registry-readback";
-                        if (remote_call_current_success()) {
-                            (void)r_msg2(
-                                currentRecord, "release", 0, 0, 0, 0);
-                        }
                         break;
                     }
                     sourceRegistryEntryCount = sourceIdentifiers.count;
@@ -5389,16 +5727,12 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
                         !storeIndexEntryPresent;
                 }
                 sourceRegistryDataPresent = sourceRegistryData.length > 0;
-                if (currentRecord && remote_call_current_success()) {
-                    (void)r_msg2(currentRecord, "release", 0, 0, 0, 0);
-                }
             } while (0);
 
-            if (localIcon && remote_call_current_success()) {
-                (void)r_msg2(localIcon, "release", 0, 0, 0, 0);
-            }
-            if (targetBundle && remote_call_current_success()) {
-                (void)r_msg2(targetBundle, "release", 0, 0, 0, 0);
+            if (!retainApplicationContext &&
+                batch.auditApplicationCanonicalIcon &&
+                remote_call_current_success()) {
+                (void)cnd_publisher_clear_audit_application_context(batch);
             }
             if (pool && remote_call_current_success()) {
                 (void)r_autorelease_pool_pop(pool);
@@ -5466,6 +5800,10 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
         @"storeIndexUnitIdentifierEqual":
             @(storeIndexUnitIdentifierEqual),
         @"sourceIdentityAuditReady": @(sourceIdentityAuditReady),
+        @"sourceRegistryReadTransport":
+            @"validated-file-bounded-pread",
+        @"sourceRegistryFileLength":
+            @(batch.auditSourceRegistryFileLength),
         @"sourceRegistryEntryCount": @(sourceRegistryEntryCount),
         @"sourceRegistryDataPresent": @(sourceRegistryDataPresent),
         @"sourceRegistryDataLength": @(sourceRegistryData.length),
@@ -5480,8 +5818,111 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
             currentSourceIdentifierResolution ?: @"",
         @"sourceIdentityMatchesCurrentRecord":
             @(sourceIdentityMatchesCurrentRecord),
+        @"applicationContextReused": @(applicationContextReused),
+        @"applicationContextCreatedForVariant":
+            @(!applicationContextReused && applicationContextSerial > 0 &&
+              batch.auditApplicationCanonicalIcon != 0),
+        @"applicationContextSerial": @(applicationContextSerial),
+        @"applicationContextOwnedByBatch":
+            @(retainApplicationContext &&
+              batch.auditApplicationCanonicalIcon != 0),
         @"transportHealthy": @(batch.healthy),
         @"transientWeakRegistryProbeIssued": @YES,
+        @"persistentMutationsIssued": @NO,
+        @"presentationMutationsIssued": @NO,
+        @"mutationsIssued": @NO,
+        @"generationIssued": @NO,
+        @"cachePurgeIssued": @NO,
+        @"storeWriteIssued": @NO,
+    };
+}
+
+static const NSUInteger CNDIconServicesPublisherMaximumAuditMatrixCount = 64;
+
+static NSDictionary<NSString *, id> *cnd_publisher_audit_matrix(
+    NSString *bundleIdentifier,
+    NSArray<NSDictionary<NSString *, NSNumber *> *> *descriptorSpecifications)
+{
+    if (!cnd_publisher_valid_bundle_identifier(bundleIdentifier) ||
+        ![descriptorSpecifications isKindOfClass:NSArray.class] ||
+        descriptorSpecifications.count == 0 ||
+        descriptorSpecifications.count >
+            CNDIconServicesPublisherMaximumAuditMatrixCount) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"audit-matrix-input",
+            @"message": @"The matrix audit requires one valid bundle and a bounded non-empty descriptor array.",
+            @"requestedCount": @(descriptorSpecifications.count),
+            @"auditedCount": @0,
+            @"mutationsIssued": @NO,
+        };
+    }
+    for (NSDictionary *specification in descriptorSpecifications) {
+        if (!cnd_publisher_normalized_descriptor_specification(
+                specification)) {
+            return @{
+                @"ok": @NO,
+                @"stage": @"audit-matrix-input",
+                @"message": @"The matrix audit contains an invalid descriptor specification.",
+                @"requestedCount": @(descriptorSpecifications.count),
+                @"auditedCount": @0,
+                @"mutationsIssued": @NO,
+            };
+        }
+    }
+
+    NSMutableArray<NSDictionary *> *audits =
+        [NSMutableArray arrayWithCapacity:descriptorSpecifications.count];
+    CNDIconServicesPublisherBatchState *batch = cnd_publisher_batch_state();
+    RemoteCallSession *session = batch.session;
+    NSUInteger contextSetupCount = 0;
+    NSUInteger contextReuseCount = 0;
+    for (NSDictionary *specification in descriptorSpecifications) {
+        if (!batch || !batch.healthy || !session ||
+            ![session hasLocalState] || session.pid != batch.pid) break;
+        NSDictionary *audit = cnd_publisher_audit_variant(
+            bundleIdentifier, specification, YES);
+        [audits addObject:audit ?: @{}];
+        if ([audit[@"applicationContextCreatedForVariant"] boolValue]) {
+            contextSetupCount++;
+        }
+        if ([audit[@"applicationContextReused"] boolValue]) {
+            contextReuseCount++;
+        }
+        if (![audit[@"ok"] boolValue]) break;
+    }
+    BOOL transportHealthy = batch && batch.healthy && session &&
+        [session hasLocalState] && session.pid == batch.pid;
+    BOOL complete = transportHealthy &&
+        audits.count == descriptorSpecifications.count;
+    if (complete) {
+        for (NSDictionary *audit in audits) {
+            if (![audit[@"ok"] boolValue]) {
+                complete = NO;
+                break;
+            }
+        }
+    }
+    return @{
+        @"ok": @(complete),
+        @"stage": complete ? @"audit-matrix-complete"
+                            : @"audit-matrix-partial",
+        @"message": complete
+            ? @"The descriptor matrix was inspected with one reusable application context and independent read-only descriptor evidence."
+            : @"The descriptor matrix audit stopped before every descriptor completed safely.",
+        @"bundleIdentifier": bundleIdentifier,
+        @"audits": audits,
+        @"requestedCount": @(descriptorSpecifications.count),
+        @"auditedCount": @(audits.count),
+        @"applicationContextSetupCount": @(contextSetupCount),
+        @"applicationContextReuseCount": @(contextReuseCount),
+        @"canonicalIconLookupCount": @(contextSetupCount),
+        @"sourceIdentityResolutionCount": @(contextSetupCount),
+        @"descriptorRemoteOperationCount": @(audits.count),
+        @"applicationContextRetainedForBatch":
+            @([audits.lastObject[@"applicationContextOwnedByBatch"]
+                boolValue]),
+        @"transportHealthy": @(transportHealthy),
         @"persistentMutationsIssued": @NO,
         @"presentationMutationsIssued": @NO,
         @"mutationsIssued": @NO,
@@ -5540,6 +5981,7 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
 
         CNDIconServicesPublisherBatchState *state =
             [[CNDIconServicesPublisherBatchState alloc] init];
+        state.auditSourceRegistryFileDescriptor = -1;
         state.session = session;
         state.wake = wake;
         state.healthy = YES;
@@ -5892,7 +6334,16 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
 {
     return cnd_remote_transport_call(self, ^{
         return cnd_publisher_audit_variant(
-            bundleIdentifier, descriptorSpecification);
+            bundleIdentifier, descriptorSpecification, NO);
+    });
+}
+
+- (NSDictionary<NSString *, id> *)auditBundleIdentifier:(NSString *)bundleIdentifier
+                                descriptorSpecifications:(NSArray<NSDictionary<NSString *,NSNumber *> *> *)descriptorSpecifications
+{
+    return cnd_remote_transport_call(self, ^{
+        return cnd_publisher_audit_matrix(
+            bundleIdentifier, descriptorSpecifications);
     });
 }
 
@@ -5921,21 +6372,41 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
         state.descriptorTemplates.count > 0 || state.descriptorTemplate ||
         state.stagingRemoteBase || state.persistentIndexScratchRemoteBase;
     BOOL auditSourceRegistryCleanupNeeded =
-        state.auditSourceRegistry != 0;
+        state.auditSourceRegistry != 0 ||
+        state.auditSourceRegistryFileDescriptor >= 0 ||
+        state.auditSourceRegistryFileLength != 0;
+    BOOL auditApplicationContextCleanupNeeded =
+        state.auditApplicationCanonicalIcon != 0 ||
+        state.auditApplicationLocalIcon != 0 ||
+        state.auditApplicationTargetBundle != 0;
     BOOL remoteCleanupNeeded = payloadCleanupNeeded ||
-        auditSourceRegistryCleanupNeeded;
+        auditSourceRegistryCleanupNeeded ||
+        auditApplicationContextCleanupNeeded;
     BOOL payloadCleanupAttempted = NO;
     BOOL payloadCleaned = !payloadCleanupNeeded;
     BOOL auditSourceRegistryCleaned =
         !auditSourceRegistryCleanupNeeded;
+    __block BOOL auditApplicationContextCleaned =
+        !auditApplicationContextCleanupNeeded;
     if (healthyBeforeClose && remoteCleanupNeeded) {
         payloadCleanupAttempted = payloadCleanupNeeded;
         __block BOOL cleanupOK = NO;
+        __block BOOL sourceRegistryFileClosed =
+            state.auditSourceRegistryFileDescriptor < 0 &&
+            !state.auditSourceRegistryFileLength;
         @try {
             remote_call_with_session_suppressing_result_logs(session, ^{
+                if (auditApplicationContextCleanupNeeded) {
+                    auditApplicationContextCleaned =
+                        cnd_publisher_clear_audit_application_context(state);
+                }
                 if (state.auditSourceRegistry) {
                     (void)r_msg2(state.auditSourceRegistry,
                                  "release", 0, 0, 0, 0);
+                }
+                if (remote_call_current_success()) {
+                    sourceRegistryFileClosed =
+                        cnd_publisher_close_source_registry_file(state);
                 }
                 NSMutableSet<NSNumber *> *releasedDescriptors =
                     [NSMutableSet set];
@@ -5978,6 +6449,8 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
                     : 0;
                 cleanupOK = unmap == 0 && stagingUnmap == 0 &&
                     persistentIndexScratchUnmap == 0 &&
+                    sourceRegistryFileClosed &&
+                    auditApplicationContextCleaned &&
                     remote_call_current_success();
             });
         } @catch (__unused NSException *exception) {
@@ -6034,6 +6507,10 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
         @"auditSourceRegistryCleanupNeeded":
             @(auditSourceRegistryCleanupNeeded),
         @"auditSourceRegistryCleaned": @(auditSourceRegistryCleaned),
+        @"auditApplicationContextCleanupNeeded":
+            @(auditApplicationContextCleanupNeeded),
+        @"auditApplicationContextCleaned":
+            @(auditApplicationContextCleaned),
         @"closed": @(closed),
         @"abandoned": @(abandoned),
         @"localStateRemaining": @([session hasLocalState]),

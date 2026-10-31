@@ -1,0 +1,154 @@
+PROGRAM com.apple.iokit.IONetworkingFamily base fffffe0007376260
+INIT-FINGERPRINT-LENGTH 123
+DISPATCHER-FINGERPRINT-LENGTH 7
+INIT-EXACT fffffe0008f87a38 size 492 name FUN_fffffe0008f87a38
+  DIFF-COUNT 0
+  DIS 0 pacibsp
+  DIS 4 stp x20;x19;sp,-0x20
+  DIS 8 stp x29;x30;sp,IMM0x10
+  DIS 12 add x29;sp;IMM0x10
+  DIS 16 mov x19;x1
+  DIS 20 mov x20;x0
+  DIS 24 adrp x8;-0x1fff865e000
+  DIS 28 add x8;x8;IMM0x3f0
+  DIS 32 add x9;x8;IMM0x6c0
+  DIS 36 ldr x8;x8,IMM0x6c0
+  DIS 40 mov x17;x9
+  DIS 44 movk x17;IMM0xe2f
+  DIS 48 blraa x8;x17
+  DIS 52 ldr x16;x20
+  DIS 56 mov x17;x20
+  DIS 60 movk x17;IMM0xcda1
+  DIS 64 autda x16;x17
+  DIS 68 mov x17;IMM0x370
+  DIS 72 add x16;x16;x17
+  DIS 76 ldr x8;x16
+  DIS 80 mov x9;x16
+  DIS 84 mov x0;x20
+  DIS 88 mov x17;x9
+  DIS 92 movk x17;IMM0x93b7
+  DIS 96 blraa x8;x17
+  DIS 100 mov x17;x0
+  DIS 104 ldr x16;x0
+  DIS 108 movk x17;IMM0xcda1
+  DIS 112 autda x16;x17
+  DIS 116 mov x17;x16
+  DIS 120 xpacd x17
+  DIS 124 cmp x16;x17
+  DIS 128 b.eq ADDR
+  DIS 132 brk IMM0xc472
+  DIS 136 add x8;x16;IMM0x118
+  DIS 140 ldr x9;x16,IMM0x118
+  DIS 144 adrp x1;-0x1fff8c8a000
+  DIS 148 add x1;x1;IMM0xabf
+  DIS 152 mov x17;x8
+  DIS 156 movk x17;IMM0x37a5
+  DIS 160 blraa x9;x17
+  DIS 164 adrp x8;-0x1fff8661000
+  DIS 168 ldr x8;x8,IMM0x520
+  DIS 172 ldr x1;x8
+  DIS 176 bl ADDR
+  DIS 180 cbz x0;ADDR
+  DIS 184 mov x20;x0
+  DIS 188 ldr x16;x0
+  DIS 192 mov x17;x0
+  DIS 196 movk x17;IMM0xcda1
+  DIS 200 autda x16;x17
+  DIS 204 ldr x8;x16,IMM0xa0
+  DIS 208 mov x9;x16
+  DIS 212 mov x17;x9
+  DIS 216 movk x17;IMM0xbb9b
+  DIS 220 blraa x8;x17
+  DIS 224 cmp w0;IMM0x6
+  DIS 228 b.ne ADDR
+  DIS 232 ldr x16;x20
+  DIS 236 mov x17;x20
+  DIS 240 movk x17;IMM0xcda1
+  DIS 244 autda x16;x17
+  DIS 248 ldr x8;x16,IMM0xd8
+  DIS 252 mov x9;x16
+  DIS 256 mov x0;x20
+  DIS 260 mov x17;x9
+  DIS 264 movk x17;IMM0xd240
+  DIS 268 blraa x8;x17
+  DIS 272 mov x17;x20
+  DIS 276 str x0;x19
+  DIS 280 ldr x16;x20
+  DIS 284 movk x17;IMM0xcda1
+  DIS 288 autda x16;x17
+  DIS 292 mov x17;x16
+  DIS 296 xpacd x17
+  DIS 300 cmp x16;x17
+  DIS 304 b.eq ADDR
+  DIS 308 brk IMM0xc472
+  DIS 312 add x8;x16;IMM0xa0
+  DIS 316 ldr x9;x16,IMM0xa0
+  DIS 320 mov x0;x20
+  DIS 324 mov x17;x8
+  DIS 328 movk x17;IMM0xbb9b
+  DIS 332 blraa x9;x17
+  DIS 336 str w0;x19,IMM0x8
+  DIS 340 mov w8;IMM0x2
+  DIS 344 str w8;x19,IMM0x1c
+  DIS 348 adrp x16;-0x1fff8661000
+  DIS 352 ldr x16;x16,IMM0x598
+  DIS 356 mov x17;IMM0x61de
+  DIS 360 pacia x16;x17
+  DIS 364 str x16;x19,IMM0x30
+  DIS 368 adrp x16;-0x1fff8661000
+  DIS 372 ldr x16;x16,IMM0x580
+  DIS 376 mov x17;IMM0x629a
+  DIS 380 pacia x16;x17
+  DIS 384 str x16;x19,IMM0x38
+  DIS 388 adrp x16;-0x1fff8661000
+  DIS 392 ldr x16;x16,IMM0x590
+  DIS 396 mov x17;IMM0x50c7
+  DIS 400 pacia x16;x17
+  DIS 404 str x16;x19,IMM0x40
+  DIS 408 adrp x16;-0x1fff8661000
+  DIS 412 ldr x16;x16,IMM0x5a0
+  DIS 416 mov x17;IMM0xe28a
+  DIS 420 pacia x16;x17
+  DIS 424 str x16;x19,IMM0x50
+  DIS 428 adrp x16;-0x1fff8661000
+  DIS 432 ldr x16;x16,IMM0x588
+  DIS 436 mov x17;IMM0xe4fe
+  DIS 440 pacia x16;x17
+  DIS 444 str x16;x19,IMM0x48
+  DIS 448 adrp x8;-0x1fff8c8a000
+  DIS 452 add x8;x8;IMM0x990
+  DIS 456 str x8;x19,IMM0x80
+  DIS 460 mov w8;IMM0x6
+  DIS 464 str w8;x19,IMM0x88
+  DIS 468 mov w0;IMM0x1
+  DIS 472 b ADDR
+  DIS 476 mov w0;IMM0x0
+  DIS 480 ldp x29;x30;sp,IMM0x10
+  DIS 484 ldp x20;x19;sp,IMM0x20
+  DIS 488 retab
+  REFERENCES-TO-FUNCTION
+    REF fffffe00099b4098 DATA in ?
+    REF-COUNT 1
+SIGNER fffffe0008f87bf0 offset 0x1b8 vm-offset-match true "pacia x16;x17" preceded by "mov x17;IMM0xe4fe" followed by "str x16;x19,IMM0x48"
+GOT-READ fffffe0008f87be8 offset 0x1b0 vm-offset-match true "ldr x16;x16,IMM0x588"
+GOT-SLOT fffffe000799f588 block __got reftype READ raw8 0x10000000d253fc symbol PTR_DAT_fffffe000799f588
+  REFERENCES-TO-GOT-SLOT
+    REF fffffe0008f87be8 READ in FUN_fffffe0008f87a38@fffffe0008f87a38
+    REF-COUNT 1
+GOT-SLOT-COUNT 1
+SIGNER-PATTERN-COUNT 1
+INIT-EXACT-COUNT 1
+INIT-MNEMONIC-COUNT 0
+DISPATCHER-EXACT fffffe0008f94a8c size 28 name FUN_fffffe0008f94a8c
+  DIS 0 bti
+  DIS 4 ldr x16;x0,IMM0xb0
+  DIS 8 cbz x16;ADDR
+  DIS 12 ldr x0;x0,IMM0x90
+  DIS 16 mov x17;IMM0xe4fe
+  DIS 20 braa x16;x17
+  DIS 24 ret
+  NEIGHBOR+28 bti / ldr x16;x0,IMM0xb8
+  REFERENCES-TO-FUNCTION
+    REF fffffe00099b4268 DATA in ?
+    REF-COUNT 1
+DISPATCHER-EXACT-COUNT 1

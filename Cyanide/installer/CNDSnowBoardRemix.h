@@ -26,6 +26,9 @@ FOUNDATION_EXPORT NSString * const CNDSnowBoardRemixStatusesDidRefreshNotificati
     (NSArray<NSString *> *)bundleIdentifiers
     progress:(nullable CNDSnowBoardRemixProgress)progress
     cancellation:(nullable CNDSnowBoardRemixCancellation)cancellation;
+/// Restores persistent IconServices records only. Exact stock checkpoints are
+/// reused on retry; process-local SpringBoard presentation is intentionally
+/// left for the queue's required respring instead of opening a restore call.
 + (NSDictionary<NSString *, id> *)restoreAllWithProgress:
     (nullable CNDSnowBoardRemixProgress)progress
     cancellation:(nullable CNDSnowBoardRemixCancellation)cancellation;
@@ -94,6 +97,9 @@ FOUNDATION_EXPORT NSString * const CNDSnowBoardRemixStatusesDidRefreshNotificati
 + (void)refreshApplicationStatusesInBackgroundWithCompletion:
     (nullable CNDSnowBoardRemixStatusesCompletion)completion;
 + (BOOL)hasRecoveryData;
+/// Automatic Repair watches normal app recovery data only. Isolated AirDrop
+/// diagnostic journals remain recoverable through their separate actions.
++ (BOOL)hasAutomaticRepairData;
 
 @end
 

@@ -480,7 +480,8 @@ static int handle_client(int client, mach_port_t kernel_task, uint64_t base)
             request.operation == CNDLabKRWOperationTaskThreadStart ||
             request.operation == CNDLabKRWOperationKernelCall;
         int returns_payload = request.operation == CNDLabKRWOperationRead ||
-            request.operation == CNDLabKRWOperationTaskRead;
+            request.operation == CNDLabKRWOperationTaskRead ||
+            request.operation == CNDLabKRWOperationSafeRead;
         if (request.magic != CND_LAB_KRW_MAGIC ||
             request.version != CND_LAB_KRW_VERSION ||
             request.length > CND_LAB_TASK_REGION_MAX ||
@@ -512,6 +513,21 @@ static int handle_client(int client, mach_port_t kernel_task, uint64_t base)
                                    capabilities);
         } else if (request.operation == CNDLabKRWOperationKBase) {
             result = send_response(client, base ? 0 : ENOTSUP, 0, base);
+        } else if (request.operation == CNDLabKRWOperationSafeRead) {
+            int status = EIO;
+            if (MACH_PORT_VALID(kernel_task)) {
+                mach_vm_size_t copied = 0;
+                kern_return_t kr = mach_vm_read_overwrite(
+                    kernel_task, request.address, request.length,
+                    (mach_vm_address_t)payload, &copied);
+                status = kr == KERN_SUCCESS && copied == request.length
+                    ? 0 : EIO;
+            }
+            result = send_response(client, status,
+                                   status == 0 ? request.length : 0, 0);
+            if (result == 0 && status == 0) {
+                result = transfer_all(client, payload, request.length, 1);
+            }
         } else if (request.operation == CNDLabKRWOperationRead) {
             int status = EIO;
             if (g_libkrw_read) {

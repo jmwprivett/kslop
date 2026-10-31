@@ -1,0 +1,146 @@
+{
+  "boundary": {
+    "forbiddenTarget": ".19 method-list IMP text page",
+    "sameBootIdenticalWriteTicketRequired": true,
+    "targetInitProt": "r--",
+    "targetMaxProt": "r--",
+    "targetSegment": "__LINKEDIT",
+    "targetSubcache": ".34.dyldreadonly"
+  },
+  "build": "23A341",
+  "cache": {
+    "main": {
+      "fileName": "dyld_shared_cache_arm64e",
+      "uuid": "DC5F2F67-1FC8-3905-873B-35D17D1A44E8"
+    },
+    "readonlySubcache": {
+      "fileName": "dyld_shared_cache_arm64e.34.dyldreadonly",
+      "sha256": "932d004fd1b7c92aaeb4d9d4fc32188b0df17eadb8155888180ba84e088b87b2",
+      "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58"
+    }
+  },
+  "kind": "per-boot-clock-calendar-preoptimized-dispatch-redirect",
+  "product": "iPhone17,2",
+  "redirect": {
+    "executableTextWritten": false,
+    "methodListWritten": false,
+    "perBoot": true,
+    "perProcess": false,
+    "respringRequiredBeforeLiveIconRebuild": true,
+    "staticThemeRecordsTouched": false,
+    "survivesReboot": false,
+    "survivesRespringExpected": true,
+    "survivesRespringPhysicalProof": false,
+    "writeKind": "two 32-bit low-word stores"
+  },
+  "replacement": {
+    "impUnslid": "0x1be19d9e8",
+    "symbol": "+[SBHIconModel applicationIconClass]"
+  },
+  "schemaVersion": 1,
+  "selector": {
+    "name": "iconClassForApplicationWithBundleIdentifier:",
+    "offset": "0x89102d",
+    "originalIMPUnslid": "0x1be19db3c"
+  },
+  "targets": [
+    {
+      "className": "SBHIconModel",
+      "classROUnslid": "0x1eebe3740",
+      "classUnslid": "0x1eda01028",
+      "consumer": "Spotlight",
+      "entryFileOffset": "0x78df0a8",
+      "entryUnslid": "0x1ffc330a8",
+      "fallbackClassUnslid": "0x1ff83b8e8",
+      "frameOffset": "0x30a8",
+      "frameUnslid": "0x1ffc30000",
+      "hash": {
+        "hasInlines": false,
+        "mask": 255,
+        "occupied": 178,
+        "shift": 10,
+        "unusedHighBit": true
+      },
+      "mapping": {
+        "initProt": 1,
+        "maxProt": 1,
+        "segmentBase": "0x1f8358000",
+        "segmentFileOffset": "0x4000",
+        "segmentSize": "0x7c88000",
+        "subcache": "dyld_shared_cache_arm64e.34.dyldreadonly",
+        "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58"
+      },
+      "original": {
+        "decodedIMPUnslid": "0x1be19db3c",
+        "guardHex": "3b8de10b400b44228f90ec0b80054503d370e10b000046229c70e10b00204720",
+        "guardSHA256": "e495c955bec6fd68c5dfd23b4a7e181ec006832a2aa5ba389dd40a912232f9e8",
+        "packedWord": "0x22440b400be18d3b"
+      },
+      "preoptimizedCacheUnslid": "0x1ffc32e78",
+      "redirected": {
+        "decodedIMPUnslid": "0x1be19d9e8",
+        "guardHex": "908de10b400b44228f90ec0b80054503d370e10b000046229c70e10b00204720",
+        "guardSHA256": "12352496ebeb23bc626ef83d0ca035996f2aed16cde68bbb123576235c711486",
+        "packedWord": "0x22440b400be18d90"
+      },
+      "selector": "iconClassForApplicationWithBundleIdentifier:",
+      "selectorOffset": "0x89102d",
+      "slot": 68,
+      "write": {
+        "kind": "one 32-bit low-word store",
+        "originalLowWord": "0x0be18d3b",
+        "redirectedLowWord": "0x0be18d90",
+        "upperWordPreserved": "0x22440b40"
+      }
+    },
+    {
+      "className": "SBIconModel",
+      "classROUnslid": "0x283298630",
+      "classUnslid": "0x281548678",
+      "consumer": "SpringBoard",
+      "entryFileOffset": "0x79feeb8",
+      "entryUnslid": "0x1ffd52eb8",
+      "fallbackClassUnslid": "0x16be140a8",
+      "frameOffset": "0x2eb8",
+      "frameUnslid": "0x1ffd50000",
+      "hash": {
+        "hasInlines": false,
+        "mask": 255,
+        "occupied": 191,
+        "shift": 10,
+        "unusedHighBit": true
+      },
+      "mapping": {
+        "initProt": 1,
+        "maxProt": 1,
+        "segmentBase": "0x1f8358000",
+        "segmentFileOffset": "0x4000",
+        "segmentSize": "0x7c88000",
+        "subcache": "dyld_shared_cache_arm64e.34.dyldreadonly",
+        "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58"
+      },
+      "original": {
+        "decodedIMPUnslid": "0x1be19db3c",
+        "guardHex": "cfaace30400b442223aed93080054503678ece3000004622308ece3000204720",
+        "guardSHA256": "259cd6284eb2a799d2afac98eafcaaf6c8624d7f0f4f8259c94017d9b6f767af",
+        "packedWord": "0x22440b4030ceaacf"
+      },
+      "preoptimizedCacheUnslid": "0x1ffd52c88",
+      "redirected": {
+        "decodedIMPUnslid": "0x1be19d9e8",
+        "guardHex": "24abce30400b442223aed93080054503678ece3000004622308ece3000204720",
+        "guardSHA256": "522c7804dd99c120180d14b283ce5e750b4d8c737d033607448c93d5b0d337a4",
+        "packedWord": "0x22440b4030ceab24"
+      },
+      "selector": "iconClassForApplicationWithBundleIdentifier:",
+      "selectorOffset": "0x89102d",
+      "slot": 68,
+      "write": {
+        "kind": "one 32-bit low-word store",
+        "originalLowWord": "0x30ceaacf",
+        "redirectedLowWord": "0x30ceab24",
+        "upperWordPreserved": "0x22440b40"
+      }
+    }
+  ]
+}

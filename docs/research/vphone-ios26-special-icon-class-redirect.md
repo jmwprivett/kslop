@@ -2,7 +2,16 @@
 
 **Date:** 2026-10-08
 **Target:** iPhone17,2, iOS 26.0 (`23A341`)
-**Status:** offline derivation complete; runtime unverified
+**Status:** the two-entry per-boot route is derived offline and implemented;
+it is not yet VM-proved or physical-device-proved.
+
+> **Correction (2026-10-21):** The earlier conclusion that SpringBoard must
+> fall through to the relative method list was incomplete. dyld also flattens
+> this inherited selector into the `SBIconModel` subclass's own preoptimized
+> cache. Spotlight uses the `SBHIconModel` entry at `0x1ffc330a8`;
+> SpringBoard uses the `SBIconModel` entry at `0x1ffd52eb8`. Both decode to
+> the original IMP and both must be redirected. The `.19` method-list page
+> remains forbidden after its physical level-3 write-permission fault.
 
 The proposed special-class kill is viable on the exact build. One packed
 Objective-C dispatch entry controls
@@ -33,29 +42,26 @@ encoding match, but it is machine-call compatible. The replacement ignores
 `self`, `_cmd`, and the extra identifier in `x2`, and returns one `Class` in
 `x0`. Both implementations are in the same Apple-signed RX subcache.
 
-## One-word dispatch shape
+## Two-entry dispatch shape
 
-`SBHIconModel` has a preoptimized cache at unslid `0x1ffc32e78`. The target
-selector occupies slot 68:
+`SBHIconModel` and SpringBoard's `SBIconModel` subclass each carry the
+selector in slot 68:
 
-| Field | Value |
-| --- | --- |
-| Entry | `0x1ffc330a8` |
-| 16 KiB frame | `0x1ffc30000` |
-| Original packed value | `0x22440b400be18d3b` |
-| Redirected packed value | `0x22440b400be18d90` |
-| Original low word | `0x0be18d3b` |
-| Redirected low word | `0x0be18d90` |
-| Semantic writes | one 32-bit write |
+| Class / consumer | Entry | Frame | Original | Redirected |
+| --- | --- | --- | --- | --- |
+| `SBHIconModel` / Spotlight | `0x1ffc330a8` | `0x1ffc30000` | `0x22440b400be18d3b` | `0x22440b400be18d90` |
+| `SBIconModel` / SpringBoard | `0x1ffd52eb8` | `0x1ffd50000` | `0x22440b4030ceaacf` | `0x22440b4030ceab24` |
 
-The selector field and upper word do not change. The packed values contain no
-plain pointer or PAC bits. Decoding them relative to the class produces the
-original IMP `0x1be19db3c` and replacement IMP `0x1be19d9e8` exactly.
+The selector fields and upper words do not change. The packed values contain
+no plain pointer or PAC bits. Decoding each entry relative to its own class
+produces original IMP `0x1be19db3c` and replacement IMP `0x1be19d9e8`
+exactly. The semantic operation is two 32-bit low-word writes.
 
 The complete original/redirected 32-byte guards, hashes, cache identities,
 method records, and code-directory verification are in
-`special-icon-class-redirect-23A341-iphone17,2.json`. They are reproduced by
-`scripts/derive_special_icon_class_redirect.py`.
+`special-icon-class-dispatch-redirect-23A341-iphone17,2.json`. They are
+reproduced by
+`scripts/derive_special_icon_class_dispatch_redirect.py`.
 
 ## What this would buy
 
@@ -75,31 +81,50 @@ runtime proof.
 ## Boundaries before a semantic apply
 
 The prior successful `.34.dyldreadonly` permission experiment targeted entry
-`0x1ffc27458`, on frame `0x1ffc24000`. This target is on a different frame,
-`0x1ffc30000`. The earlier ticket therefore does not authorize this write.
-The next safe experiment is an identical-bytes-only write against the exact
-new entry page, with fresh SpringBoard and Spotlight translations proving one
-shared physical frame and the exact 32-byte original guard.
+`0x1ffc27458`, on frame `0x1ffc24000`. These targets are on two different
+frames, `0x1ffc30000` and `0x1ffd50000`. The earlier ticket therefore
+authorizes neither write. The new permission operation performs one
+identical-low-word `kwrite32` against each exact target, requires the pinned
+32-byte guard before and after, and binds the ticket to the slide, physical
+frames, physical addresses, and aperture KVAs.
 
 There is also an object-lifetime boundary: changing dispatch does not
-reclassify existing `SBClockApplicationIcon` or `SBCalendarApplicationIcon`
-instances. A live validation must install the redirect first and then rebuild
-both consumers' icon models—most cleanly with one controlled userspace
-restart—before judging the static result. This is still much cheaper than
-ongoing per-PID repair, but it means the first apply is not visually complete
-at the instant of the write.
+reclassify existing `SBHClockApplicationIcon` or
+`SBHCalendarApplicationIcon` instances. Physical testing showed that a
+controlled respring restores those same special-class identities from the
+icon-state archive even while the redirected method now selects
+`SBHApplicationIcon`. A live validation must therefore install the redirect
+and run the bounded Clock/Calendar remove/re-add migration in both consumers
+before judging the static result.
 
 The runtime acceptance test is:
 
-1. prove the exact new `.34` page with an identical-byte write;
-2. apply the guarded low-word redirect;
-3. rebuild SpringBoard and Spotlight after the redirect is active;
+1. prove both exact new `.34` pages with identical low-word writes;
+2. apply both guarded low-word redirects;
+3. preflight and rebuild exactly Clock and Calendar through SpringBoard's and
+   Spotlight's live icon models after the redirect is active;
 4. verify both canonical objects are `SBApplicationIcon`, not the special
    subclasses;
 5. verify Home, Spotlight, App Library, switcher, and launch/return surfaces
    resolve the existing themed ordinary records;
 6. verify bundle identity, badges, quick actions, and launching remain stock;
-7. restore the exact original word and rebuild consumers again.
+7. restore the exact original words and run the symmetric two-bundle live
+   object rebuild.
 
 Until that run passes, the correct claim is **offline-proved one-write
 candidate**, not a completed replacement for the current live-icon bridges.
+
+## Runtime implementation (2026-10-20)
+
+`CNDHailMarySpecialIconClassDispatchRedirect.h` exposes the dedicated
+permission/apply/restore/verify API. Its implementation is co-located with the
+older GOT experiment in `CNDHailMarySpecialIconClassRedirect.m` so both routes
+share the same proof parsing, durable-journal, and mutual-exclusion helpers.
+It mints
+`Documents/CNDHailMarySpecialIconClassDispatchPermission.json` and records
+semantic operations in
+`Documents/CNDHailMarySpecialIconClassDispatchRedirect.json`.
+
+The module and UI are implemented and compile, but runtime status remains
+unverified: implemented is not VM-proved, and VM-proved is not
+physical-device-proved.

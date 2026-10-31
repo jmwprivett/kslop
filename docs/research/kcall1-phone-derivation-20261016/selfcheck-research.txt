@@ -1,0 +1,119 @@
+PROGRAM com.apple.kernel base fffffe0007008000
+FINGERPRINT-LENGTH 20
+FINGERPRINT 0 ldrb w8;x1,IMM0x1
+FINGERPRINT 1 cbz w8;ADDR
+FINGERPRINT 2 cmp w8;IMM0x12
+FINGERPRINT 3 b.ne ADDR
+FINGERPRINT 4 ldrb w8;x1,IMM0x5
+FINGERPRINT 5 add x9;x1;IMM0xff
+FINGERPRINT 6 add x8;x1;x8
+FINGERPRINT 7 add x8;x8;IMM0x8
+FINGERPRINT 8 cmp x8;x9
+FINGERPRINT 9 ccmp x8;x1;IMM0x0;
+FINGERPRINT 10 b.cs ADDR
+FINGERPRINT 11 brk IMM0x5519
+FINGERPRINT 12 add x8;x1;IMM0x2
+FINGERPRINT 13 ldrb w8;x8
+FINGERPRINT 14 tst w8;IMM0x1
+FINGERPRINT 15 mov w8;IMM0x31
+FINGERPRINT 16 csel w0;w8;wzr;
+FINGERPRINT 17 ret
+FINGERPRINT 18 mov w0;IMM0x2f
+FINGERPRINT 19 ret
+STOCK-EXACT fffffe0007d293fc size 80 name FUN_fffffe0007d293fc
+  DIS 0 ldrb w8;x1,IMM0x1
+  DIS 4 cbz w8;ADDR
+  DIS 8 cmp w8;IMM0x12
+  DIS 12 b.ne ADDR
+  DIS 16 ldrb w8;x1,IMM0x5
+  DIS 20 add x9;x1;IMM0xff
+  DIS 24 add x8;x1;x8
+  DIS 28 add x8;x8;IMM0x8
+  DIS 32 cmp x8;x9
+  DIS 36 ccmp x8;x1;IMM0x0;
+  DIS 40 b.cs ADDR
+  DIS 44 brk IMM0x5519
+  DIS 48 add x8;x1;IMM0x2
+  DIS 52 ldrb w8;x8
+  DIS 56 tst w8;IMM0x1
+  DIS 60 mov w8;IMM0x31
+  DIS 64 csel w0;w8;wzr;
+  DIS 68 ret
+  DIS 72 mov w0;IMM0x2f
+  DIS 76 ret
+  REF fffffe0007d2cfac DATA
+  REF fffffe0007cf1168 DATA
+  REF fffffe0007d313e0 DATA
+  REF fffffe0007d39358 DATA
+  REF-COUNT 4
+STOCK-EXACT-COUNT 1
+STOCK-EXACT-BTI-COUNT 0
+STOCK-MNEMONIC-COUNT 0
+OUTLINE-RUN-COUNT 15
+OUTLINE-RUN fffffe00082f6578 elements 6 values ldr:0x20,ldr:0x20,ldr:,ldr:0x4,ldr:0x8,str:0x8
+  LOAD-SEQUENCE at element 2 middle-ok true
+  LOAD-CANDIDATE element 2 at fffffe00082f6590 middle "ldr w0;x0"
+    DIS 0 bti
+    DIS 4 ldr w0;x0
+    DIS 8 ret
+    REF fffffe00082f503c UNCONDITIONAL_CALL
+    REF fffffe00082f5388 UNCONDITIONAL_CALL
+OUTLINE-RUN fffffe00082f69f0 elements 13 values ldr:0x18,str:0x18,mov:0x1,mov:0x1,mov:0x2,mov:0x4,mov:0x8,mov:0x1,mov:0x2,mov:0x4,mov:0x8,mov:0x4,mov:0x8
+  ENOEXEC-SEQUENCE at element 6 middle-ok true
+  ENOEXEC-CANDIDATE element 6 at fffffe00082f6a38 middle "mov w0;IMM0x8"
+    DIS 0 bti
+    DIS 4 mov w0;IMM0x8
+    DIS 8 ret
+    REF none
+ENOEXEC-SEQUENCE-COUNT 1
+LOAD-SEQUENCE-COUNT 1
+GOT-CANDIDATE fffffe0007d293fc
+GOT-CANDIDATE-BLOCK __text
+GOT-CANDIDATE-FUNCTION FUN_fffffe0007d293fc entry fffffe0007d293fc size 80 offset-in-function 0
+  DIS 0 ldrb w8;x1,IMM0x1
+  DIS 4 cbz w8;ADDR
+  DIS 8 cmp w8;IMM0x12
+  DIS 12 b.ne ADDR
+  DIS 16 ldrb w8;x1,IMM0x5
+  DIS 20 add x9;x1;IMM0xff
+  DIS 24 add x8;x1;x8
+  DIS 28 add x8;x8;IMM0x8
+  DIS 32 cmp x8;x9
+  DIS 36 ccmp x8;x1;IMM0x0;
+  DIS 40 b.cs ADDR
+  DIS 44 brk IMM0x5519
+  DIS 48 add x8;x1;IMM0x2
+  DIS 52 ldrb w8;x8
+  DIS 56 tst w8;IMM0x1
+  DIS 60 mov w8;IMM0x31
+  DIS 64 csel w0;w8;wzr;
+  DIS 68 ret
+  DIS 72 mov w0;IMM0x2f
+  DIS 76 ret
+  DIS 80 mov w0;IMM0x66
+  DIS 84 ret
+  DIS 88 pacibsp
+  DIS 92 sub sp;sp;IMM0x20
+  DIS 96 stp x29;x30;sp,IMM0x10
+  DIS 100 add x29;sp;IMM0x10
+  DIS 104 adrp x16;-0x1fff82d7000
+  DIS 108 add x16;x16;IMM0x540
+  DIS 112 mov x17;IMM0x50c7
+  DIS 116 pacia x16;x17
+  DIS 120 mov x2;x16
+  DIS 124 adrp x16;-0x1fff82d6000
+  DIS 128 add x16;x16;IMM0x3a4
+  DIS 132 mov x17;IMM0xd507
+  DIS 136 pacia x16;x17
+  DIS 140 mov x3;x16
+  DIS 144 mov w0;IMM0x2
+  DIS 148 mov w1;IMM0x2
+  DIS 152 bl ADDR
+  DIS 156 cbnz w0;ADDR
+GOT-CANDIDATE-EXACT true
+GOT-CANDIDATE-SAME-MNEMONIC 20/20
+  REF fffffe0007d2cfac DATA
+  REF fffffe0007cf1168 DATA
+  REF fffffe0007d313e0 DATA
+  REF fffffe0007d39358 DATA
+GOT-CANDIDATE-REF-COUNT 4

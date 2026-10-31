@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 
+#import "CNDHailMaryProbe.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 typedef void (^CNDHailMaryReadOnlyDataPageCompletion)(
@@ -16,11 +18,26 @@ BOOL CNDHailMaryReadOnlyDataPageIsRunning(void);
 /// are deduplicated and translated; exactly one candidate must expose either
 /// the pinned original or redirected 32-byte guard. The winning translation
 /// and bytes are re-read before returning. This helper never writes memory.
+/// Mode-aware resolver. `CNDHailMaryProofModeSharedPair` keeps the original
+/// two-process requirement. `CNDHailMaryProofModeSpringBoardOnly` proves the
+/// same guard through SpringBoard's own page table and never consults or
+/// requires Spotlight; it is used by the transparency fix, whose target is
+/// SpringBoard's mapping alone.
+BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntryWithMode(
+    CNDHailMaryProofMode mode,
+    NSDictionary<NSString *, id> *probeReport,
+    BOOL expectRedirected,
+    NSDictionary<NSString *, id> * _Nullable * _Nullable contextOut,
+    NSData * _Nullable * _Nullable guardDataOut,
+    NSDictionary<NSString *, id> * _Nullable * _Nullable diagnosticsOut,
+    NSString * _Nullable * _Nullable errorOut);
+
 BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
     NSDictionary<NSString *, id> *probeReport,
     BOOL expectRedirected,
     NSDictionary<NSString *, id> * _Nullable * _Nullable contextOut,
     NSData * _Nullable * _Nullable guardDataOut,
+    NSDictionary<NSString *, id> * _Nullable * _Nullable diagnosticsOut,
     NSString * _Nullable * _Nullable errorOut);
 
 /// Identical-bytes writability probe for the .34 dyldreadonly page that
@@ -39,6 +56,14 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
 /// verified again. The dispatch can still panic if maxProt=r-- governs the
 /// physical aperture. No redirect or fallback is implemented here.
 void CNDHailMaryReadOnlyDataPageRun(
+    CNDHailMaryReadOnlyDataPageCompletion completion);
+
+/// Mode-aware permission probe. `CNDHailMaryProofModeSharedPair` is the
+/// original SpringBoard+Spotlight experiment. `CNDHailMaryProofModeSpringBoardOnly`
+/// proves, arms, and journals the same no-op write using SpringBoard's page
+/// table only, so a consumer that never needs Spotlight is not blocked by it.
+void CNDHailMaryReadOnlyDataPageRunWithMode(
+    CNDHailMaryProofMode mode,
     CNDHailMaryReadOnlyDataPageCompletion completion);
 
 NS_ASSUME_NONNULL_END

@@ -656,6 +656,17 @@ void CNDPhysicalIOUserEthernetSignerProbeRun(
         NSDictionary<NSString *, id> *report =
             CNDPhysicalSignerRunOnce();
         __sync_lock_release(&gCNDPhysicalSignerProbeRunning);
+        /* RunOnce has returned from every path by now, so stamp the terminal
+         * state on the report it built.  Without this a finished report keeps
+         * carrying its last in-flight state ("acquiring-physical-krw",
+         * "label-restored-before-selector", …) and reads as unfinished.  The
+         * object RunOnce returns is the mutable dictionary it persisted. */
+        if ([report isKindOfClass:NSMutableDictionary.class]) {
+            NSMutableDictionary<NSString *, id> *finished =
+                (NSMutableDictionary<NSString *, id> *)report;
+            CNDPhysicalSignerPersist(finished, finished[@"reportPath"],
+                @"state", @"finished");
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(report ?: @{ @"result": @"unknown-result" });
         });

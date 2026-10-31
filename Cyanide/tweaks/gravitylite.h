@@ -20,7 +20,10 @@ typedef struct {
 } GravityLiteConfig;
 
 bool gravitylite_apply_in_session(GravityLiteConfig config);
+// Ordinary stops skip orphan recovery when associated state is missing;
+// explicit restores also recover overlays in that case.
 bool gravitylite_stop_in_session(void);
+bool gravitylite_restore_in_session(void);
 bool gravitylite_explosion_in_session(double force);
 bool gravitylite_update_gravity_angle_in_session(double angle, double magnitude);
 void gravitylite_forget_remote_state(void);

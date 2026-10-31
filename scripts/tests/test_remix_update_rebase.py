@@ -65,6 +65,12 @@ class RemixUpdateRebaseTests(unittest.TestCase):
             helper.index('journal[@"state"] = @"persistent-stock-verified";'),
             helper.index("CNDRemixRemoveIconServicesJournal(bundleIdentifier)"),
         )
+        restore_loop = helper[
+            helper.index("for (NSUInteger index = 0;"):
+            helper.index("BOOL complete =", helper.index("for (NSUInteger index = 0;"))
+        ]
+        self.assertIn("CNDRemixAppendIconServicesJournalCheckpoint(", restore_loop)
+        self.assertNotIn("CNDRemixWriteIconServicesJournal(", restore_loop)
 
         apply_start = self.remix.index(
             "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
@@ -76,7 +82,7 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         apply = self.remix[apply_start:apply_end]
         rebase_call = apply.index("CNDRemixRebaseActiveJournalToCurrentStock(")
         new_journal = apply.index(
-            "NSMutableDictionary *journal = profileExpansionJournal.count",
+            "NSMutableDictionary *journal = retainedJournal.count",
             rebase_call,
         )
         publish = apply.index("CNDIconServicesPublisherPublishVariantInBatch(", new_journal)
@@ -87,7 +93,7 @@ class RemixUpdateRebaseTests(unittest.TestCase):
     def test_legacy_journal_adoption_is_metadata_only(self) -> None:
         start = self.remix.index("BOOL lacksSavedFingerprint =")
         end = self.remix.index(
-            "if (CNDRemixJournalMatchesCurrentApplication(", start
+            "BOOL journalMatchesCurrentApplication =", start
         )
         adoption = self.remix[start:end]
         self.assertIn('migrated[@"applicationFingerprint"]', adoption)
@@ -95,7 +101,7 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         self.assertNotIn("CNDIconServicesPublisherRestore", adoption)
         self.assertNotIn("CNDIconServicesPublisherPublish", adoption)
 
-    def test_manual_update_repair_reuses_fingerprint_aware_publisher(self) -> None:
+    def test_update_repair_enables_live_persistence_audit(self) -> None:
         selector = "repairInstalledApplicationUpdatesWithProgress:"
         self.assertIn(selector, self.remix_header)
         start = self.remix.index(f"+ (NSDictionary<NSString *, id> *){selector}")
@@ -106,12 +112,112 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         repair = self.remix[start:end]
         self.assertIn(
             "CNDRemixApplyIconServicesTheme(\n"
-            "            nil, YES, NO, progress, cancellation)",
+            "            nil, YES, NO, YES, progress, cancellation)",
             repair,
         )
         self.assertIn('@"operationMode"] = @"update-repair"', repair)
+        self.assertIn('@"liveRepairApplications"]', repair)
         self.assertNotIn("CNDIconServicesPublisherBeginBatch(", repair)
         self.assertNotIn("CNDIconServicesPublisherPublishVariantInBatch(", repair)
+
+    def test_normal_apply_does_not_pay_for_live_persistence_audit(self) -> None:
+        start = self.remix.index(
+            "+ (NSDictionary<NSString *, id> *)applySelectedThemeWithProgress:"
+        )
+        end = self.remix.index(
+            "+ (NSDictionary<NSString *, id> *)repairInstalledApplicationUpdatesWithProgress:",
+            start,
+        )
+        apply = self.remix[start:end]
+        self.assertIn(
+            "CNDRemixApplyIconServicesTheme(\n"
+            "            nil, YES, NO, NO, progress, cancellation)",
+            apply,
+        )
+
+    def test_live_repair_is_read_only_fail_closed_and_selective(self) -> None:
+        start = self.remix.index(
+            "static BOOL CNDRemixAuditIsStrictReadOnlyObservation("
+        )
+        end = self.remix.index(
+            "static NSDictionary *CNDRemixCompareAppliedAuditRecords(", start
+        )
+        repair = self.remix[start:end]
+        for field in (
+            '@"transportHealthy", YES',
+            '@"persistentMutationsIssued", NO',
+            '@"presentationMutationsIssued", NO',
+            '@"mutationsIssued", NO',
+            '@"generationIssued", NO',
+            '@"cachePurgeIssued", NO',
+            '@"storeWriteIssued", NO',
+        ):
+            self.assertIn(field, repair)
+        for missing_field in (
+            '@"storeIndexEntryPresent", NO',
+            '@"storeUnitPresent", NO',
+        ):
+            self.assertIn(missing_field, repair)
+        missing_start = repair.index(
+            "static BOOL CNDRemixAuditProvesPersistentRecordMissing("
+        )
+        missing_end = repair.index(
+            "static NSDictionary *CNDRemixAuditActiveJournalForRepairInBatch(",
+            missing_start,
+        )
+        self.assertNotIn(
+            '@"cacheResponsePresent", NO', repair[missing_start:missing_end]
+        )
+        self.assertIn("CNDRemixAppliedAuditRecordProvesThemedPersistence", repair)
+        self.assertIn('isEqualToString:@"stock"', repair)
+        self.assertIn('@"live-persistence-ambiguous"', repair)
+        self.assertIn('@"retainedVariants": retainedVariants', repair)
+        self.assertIn('@"repairSpecifications": repairSpecifications', repair)
+        self.assertIn("CNDIconServicesPublisherAuditVariantsInBatch(", repair)
+        self.assertIn('@"transportMatrix": matrixSummary', repair)
+        self.assertNotIn("CNDIconServicesPublisherAuditVariantInBatch(", repair)
+
+    def test_live_repair_prunes_only_repair_targets_before_publication(self) -> None:
+        apply_start = self.remix.index(
+            "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
+        )
+        apply_end = self.remix.index(
+            "static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(",
+            apply_start,
+        )
+        apply = self.remix[apply_start:apply_end]
+        audit = apply.index("CNDRemixAuditActiveJournalForRepairInBatch(")
+        prune = apply.index(
+            'retainedJournal[@"variants"] =\n'
+            '                                liveRepairAudit[@"retainedVariants"]',
+            audit,
+        )
+        checkpoint = apply.index(
+            "CNDRemixWriteIconServicesJournal(journal)", prune
+        )
+        publish = apply.index(
+            "CNDIconServicesPublisherPublishVariantInBatch(", checkpoint
+        )
+        self.assertLess(audit, prune)
+        self.assertLess(prune, checkpoint)
+        self.assertLess(checkpoint, publish)
+        self.assertIn(
+            "publicationSpecifications =\n"
+            "                            liveRepairSpecifications.count > 0",
+            apply,
+        )
+
+    def test_descriptor_matrix_reuses_per_application_source_hash(self) -> None:
+        apply_start = self.remix.index(
+            "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
+        )
+        apply_end = self.remix.index(
+            "static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(",
+            apply_start,
+        )
+        apply = self.remix[apply_start:apply_end]
+        self.assertIn("NSString *variantSourceHash = sourceHash;", apply)
+        self.assertNotIn("CNDRemixSHA256(variantSource)", apply)
 
     def test_update_repair_button_uses_bounded_public_entry_point(self) -> None:
         self.assertIn('@"title": @"Update Repair"', self.settings)
@@ -120,6 +226,30 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         self.assertIn(
             "repairInstalledApplicationUpdatesWithProgress:", self.snowboard
         )
+
+    def test_automatic_repair_is_coalesced_and_reuses_existing_krw(self) -> None:
+        self.assertIn('@"title": @"Automatic Repair"', self.settings)
+        self.assertIn(
+            'notify_register_dispatch("com.apple.mobile.application_updated"',
+            self.settings,
+        )
+        self.assertIn(
+            'notify_register_dispatch("com.apple.LaunchServices.ApplicationsChanged"',
+            self.settings,
+        )
+        start = self.settings.index(
+            "static BOOL settings_run_snowboard_automatic_repair("
+        )
+        end = self.settings.index(
+            "static void settings_schedule_snowboard_automatic_repair_internal(",
+            start,
+        )
+        automatic = self.settings[start:end]
+        self.assertIn("kexploit_krw_ready()", automatic)
+        self.assertNotIn("settings_ensure_kexploit()", automatic)
+        self.assertIn("settings_update_repair_snowboard_remix()", automatic)
+        self.assertIn("setTransparencyFixEnabled:YES", automatic)
+        self.assertIn("packageQueue.commitInFlight", automatic)
 
 
 if __name__ == "__main__":

@@ -734,23 +734,15 @@ static NSDictionary<NSString *, id> *CNDHailMaryTranslateVirtualAddress(
     };
 }
 
-BOOL CNDHailMaryProbeTranslateSharedRuntimeAddress(
+/* Shared validation for both translation entry points: a confirmed report
+ * of the exact product, a re-validated kernel identity/layout, and live
+ * physical-map anchors. Performs kernel reads only. */
+static BOOL CNDHailMaryProbePrepareTranslation(
     NSDictionary<NSString *, id> *report,
     uint64_t runtimeVirtualAddress,
-    NSDictionary<NSString *, id> **springBoardTranslationOut,
-    NSDictionary<NSString *, id> **spotlightTranslationOut,
-    uint64_t *physicalFrameOut,
-    uint64_t *physicalAddressOut,
-    uint64_t *frameKernelVirtualAddressOut,
+    CNDHailMaryPhysicalMap *physicalMapOut,
     NSString **errorOut)
 {
-    if (springBoardTranslationOut) *springBoardTranslationOut = nil;
-    if (spotlightTranslationOut) *spotlightTranslationOut = nil;
-    if (physicalFrameOut) *physicalFrameOut = 0;
-    if (physicalAddressOut) *physicalAddressOut = 0;
-    if (frameKernelVirtualAddressOut) *frameKernelVirtualAddressOut = 0;
-    if (errorOut) *errorOut = nil;
-
     NSDictionary<NSString *, id> *physicalProof =
         report[@"physicalPageProof"];
     if (![report isKindOfClass:NSDictionary.class] ||
@@ -780,52 +772,92 @@ BOOL CNDHailMaryProbeTranslateSharedRuntimeAddress(
     if (!CNDHailMaryValidateKernelIdentity(live, errorOut)) {
         return NO;
     }
-    CNDHailMaryPhysicalMap physicalMap = {0};
-    if (!CNDHailMaryLoadPhysicalMap(&physicalMap, live, errorOut)) {
+    *physicalMapOut = (CNDHailMaryPhysicalMap){0};
+    if (!CNDHailMaryLoadPhysicalMap(physicalMapOut, live, errorOut)) {
+        return NO;
+    }
+    return YES;
+}
+
+/* Re-verify one of the two live processes recorded by the proof. A PID reuse
+ * or a process restart between the proof and this observation fails closed. */
+static BOOL CNDHailMaryProbeVerifyLiveProcess(
+    NSDictionary<NSString *, id> *report,
+    NSString *name,
+    NSDictionary<NSString *, id> **processOut,
+    NSString **errorOut)
+{
+    NSDictionary<NSString *, id> *process = [name isEqual:@"SpringBoard"]
+        ? report[@"springBoard"] : report[@"spotlight"];
+    uint64_t expectedProc = 0;
+    uint64_t expectedTask = 0;
+    uint64_t expectedMap = 0;
+    pid_t expectedPID = (pid_t)[process[@"pid"] intValue];
+    if (![process isKindOfClass:NSDictionary.class] ||
+        expectedPID <= 1 ||
+        !CNDHailMaryParseHex(process[@"proc"], &expectedProc) ||
+        !CNDHailMaryParseHex(process[@"task"], &expectedTask) ||
+        !CNDHailMaryParseHex(process[@"map"], &expectedMap) ||
+        !CNDHailMaryKernelPointer(expectedProc) ||
+        !CNDHailMaryKernelPointer(expectedTask) ||
+        !CNDHailMaryKernelPointer(expectedMap)) {
+        if (errorOut) {
+            *errorOut = [NSString stringWithFormat:
+                @"%@-process-identity-invalid", name];
+        }
         return NO;
     }
 
-    static const char *const kProcessNames[2] = {"SpringBoard", "Spotlight"};
-    NSDictionary<NSString *, id> *processes[2] = {
-        report[@"springBoard"],
-        report[@"spotlight"],
-    };
-    for (NSUInteger index = 0; index < 2; index++) {
-        NSDictionary<NSString *, id> *process = processes[index];
-        uint64_t expectedProc = 0;
-        uint64_t expectedTask = 0;
-        uint64_t expectedMap = 0;
-        pid_t expectedPID = (pid_t)[process[@"pid"] intValue];
-        if (![process isKindOfClass:NSDictionary.class] ||
-            expectedPID <= 1 ||
-            !CNDHailMaryParseHex(process[@"proc"], &expectedProc) ||
-            !CNDHailMaryParseHex(process[@"task"], &expectedTask) ||
-            !CNDHailMaryParseHex(process[@"map"], &expectedMap) ||
-            !CNDHailMaryKernelPointer(expectedProc) ||
-            !CNDHailMaryKernelPointer(expectedTask) ||
-            !CNDHailMaryKernelPointer(expectedMap)) {
-            if (errorOut) {
-                *errorOut = [NSString stringWithFormat:
-                    @"%@-process-identity-invalid", kProcessNames[index]];
-            }
-            return NO;
+    uint64_t liveProc = proc_find(expectedPID);
+    uint64_t liveTask = is_kaddr_valid(liveProc)
+        ? proc_task(liveProc) : 0;
+    uint64_t liveMap = is_kaddr_valid(liveTask)
+        ? task_get_vm_map(liveTask) : 0;
+    if (liveProc != expectedProc || liveTask != expectedTask ||
+        liveMap != expectedMap ||
+        strcmp(proc_get_p_name(liveProc) ?: "", name.UTF8String) != 0) {
+        if (errorOut) {
+            *errorOut = [NSString stringWithFormat:
+                @"%@-changed-after-physical-proof", name];
         }
+        return NO;
+    }
+    if (processOut) *processOut = process;
+    return YES;
+}
 
-        uint64_t liveProc = proc_find(expectedPID);
-        uint64_t liveTask = is_kaddr_valid(liveProc)
-            ? proc_task(liveProc) : 0;
-        uint64_t liveMap = is_kaddr_valid(liveTask)
-            ? task_get_vm_map(liveTask) : 0;
-        if (liveProc != expectedProc || liveTask != expectedTask ||
-            liveMap != expectedMap ||
-            strcmp(proc_get_p_name(liveProc) ?: "",
-                   kProcessNames[index]) != 0) {
-            if (errorOut) {
-                *errorOut = [NSString stringWithFormat:
-                    @"%@-changed-after-physical-proof", kProcessNames[index]];
-            }
+BOOL CNDHailMaryProbeTranslateSharedRuntimeAddress(
+    NSDictionary<NSString *, id> *report,
+    uint64_t runtimeVirtualAddress,
+    NSDictionary<NSString *, id> **springBoardTranslationOut,
+    NSDictionary<NSString *, id> **spotlightTranslationOut,
+    uint64_t *physicalFrameOut,
+    uint64_t *physicalAddressOut,
+    uint64_t *frameKernelVirtualAddressOut,
+    NSString **errorOut)
+{
+    if (springBoardTranslationOut) *springBoardTranslationOut = nil;
+    if (spotlightTranslationOut) *spotlightTranslationOut = nil;
+    if (physicalFrameOut) *physicalFrameOut = 0;
+    if (physicalAddressOut) *physicalAddressOut = 0;
+    if (frameKernelVirtualAddressOut) *frameKernelVirtualAddressOut = 0;
+    if (errorOut) *errorOut = nil;
+
+    CNDHailMaryPhysicalMap physicalMap = {0};
+    if (!CNDHailMaryProbePrepareTranslation(
+            report, runtimeVirtualAddress, &physicalMap, errorOut)) {
+        return NO;
+    }
+    NSDictionary<NSString *, id> *processes[2] = {nil, nil};
+    static NSString *const kProcessNames[2] =
+        {@"SpringBoard", @"Spotlight"};
+    for (NSUInteger index = 0; index < 2; index++) {
+        NSDictionary<NSString *, id> *process = nil;
+        if (!CNDHailMaryProbeVerifyLiveProcess(
+                report, kProcessNames[index], &process, errorOut)) {
             return NO;
         }
+        processes[index] = process;
     }
 
     NSDictionary<NSString *, id> *springBoardTranslation =
@@ -886,6 +918,72 @@ BOOL CNDHailMaryProbeTranslateSharedRuntimeAddress(
         *frameKernelVirtualAddressOut = frameKernelVirtualAddress;
     }
     return YES;
+}
+
+BOOL CNDHailMaryProbeTranslateRuntimeAddressInProcessWithPhysical(
+    NSDictionary<NSString *, id> *report,
+    NSString *processName,
+    uint64_t runtimeVirtualAddress,
+    NSDictionary<NSString *, id> **translationOut,
+    uint64_t *physicalFrameOut,
+    uint64_t *physicalAddressOut,
+    uint64_t *frameKernelVirtualAddressOut,
+    NSString **errorOut)
+{
+    if (translationOut) *translationOut = nil;
+    if (physicalFrameOut) *physicalFrameOut = 0;
+    if (physicalAddressOut) *physicalAddressOut = 0;
+    if (frameKernelVirtualAddressOut) *frameKernelVirtualAddressOut = 0;
+    if (errorOut) *errorOut = nil;
+    if (![processName isEqual:@"SpringBoard"] &&
+        ![processName isEqual:@"Spotlight"]) {
+        if (errorOut) *errorOut = @"unknown-process-name";
+        return NO;
+    }
+
+    CNDHailMaryPhysicalMap physicalMap = {0};
+    if (!CNDHailMaryProbePrepareTranslation(
+            report, runtimeVirtualAddress, &physicalMap, errorOut)) {
+        return NO;
+    }
+    NSDictionary<NSString *, id> *process = nil;
+    if (!CNDHailMaryProbeVerifyLiveProcess(
+            report, processName, &process, errorOut)) {
+        return NO;
+    }
+    NSDictionary<NSString *, id> *translation =
+        CNDHailMaryTranslateVirtualAddress(
+            process, runtimeVirtualAddress, &physicalMap, errorOut);
+    if (!translation) return NO;
+
+    uint64_t physicalFrame = 0;
+    uint64_t physicalAddress = 0;
+    uint64_t frameKVA = 0;
+    if (!CNDHailMaryParseHex(translation[@"physicalFrame"], &physicalFrame) ||
+        !CNDHailMaryParseHex(translation[@"physicalAddress"], &physicalAddress) ||
+        physicalFrame == 0 ||
+        !CNDHailMaryPhysicalToKernelVirtual(
+            &physicalMap, physicalFrame, &frameKVA)) {
+        if (errorOut) *errorOut = @"physical-frame-conversion-failed";
+        return NO;
+    }
+    if (translationOut) *translationOut = translation;
+    if (physicalFrameOut) *physicalFrameOut = physicalFrame;
+    if (physicalAddressOut) *physicalAddressOut = physicalAddress;
+    if (frameKernelVirtualAddressOut) *frameKernelVirtualAddressOut = frameKVA;
+    return YES;
+}
+
+BOOL CNDHailMaryProbeTranslateRuntimeAddressInProcess(
+    NSDictionary<NSString *, id> *report,
+    NSString *processName,
+    uint64_t runtimeVirtualAddress,
+    NSDictionary<NSString *, id> **translationOut,
+    NSString **errorOut)
+{
+    return CNDHailMaryProbeTranslateRuntimeAddressInProcessWithPhysical(
+        report, processName, runtimeVirtualAddress, translationOut,
+        NULL, NULL, NULL, errorOut);
 }
 
 static BOOL CNDHailMaryAddSigned(uint64_t address, int64_t delta,
@@ -1332,6 +1430,54 @@ static NSDictionary<NSString *, id> *CNDHailMaryCompare(
     };
 }
 
+/* SpringBoard-only counterpart of CNDHailMaryCompare. It proves that
+ * SpringBoard holds exactly one non-copy shared backing candidate; no second
+ * process is consulted, so a diverged or absent Spotlight cannot block or
+ * silently widen the proof. */
+static NSDictionary<NSString *, id> *CNDHailMaryCompareSpringBoardOnly(
+    NSArray<NSDictionary<NSString *, id> *> *springBoardCandidates)
+{
+    NSMutableArray<NSDictionary<NSString *, id> *> *matches =
+        [NSMutableArray array];
+    for (NSDictionary<NSString *, id> *candidate in springBoardCandidates) {
+        if (![candidate[@"needsCopy"] boolValue]) {
+            [matches addObject:candidate];
+        }
+    }
+    if (matches.count != 1) {
+        return @{
+            @"confirmed": @NO,
+            @"translationMode": @"springboard-only",
+            @"singleProcess": @YES,
+            @"matchingPairCount": @(matches.count),
+            @"sameBackingObjectPageSlot": @NO,
+            @"physicalFrameResolved": @NO,
+            @"verdict": matches.count == 0
+                ? @"springboard-copy-on-write-or-unresolved-backing"
+                : @"ambiguous-springboard-backing-candidates",
+        };
+    }
+
+    NSDictionary<NSString *, id> *springBoard = matches.firstObject;
+    NSString *springBoardSubmap = CNDHailMaryFirstSubmap(springBoard);
+    return @{
+        @"confirmed": @YES,
+        @"translationMode": @"springboard-only",
+        @"singleProcess": @YES,
+        @"matchingPairCount": @1,
+        @"sameRootSubmap": @(springBoardSubmap.length != 0),
+        @"sameBackingObject": @YES,
+        @"sameObjectOffset": @YES,
+        @"sameBackingObjectPageSlot": @YES,
+        @"entryMarkedShared": @([springBoard[@"isShared"] boolValue]),
+        @"physicalFrameResolved": @NO,
+        @"physicalFrameStatus":
+            @"not-resolved-no-validated-vm-page-layout",
+        @"verdict": @"confirmed-springboard-shared-backing-page-slot",
+        @"springBoard": springBoard,
+    };
+}
+
 static NSDictionary<NSString *, id> *CNDHailMaryPhysicalFailure(
     NSString *verdict, NSString *message)
 {
@@ -1537,6 +1683,159 @@ static NSDictionary<NSString *, id> *CNDHailMaryProvePhysicalPage(
     return proof;
 }
 
+/* SpringBoard-only counterpart of CNDHailMaryProvePhysicalPage. The guarded
+ * text page is translated and byte-verified through SpringBoard's own pmap
+ * only. The resulting proof is deliberately marked singleProcess so the
+ * shared-pair translator keeps refusing it. */
+static NSDictionary<NSString *, id> *CNDHailMaryProvePhysicalPageSpringBoardOnly(
+    NSDictionary<NSString *, id> *springBoard,
+    NSDictionary<NSString *, id> *objectComparison,
+    const CNDHailMaryPhysicalMap *physicalMap)
+{
+    if (![objectComparison[@"confirmed"] boolValue]) {
+        return CNDHailMaryPhysicalFailure(
+            @"object-backing-prerequisite-failed",
+            @"SpringBoard's shared backing object/page-slot prerequisite was not proven.");
+    }
+    NSDictionary<NSString *, id> *springBoardCandidate =
+        objectComparison[@"springBoard"];
+    uint64_t springBoardAddress = 0;
+    if (!CNDHailMaryParseHex(springBoardCandidate[@"runtimeAddress"],
+                             &springBoardAddress)) {
+        return CNDHailMaryPhysicalFailure(
+            @"runtime-address-prerequisite-mismatch",
+            @"SpringBoard's object candidate did not preserve its runtime address.");
+    }
+
+    NSString *springBoardError = nil;
+    NSDictionary<NSString *, id> *springBoardTranslation =
+        CNDHailMaryTranslateVirtualAddress(
+            springBoard, springBoardAddress, physicalMap, &springBoardError);
+    if (!springBoardTranslation) {
+        return CNDHailMaryPhysicalFailure(
+            @"springboard-pmap-translation-failed",
+            springBoardError ?: @"SpringBoard page-table translation failed.");
+    }
+
+    uint64_t springBoardPhysical = 0;
+    uint64_t springBoardFrame = 0;
+    BOOL parsedPhysical =
+        CNDHailMaryParseHex(springBoardTranslation[@"physicalAddress"],
+                            &springBoardPhysical) &&
+        CNDHailMaryParseHex(springBoardTranslation[@"physicalFrame"],
+                            &springBoardFrame);
+    if (!parsedPhysical || springBoardFrame == 0) {
+        return @{
+            @"confirmed": @NO,
+            @"translationMode": @"springboard-only",
+            @"singleProcess": @YES,
+            @"physicalFrameResolved": @NO,
+            @"samePhysicalFrame": @NO,
+            @"runtimeInstructionBytesVerified": @NO,
+            @"springBoard": springBoardTranslation,
+            @"verdict": @"physical-frame-unresolved",
+            @"message": @"SpringBoard's page table did not resolve the target to one physical address.",
+        };
+    }
+
+    uint64_t expectedOffset = kCNDHailMarySubcacheFileOffset &
+        (kCNDHailMaryPageSize - 1);
+    uint64_t offsetWithinFrame = springBoardPhysical - springBoardFrame;
+    uint64_t frameKVA = 0;
+    if (offsetWithinFrame != expectedOffset ||
+        offsetWithinFrame < kCNDHailMaryGuardPatchOffset ||
+        offsetWithinFrame - kCNDHailMaryGuardPatchOffset >
+            kCNDHailMaryPageSize - kCNDHailMaryGuardLength ||
+        !CNDHailMaryPhysicalToKernelVirtual(
+            physicalMap, springBoardFrame, &frameKVA)) {
+        return @{
+            @"confirmed": @NO,
+            @"translationMode": @"springboard-only",
+            @"singleProcess": @YES,
+            @"physicalFrameResolved": @YES,
+            @"samePhysicalFrame": @YES,
+            @"runtimeInstructionBytesVerified": @NO,
+            @"springBoard": springBoardTranslation,
+            @"verdict": @"physical-byte-window-invalid",
+            @"message": @"SpringBoard's frame did not expose the exact guarded byte window at the derived offset.",
+        };
+    }
+
+    uint64_t guardOffsetWithinFrame = offsetWithinFrame -
+        kCNDHailMaryGuardPatchOffset;
+    uint8_t guardBytes[kCNDHailMaryGuardLength];
+    memset(guardBytes, 0, sizeof(guardBytes));
+    kreadbuf(frameKVA + guardOffsetWithinFrame,
+             guardBytes, sizeof(guardBytes));
+    uint32_t instructionWord = 0;
+    memcpy(&instructionWord,
+           guardBytes + kCNDHailMaryGuardPatchOffset,
+           sizeof(instructionWord));
+    NSString *contextSHA256 = CNDHailMarySHA256(
+        guardBytes, sizeof(guardBytes));
+    BOOL wordMatches = instructionWord == kCNDHailMaryOriginalWord;
+    BOOL hashMatches = [contextSHA256
+        isEqual:@CND_HAIL_MARY_CONTEXT_SHA256];
+
+    NSString *springBoardPostError = nil;
+    NSDictionary<NSString *, id> *springBoardPost =
+        CNDHailMaryTranslateVirtualAddress(
+            springBoard, springBoardAddress, physicalMap,
+            &springBoardPostError);
+    BOOL postReadStable = springBoardPost &&
+        [springBoardPost[@"physicalAddress"]
+            isEqual:springBoardTranslation[@"physicalAddress"]] &&
+        [springBoardPost[@"terminalEntryValue"]
+            isEqual:springBoardTranslation[@"terminalEntryValue"]];
+    BOOL confirmed = wordMatches && hashMatches && postReadStable;
+
+    NSMutableDictionary<NSString *, id> *proof = [@{
+        @"confirmed": @(confirmed),
+        @"translationMode": @"springboard-only",
+        @"singleProcess": @YES,
+        @"physicalFrameResolved": @YES,
+        @"samePhysicalFrame": @YES,
+        @"samePhysicalAddress": @YES,
+        @"runtimeInstructionBytesVerified": @(wordMatches && hashMatches),
+        @"postReadTranslationStable": @(postReadStable),
+        @"physicalFrame": CNDHailMaryHex(springBoardFrame),
+        @"physicalAddress": CNDHailMaryHex(springBoardPhysical),
+        @"frameKernelVirtualAddress": CNDHailMaryHex(frameKVA),
+        @"offsetWithinFrame": @(offsetWithinFrame),
+        @"guard": @{
+            @"subcacheFileOffset": CNDHailMaryHex(
+                kCNDHailMaryGuardFileOffset),
+            @"offsetWithinFrame": @(guardOffsetWithinFrame),
+            @"byteLength": @(kCNDHailMaryGuardLength),
+            @"bytesHex": CNDHailMaryBytesHex(
+                guardBytes, sizeof(guardBytes)),
+            @"sha256": contextSHA256,
+            @"expectedSHA256": @CND_HAIL_MARY_CONTEXT_SHA256,
+            @"sha256Matches": @(hashMatches),
+            @"instructionWord": CNDHailMaryHex(instructionWord),
+            @"expectedInstructionWord": CNDHailMaryHex(
+                kCNDHailMaryOriginalWord),
+            @"instructionWordMatches": @(wordMatches),
+        },
+        @"springBoard": springBoardTranslation,
+        @"verdict": confirmed
+            ? @"confirmed-springboard-only-physical-frame-and-bytes"
+            : (postReadStable
+                ? @"runtime-byte-guard-mismatch"
+                : @"translation-changed-after-byte-read"),
+        @"message": confirmed
+            ? @"SpringBoard resolves the guarded instruction to one physical frame and the exact original bytes."
+            : (postReadStable
+                ? @"The frame was resolved, but the live original-word/context guard did not match exactly."
+                : @"SpringBoard's page-table translation changed while the guarded bytes were observed."),
+    } mutableCopy];
+    if (!springBoardPost) {
+        proof[@"springBoardPostReadError"] = springBoardPostError ?:
+            @"post-read translation failed";
+    }
+    return proof;
+}
+
 BOOL CNDHailMaryProbeIsSupported(NSString **reasonOut)
 {
     NSString *product = CNDHailMarySysctlString("hw.machine");
@@ -1559,7 +1858,9 @@ BOOL CNDHailMaryProbeIsRunning(void)
     return __sync_fetch_and_add(&gCNDHailMaryProbeRunning, 0) != 0;
 }
 
-void CNDHailMaryProbeRun(CNDHailMaryProbeCompletion completion)
+void CNDHailMaryProbeRunWithMode(
+    CNDHailMaryProofMode mode,
+    CNDHailMaryProbeCompletion completion)
 {
     if (!completion) return;
     if (!__sync_bool_compare_and_swap(&gCNDHailMaryProbeRunning, 0, 1)) {
@@ -1681,26 +1982,16 @@ void CNDHailMaryProbeRun(CNDHailMaryProbeCompletion completion)
                                 @"SpringBoard map inspection failed.";
                         } else {
                             report[@"springBoard"] = springBoard;
-                            NSString *spotlightError = nil;
-                            NSDictionary<NSString *, id> *spotlight =
-                                CNDHailMaryInspectProcess(
-                                    "Spotlight", &spotlightError);
-                            if (!spotlight) {
-                                report[@"result"] = [spotlightError
-                                    isEqual:@"Spotlight-not-running"]
-                                    ? @"spotlight-not-running"
-                                    : @"spotlight-inspection-failed";
-                                report[@"message"] = [spotlightError
-                                    isEqual:@"Spotlight-not-running"]
-                                    ? @"Open Spotlight so its process exists, then run the probe again."
-                                    : (spotlightError ?:
-                                        @"Spotlight map inspection failed.");
-                            } else {
-                                report[@"spotlight"] = spotlight;
-                                NSDictionary<NSString *, id> *objectComparison =
-                                    CNDHailMaryCompare(
-                                        springBoard[@"candidates"],
-                                        spotlight[@"candidates"]);
+                            report[@"proofMode"] = mode ==
+                                CNDHailMaryProofModeSpringBoardOnly
+                                    ? @"springboard-only"
+                                    : @"shared-pair";
+                            NSDictionary<NSString *, id> *objectComparison = nil;
+                            NSDictionary<NSString *, id> *physicalProof = nil;
+                            if (mode == CNDHailMaryProofModeSpringBoardOnly) {
+                                objectComparison =
+                                    CNDHailMaryCompareSpringBoardOnly(
+                                        springBoard[@"candidates"]);
                                 report[@"objectBackingComparison"] =
                                     objectComparison;
                                 if (![objectComparison[@"confirmed"]
@@ -1709,45 +2000,84 @@ void CNDHailMaryProbeRun(CNDHailMaryProbeCompletion completion)
                                     report[@"result"] =
                                         objectComparison[@"verdict"];
                                     report[@"message"] =
-                                        @"The target backing identity was not proven uniquely; no physical translation or mutation was attempted.";
+                                        @"SpringBoard's shared backing identity was not proven uniquely; no physical translation or mutation was attempted.";
                                 } else {
-                                    NSDictionary<NSString *, id> *physicalProof =
-                                        CNDHailMaryProvePhysicalPage(
-                                            springBoard, spotlight,
-                                            objectComparison, &physicalMap);
-                                    report[@"physicalPageProof"] = physicalProof;
-                                    NSMutableDictionary<NSString *, id> *comparison =
-                                        [objectComparison mutableCopy];
-                                    comparison[@"objectBackingConfirmed"] = @YES;
-                                    comparison[@"confirmed"] =
-                                        physicalProof[@"confirmed"] ?: @NO;
-                                    comparison[@"physicalFrameResolved"] =
-                                        physicalProof[@"physicalFrameResolved"] ?: @NO;
-                                    comparison[@"samePhysicalFrame"] =
-                                        physicalProof[@"samePhysicalFrame"] ?: @NO;
-                                    comparison[@"physicalFrameStatus"] =
-                                        physicalProof[@"verdict"] ?:
-                                            @"physical-page-proof-failed";
-                                    if (physicalProof[@"physicalFrame"]) {
-                                        comparison[@"physicalFrame"] =
-                                            physicalProof[@"physicalFrame"];
-                                    }
-                                    report[@"comparison"] = comparison;
-                                    BOOL confirmed =
-                                        [physicalProof[@"confirmed"] boolValue];
-                                    report[@"runtimeInstructionBytesVerified"] =
-                                        physicalProof[
-                                            @"runtimeInstructionBytesVerified"] ?:
-                                            @NO;
-                                    report[@"result"] =
-                                        physicalProof[@"verdict"] ?:
-                                            @"physical-page-proof-failed";
-                                    report[@"message"] =
-                                        physicalProof[@"message"] ?:
-                                            (confirmed
-                                                ? @"Physical-page proof confirmed."
-                                                : @"Physical-page proof failed closed.");
+                                    physicalProof =
+                                        CNDHailMaryProvePhysicalPageSpringBoardOnly(
+                                            springBoard, objectComparison,
+                                            &physicalMap);
                                 }
+                            } else {
+                                NSString *spotlightError = nil;
+                                NSDictionary<NSString *, id> *spotlight =
+                                    CNDHailMaryInspectProcess(
+                                        "Spotlight", &spotlightError);
+                                if (!spotlight) {
+                                    report[@"result"] = [spotlightError
+                                        isEqual:@"Spotlight-not-running"]
+                                        ? @"spotlight-not-running"
+                                        : @"spotlight-inspection-failed";
+                                    report[@"message"] = [spotlightError
+                                        isEqual:@"Spotlight-not-running"]
+                                        ? @"Open Spotlight so its process exists, then run the probe again."
+                                        : (spotlightError ?:
+                                            @"Spotlight map inspection failed.");
+                                } else {
+                                    report[@"spotlight"] = spotlight;
+                                    objectComparison = CNDHailMaryCompare(
+                                        springBoard[@"candidates"],
+                                        spotlight[@"candidates"]);
+                                    report[@"objectBackingComparison"] =
+                                        objectComparison;
+                                    if (![objectComparison[@"confirmed"]
+                                            boolValue]) {
+                                        report[@"comparison"] = objectComparison;
+                                        report[@"result"] =
+                                            objectComparison[@"verdict"];
+                                        report[@"message"] =
+                                            @"The target backing identity was not proven uniquely; no physical translation or mutation was attempted.";
+                                    } else {
+                                        physicalProof =
+                                            CNDHailMaryProvePhysicalPage(
+                                                springBoard, spotlight,
+                                                objectComparison, &physicalMap);
+                                    }
+                                }
+                            }
+
+                            if (physicalProof) {
+                                report[@"physicalPageProof"] = physicalProof;
+                                NSMutableDictionary<NSString *, id> *comparison =
+                                    [objectComparison mutableCopy];
+                                comparison[@"objectBackingConfirmed"] = @YES;
+                                comparison[@"confirmed"] =
+                                    physicalProof[@"confirmed"] ?: @NO;
+                                comparison[@"physicalFrameResolved"] =
+                                    physicalProof[@"physicalFrameResolved"] ?: @NO;
+                                comparison[@"samePhysicalFrame"] =
+                                    physicalProof[@"samePhysicalFrame"] ?: @NO;
+                                comparison[@"physicalFrameStatus"] =
+                                    physicalProof[@"verdict"] ?:
+                                        @"physical-page-proof-failed";
+                                if (physicalProof[@"physicalFrame"]) {
+                                    comparison[@"physicalFrame"] =
+                                        physicalProof[@"physicalFrame"];
+                                }
+                                report[@"comparison"] = comparison;
+                                BOOL confirmed =
+                                    [physicalProof[@"confirmed"] boolValue];
+                                report[@"runtimeInstructionBytesVerified"] =
+                                    physicalProof[
+                                        @"runtimeInstructionBytesVerified"] ?:
+                                        @NO;
+                                report[@"result"] =
+                                    physicalProof[@"verdict"] ?:
+                                        @"physical-page-proof-failed";
+                                report[@"message"] =
+                                    physicalProof[@"message"] ?:
+                                        (confirmed
+                                            ? @"Physical-page proof confirmed."
+                                            : @"Physical-page proof failed closed.");
                             }
                         }
                     }
@@ -1762,4 +2092,9 @@ void CNDHailMaryProbeRun(CNDHailMaryProbeCompletion completion)
             });
         }
     });
+}
+
+void CNDHailMaryProbeRun(CNDHailMaryProbeCompletion completion)
+{
+    CNDHailMaryProbeRunWithMode(CNDHailMaryProofModeSharedPair, completion);
 }

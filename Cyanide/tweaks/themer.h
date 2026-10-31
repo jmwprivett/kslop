@@ -78,6 +78,21 @@ NSDictionary<NSString *, id> *
 themer_audit_springboard_iconservices_consumers_in_session(
     NSArray<NSString *> *bundleIdentifiers);
 
+// One-time canonical-object migration for the Clock/Calendar dispatch route.
+// The shared-cache redirect changes only future class selection; archived
+// SBHClockApplicationIcon/SBHCalendarApplicationIcon instances survive a
+// respring. This routine therefore removes and re-adds exactly those two
+// applications through the live model after validating every private ABI.
+// SpringBoard additionally preserves each icon's exact relative path and
+// proves equality after insertion. Spotlight has no persisted grid path.
+// dryRun performs the complete identity/class/application/layout preflight
+// without invoking a mutating selector. spotlight selects SearchUI's private
+// SBHIconModel graph instead of SpringBoard's SBIconModel.
+NSDictionary<NSString *, id> *
+themer_rebuild_special_icon_class_objects_in_session(bool useStaticClasses,
+                                                      bool dryRun,
+                                                      bool spotlight);
+
 // Repaint currently visible icon views from the in-session UIImage cache only.
 // This is for SpringBoard re-entry paths where views keep our overrideImage
 // pointer but their inner image contents/layer were reset.

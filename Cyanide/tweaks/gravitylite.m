@@ -602,23 +602,19 @@ static bool gl_view_is_legacy_gravity_overlay(uint64_t view, uint64_t uiViewCls)
     return false;
 }
 
-static int gl_cleanup_gravity_overlays_in_window(uint64_t window, uint64_t uiViewCls)
+static int gl_cleanup_gravity_overlays_in_window(uint64_t window)
 {
-    (void)uiViewCls;
-    uint64_t subviews = gl_subviews(window);
-    uint64_t count = gl_array_count(subviews);
-    if (count > 512) count = 512;
-
-    uint64_t selTag = r_sel("tag");
-    if (!selTag) return 0;
+    if (!r_is_objc_ptr(window) || !r_responds_main(window, "viewWithTag:")) return 0;
 
     int removed = 0;
-    for (uint64_t i = 0; i < count; i++) {
-        uint64_t view = gl_array_object(subviews, i);
-        if (!r_is_objc_ptr(view)) continue;
-
-        if (r_msg(view, selTag, 0, 0, 0, 0) != kGravityLiteOverlayTag) continue;
-
+    uint64_t previous = 0;
+    // Search inside SpringBoard in one call instead of fetching every subview
+    // over RemoteCall. Repeated applies can leave more than one tagged overlay.
+    // Bound recovery, and stop if a failed removal returns the same view again.
+    for (unsigned int attempt = 0; attempt < 16; attempt++) {
+        uint64_t view = r_msg2_main(window, "viewWithTag:", kGravityLiteOverlayTag, 0, 0, 0);
+        if (!r_is_objc_ptr(view) || view == window || view == previous) break;
+        previous = view;
         r_msg2_main(view, "removeFromSuperview", 0, 0, 0, 0);
         removed++;
     }
@@ -627,11 +623,10 @@ static int gl_cleanup_gravity_overlays_in_window(uint64_t window, uint64_t uiVie
 
 static int gl_cleanup_gravity_overlays_in_app_windows(void)
 {
-    uint64_t uiViewCls = r_class("UIView");
     uint64_t appCls = r_class("UIApplication");
     uint64_t app = r_is_objc_ptr(appCls) ? r_msg2_main(appCls, "sharedApplication", 0, 0, 0, 0) : 0;
     uint64_t windows = r_is_objc_ptr(app) ? gl_safe_msg(app, "windows", 0, 0, 0, 0) : 0;
-    if (!r_is_objc_ptr(uiViewCls) || !r_is_objc_ptr(windows)) return 0;
+    if (!r_is_objc_ptr(windows)) return 0;
 
     uint64_t count = gl_array_count(windows);
     if (count > 64) count = 64;
@@ -640,7 +635,7 @@ static int gl_cleanup_gravity_overlays_in_app_windows(void)
     for (uint64_t i = 0; i < count; i++) {
         uint64_t window = gl_array_object(windows, i);
         if (!r_is_objc_ptr(window)) continue;
-        removed += gl_cleanup_gravity_overlays_in_window(window, uiViewCls);
+        removed += gl_cleanup_gravity_overlays_in_window(window);
     }
     return removed;
 }
@@ -1391,7 +1386,7 @@ static bool gl_build_group(uint64_t groups,
     return true;
 }
 
-bool gravitylite_stop_in_session(void)
+static bool gl_stop_in_session(bool recoverOrphans)
 {
     __atomic_store_n(&s_gravity_ptr_count, 0, __ATOMIC_SEQ_CST);
     memset(s_gravity_ptrs, 0, sizeof(s_gravity_ptrs));
@@ -1404,6 +1399,7 @@ bool gravitylite_stop_in_session(void)
 
     uint64_t state = gl_get_state(ctrl);
     if (!r_is_objc_ptr(state)) {
+        if (!recoverOrphans) return true;
         int orphans = gl_cleanup_gravity_overlays_in_app_windows();
         if (orphans > 0)
             printf("[GRAVITY] stop: removed %d orphaned overlay(s).\n", orphans);
@@ -1460,6 +1456,16 @@ bool gravitylite_stop_in_session(void)
     else
         printf("[GRAVITY] Restored %d icons to the home screen.\n", restoredIcons);
     return true;
+}
+
+bool gravitylite_stop_in_session(void)
+{
+    return gl_stop_in_session(false);
+}
+
+bool gravitylite_restore_in_session(void)
+{
+    return gl_stop_in_session(true);
 }
 
 bool gravitylite_apply_in_session(GravityLiteConfig config)

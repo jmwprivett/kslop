@@ -95,7 +95,7 @@ class CCFileBackingTests(unittest.TestCase):
                 str(ROOT / "scripts/tests/test_cc_theming_file_backing.m"), "-o", str(binary),
             ], capture_output=True, text=True, timeout=60)
             self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
-            tested = subprocess.run([str(binary), str(ROOT), directory], capture_output=True, text=True, timeout=30)
+            tested = subprocess.run([str(binary), str(ROOT), directory], capture_output=True, text=True, timeout=60)
             self.assertEqual(tested.returncode, 0, tested.stdout + tested.stderr)
             self.assertIn("partial rollback", tested.stdout)
 

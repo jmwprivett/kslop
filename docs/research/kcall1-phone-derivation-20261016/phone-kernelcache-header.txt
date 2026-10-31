@@ -1,0 +1,13 @@
+# otool -l on the pinned iPhone17,2 23A341 kernelcache (PHONE_KERNEL_IMAGE); container __TEXT vmaddr and the first two LC_FILESET_ENTRY vmaddrs
+FILE build/lab-cs-allow-invalid/kernel-23A341/kernelcache.release.iphone17.dec/kernelcache.release.iphone17.decompressed
+SHA256 7e66ddbb70b626c4502c3036620b59829b744c54712a74ca50f4a0c004c89f8c  build/lab-cs-allow-invalid/kernel-23A341/kernelcache.release.iphone17.dec/kernelcache.release.iphone17.decompressed
+MACH-HEADER  0xfeedfacf 16777228          2  0xc0          12   312      22424 0x00000000
+CONTAINER-TEXT   segname __TEXT
+CONTAINER-TEXT    vmaddr 0xfffffff007004000
+CONTAINER-TEXT    vmsize 0x0000000000008000
+CONTAINER-TEXT   fileoff 0
+CONTAINER-TEXT  filesize 32768
+FILESET     vmaddr 0xfffffff00700c000
+FILESET   entry_id com.apple.kernel (offset 32)
+FILESET     vmaddr 0xfffffff0070fc000
+FILESET   entry_id com.apple.AGXFirmwareKextG17PRTBuddy (offset 32)

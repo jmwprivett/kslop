@@ -9,6 +9,7 @@
 #import "PackageQueue.h"
 #import "CNDQueuedActionCatalog.h"
 #import "../SettingsViewController.h"
+#import "../tweaks/CNDCCThemingFileBacking.h"
 
 static NSString * const kPackageCellID         = @"PackageCell";
 static NSString * const kGroupByCategoryDefault = @"installer.groupByCategory";
@@ -504,6 +505,26 @@ static NSString * const kNewCCThemingIdentifier = @"com.darksword.cc-theming";
                                colorWithAlphaComponent:0.18]
                             textColor:UIColor.systemGreenColor];
         }
+    }
+    if (pkg.kind == PackageInstallKindControlCenterTheming) {
+        if (intent != PackageQueueIntentNone) {
+            NSString *text = intent == PackageQueueIntentInstall
+                ? @"APPLY PENDING" : @"RESTORE PENDING";
+            UIColor *color = self.view.tintColor;
+            return [self pillWithText:text
+                           background:[color colorWithAlphaComponent:0.18]
+                            textColor:color];
+        }
+        if (CNDCCThemingFileBackingHasJournaledState()) {
+            return [self pillWithText:@"ACTIVE"
+                           background:[UIColor.systemGreenColor
+                               colorWithAlphaComponent:0.18]
+                            textColor:UIColor.systemGreenColor];
+        }
+        return [self pillWithText:@"STOCK"
+                       background:[UIColor.secondaryLabelColor
+                           colorWithAlphaComponent:0.14]
+                        textColor:UIColor.secondaryLabelColor];
     }
     if (pkg.kind == PackageInstallKindDirectTool) {
         return [self pillWithText:@"MANUAL"

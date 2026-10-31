@@ -68,12 +68,18 @@
 #import "CNDPhysicalPACIdentityCanary.h"
 #import "CNDPhysicalCalculatorPACProbe.h"
 #import "CNDPhysicalSpringBoardPACProbe.h"
+#import "CNDPhysicalEntitlementAuditProbe.h"
+#import "CNDPhysicalIOUserEthernetSignerProbe.h"
+#import "CNDPhysicalKCall1Probe.h"
 #import "CNDLabThreadCallPACBoundary.h"
 #import "CNDHailMaryProbe.h"
 #import "CNDHailMaryPatch.h"
 #import "CNDHailMaryDataPage.h"
 #import "CNDHailMaryReadOnlyDataPage.h"
+#import "CNDHailMaryPageWire.h"
 #import "CNDHailMaryImpRedirect.h"
+#import "CNDHailMarySpecialIconClassRedirect.h"
+#import "CNDHailMarySpecialIconClassDispatchRedirect.h"
 #import "LogTextView.h"
 #import <WebKit/WebKit.h>
 #import <MessageUI/MessageUI.h>
@@ -711,7 +717,7 @@ static bool settings_stop_gravitylite_registered(BOOL springboardWillDie)
 {
     (void)springboardWillDie;
     settings_request_gravitylite_stop();
-    return gravitylite_stop_in_session();
+    return gravitylite_restore_in_session();
 }
 
 static bool settings_stop_themer_registered(BOOL springboardWillDie)
@@ -852,10 +858,18 @@ static int g_sbl_app_updated_notify_token = NOTIFY_TOKEN_INVALID;
 static int g_sbl_ls_registered_notify_token = NOTIFY_TOKEN_INVALID;
 static int g_sbl_ls_apps_changed_notify_token = NOTIFY_TOKEN_INVALID;
 static int g_sbl_mobile_installation_notify_token = NOTIFY_TOKEN_INVALID;
-static NSMutableDictionary<NSString *, NSString *> *g_sbl_app_snapshot = nil;
-static NSMutableSet<NSString *> *g_sbl_pending_app_bundles = nil;
-static uint64_t g_sbl_app_reapply_generation = 0;
-static volatile uint64_t g_sbl_app_snapshot_event_generation = 0;
+static dispatch_source_t g_sbl_automatic_repair_timer;
+// Scheduler state belongs to the main queue; repair work stays off-main.
+static dispatch_source_t g_sbl_automatic_repair_wakeup;
+static NSString *g_sbl_automatic_repair_pending_reason;
+static NSUInteger g_sbl_automatic_repair_pending_attempt = 0;
+static NSTimeInterval g_sbl_automatic_repair_pending_deadline = 0;
+static NSTimeInterval g_sbl_automatic_repair_not_before = 0;
+static BOOL g_sbl_automatic_repair_running = NO;
+static const NSTimeInterval kSBLAutomaticRepairCooldown = 2.0 * 60.0;
+static volatile int g_sbl_automatic_hail_mary_confirmed = 0;
+static void settings_schedule_snowboard_automatic_repair(
+    NSString *reason, NSTimeInterval delay);
 static const NSInteger kSBCDefaultDockIcons = 4;
 static const NSInteger kSBCDefaultCols = 4;
 static const NSInteger kSBCDefaultRows = 6;
@@ -929,6 +943,8 @@ static NSString * const kSettingsRemoteCallStateDidChangeNotification = @"Settin
 NSString * const kSettingsActionsDidCompleteNotification = @"SettingsActionsDidCompleteNotification";
 NSString * const kSettingsActionsDidCompleteSuccessKey = @"success";
 NSString * const kSettingsActionsDidCompleteMessageKey = @"message";
+NSString * const kSettingsSnowBoardAutomaticRepairDidCompleteNotification =
+    @"SettingsSnowBoardAutomaticRepairDidCompleteNotification";
 NSString * const kSettingsQueuedRunDidCompleteNotification =
     @"SettingsQueuedRunDidCompleteNotification";
 NSString * const kSettingsQueuedRunCompletionTokenKey = @"queueCompletionToken";
@@ -2031,14 +2047,16 @@ static void settings_install_screen_awake_observers(void)
             g_springboard_frontmost_notify_token = NOTIFY_TOKEN_INVALID;
         }
 
-#if 0
-        // SnowBoard Remix is explicit and journaled. It does not watch install
-        // notifications or implicitly rewrite app bundles after an update.
+        // Automatic Repair consumes several overlapping notifications because
+        // no single Darwin channel covers App Store updates, direct installs,
+        // and LaunchServices re-registration on every supported build. The
+        // shared scheduler coalesces a burst into one journal-aware repair.
         status = notify_register_dispatch("com.apple.mobile.application_installed",
                                           &g_sbl_app_installed_notify_token,
                                           dispatch_get_main_queue(), ^(int token) {
             (void)token;
-            settings_snowboardlite_handle_app_snapshot_event(@"mobile application installed");
+            settings_schedule_snowboard_automatic_repair(
+                @"mobile application installed", 20.0);
         });
         if (status != NOTIFY_STATUS_OK) {
             g_sbl_app_installed_notify_token = NOTIFY_TOKEN_INVALID;
@@ -2050,7 +2068,8 @@ static void settings_install_screen_awake_observers(void)
                                           &g_sbl_app_updated_notify_token,
                                           dispatch_get_main_queue(), ^(int token) {
             (void)token;
-            settings_snowboardlite_handle_app_snapshot_event(@"mobile application updated");
+            settings_schedule_snowboard_automatic_repair(
+                @"mobile application updated", 20.0);
         });
         if (status != NOTIFY_STATUS_OK) {
             g_sbl_app_updated_notify_token = NOTIFY_TOKEN_INVALID;
@@ -2062,7 +2081,8 @@ static void settings_install_screen_awake_observers(void)
                                           &g_sbl_ls_registered_notify_token,
                                           dispatch_get_main_queue(), ^(int token) {
             (void)token;
-            settings_snowboardlite_handle_app_snapshot_event(@"launchservices application registered");
+            settings_schedule_snowboard_automatic_repair(
+                @"launchservices application registered", 20.0);
         });
         if (status != NOTIFY_STATUS_OK) {
             g_sbl_ls_registered_notify_token = NOTIFY_TOKEN_INVALID;
@@ -2074,7 +2094,8 @@ static void settings_install_screen_awake_observers(void)
                                           &g_sbl_ls_apps_changed_notify_token,
                                           dispatch_get_main_queue(), ^(int token) {
             (void)token;
-            settings_snowboardlite_handle_app_snapshot_event(@"launchservices applications changed");
+            settings_schedule_snowboard_automatic_repair(
+                @"launchservices applications changed", 20.0);
         });
         if (status != NOTIFY_STATUS_OK) {
             g_sbl_ls_apps_changed_notify_token = NOTIFY_TOKEN_INVALID;
@@ -2086,15 +2107,14 @@ static void settings_install_screen_awake_observers(void)
                                           &g_sbl_mobile_installation_notify_token,
                                           dispatch_get_main_queue(), ^(int token) {
             (void)token;
-            settings_snowboardlite_handle_app_snapshot_event(@"mobile installation proxy installed");
+            settings_schedule_snowboard_automatic_repair(
+                @"mobile installation proxy installed", 20.0);
         });
         if (status != NOTIFY_STATUS_OK) {
             g_sbl_mobile_installation_notify_token = NOTIFY_TOKEN_INVALID;
             printf("[SBR] app notify registration failed name=com.apple.mobile.installation_proxy.installed status=%d\n",
                    status);
         }
-#endif
-
         // If the live loop tripped its 3-failure exit during a background
         // window, the screen-wake darwin notifications won't fire (the screen
         // never blanked) and the loop stays dead. Re-arm on app foreground.
@@ -2106,6 +2126,8 @@ static void settings_install_screen_awake_observers(void)
             (void)settings_refresh_screen_awake_state("app became active");
             settings_apply_statbar_once_async("app became active");
             settings_schedule_themer_quiet_repair_burst("app became active");
+            settings_schedule_snowboard_automatic_repair(
+                @"app became active", 20.0);
         }];
 
         (void)settings_refresh_screen_awake_state("startup");
@@ -2492,6 +2514,16 @@ static NSString *settings_app_build_string(void)
 
 static void settings_log_run_context(void)
 {
+}
+
+static BOOL settings_ensure_kexploit(void);
+
+bool settings_ensure_krw_for_probe(void)
+{
+    if (kexploit_krw_ready()) {
+        return true;
+    }
+    return settings_ensure_kexploit() && kexploit_krw_ready();
 }
 
 static BOOL settings_ensure_kexploit(void)
@@ -3757,6 +3789,125 @@ void settings_run_hail_mary_read_only_data_page_action(void)
     });
 }
 
+/* A failure before the probe owns KRW still has to resolve exactly one
+ * completion: the launch-argument path posts the usual notification, the
+ * Probes row hands the same shape to its own activity sheet. */
+static void settings_finish_hail_mary_page_wire_failure(
+    NSString *result,
+    NSString *message,
+    void (^hook)(NSDictionary<NSString *, id> *report))
+{
+    if (hook) {
+        hook(@{
+            @"result": result ?: @"refused",
+            @"confirmed": @NO,
+            @"semanticMutationCount": @0,
+            @"kernelWritePrimitiveInvocationCount": @0,
+            @"message": message ?: @"",
+        });
+        return;
+    }
+    settings_post_actions_complete_async(NO, message);
+}
+
+/* Shared body for the launch-argument action and the Probes row. Without a
+ * hook it posts the usual actions-complete notification; with one the caller
+ * resolves the report itself, so exactly one completion is posted per run. */
+static void settings_run_hail_mary_page_wire_with_hook(
+    void (^hook)(NSDictionary<NSString *, id> *report))
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                "Hail Mary .34 Page Wire",
+                "[HAIL_MARY_PAGE_WIRE] Another action is already running.")) {
+            settings_finish_hail_mary_page_wire_failure(
+                @"refused-actions-lock",
+                @"Hail Mary .34 Page Wire blocked: another action is running.",
+                hook);
+            return;
+        }
+
+        log_session_begin();
+        log_user("[HAIL_MARY_PAGE_WIRE] Acquiring or reusing validated KRW, then proving the exact .34 frame before one SpringBoard mlock. No write is armed and no page byte changes; the proof uses SpringBoard's mapping alone.\n");
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[HAIL_MARY_PAGE_WIRE] Validated KRW is unavailable.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_finish_hail_mary_page_wire_failure(
+                @"refused-krw-unavailable",
+                @"Hail Mary .34 Page Wire failed to acquire validated KRW.",
+                hook);
+            return;
+        }
+
+        CNDHailMaryPageWireRun(
+            ^(NSDictionary<NSString *, id> *report) {
+            dispatch_async(dispatch_get_global_queue(
+                QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL confirmed = [report[@"confirmed"] boolValue];
+                NSDictionary<NSString *, id> *wire = report[@"wire"];
+                NSDictionary<NSString *, id> *identity =
+                    report[@"runtimeIdentity"];
+                NSDictionary<NSString *, id> *controls =
+                    report[@"springBoardPageWire"][@"diagnosticControls"];
+                log_user("[HAIL_MARY_PAGE_WIRE] result=%s interpretation=%s confirmed=%s state=%s mlock-return=%s errno=%lu (%s) wired=%s retained=%s page-base=%s frame=%s aperture=%s\n",
+                    result.UTF8String ?: "unknown-result",
+                    [settings_lsreg_text(report[@"interpretation"])
+                        UTF8String],
+                    confirmed ? "yes" : "no",
+                    [settings_lsreg_text(report[@"pageState"]) UTF8String],
+                    [settings_lsreg_text(wire[@"mlockReturn"]) UTF8String],
+                    (unsigned long)[wire[@"mlockErrno"]
+                        unsignedIntegerValue],
+                    [settings_lsreg_text(
+                        wire[@"mlockErrnoDescription"]) UTF8String],
+                    [wire[@"wired"] boolValue] ? "yes" : "no",
+                    [report[@"springBoardWireRetained"] boolValue]
+                        ? "yes" : "no",
+                    [settings_lsreg_text(identity[@"wiredPageBase"])
+                        UTF8String],
+                    [settings_lsreg_text(identity[@"physicalFrame"])
+                        UTF8String],
+                    [settings_lsreg_text(
+                        identity[@"frameKernelVirtualAddress"])
+                        UTF8String]);
+                log_user("[HAIL_MARY_PAGE_WIRE] controls anon-rw=%s anon-ro=%s (self-owned 16 KiB pages; used only to attribute a refusal)\n",
+                    [settings_lsreg_text(
+                        controls[@"anonymousReadWrite"][@"mlockErrnoDescription"])
+                        UTF8String],
+                    [settings_lsreg_text(
+                        controls[@"anonymousReadOnly"][@"mlockErrnoDescription"])
+                        UTF8String]);
+                if ([report[@"stage"] isEqual:
+                         @"armed-springboard-page-wire"]) {
+                    log_user("[HAIL_MARY_PAGE_WIRE] Journal stopped at the armed checkpoint; the SpringBoard mlock is in flight.\n");
+                }
+                log_user("[HAIL_MARY_PAGE_WIRE] %s\n",
+                    [settings_lsreg_text(report[@"message"]) UTF8String]);
+                log_user("[HAIL_MARY_PAGE_WIRE] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                if (hook) {
+                    hook(report);
+                    return;
+                }
+                settings_post_actions_complete_async(
+                    confirmed,
+                    [NSString stringWithFormat:
+                        @"Hail Mary .34 Page Wire finished: %@.",
+                        result.length ? result : @"unknown-result"]);
+            });
+        });
+    });
+}
+
+void settings_run_hail_mary_page_wire_action(void)
+{
+    settings_run_hail_mary_page_wire_with_hook(nil);
+}
+
 static void settings_run_hail_mary_imp_redirect_action(
     CNDHailMaryImpRedirectOperation operation)
 {
@@ -3811,6 +3962,731 @@ void settings_run_hail_mary_imp_redirect_restore_action(void)
 {
     settings_run_hail_mary_imp_redirect_action(
         CNDHailMaryImpRedirectOperationRestore);
+}
+
+static NSString *settings_hail_mary_special_icon_class_operation_name(
+    CNDHailMarySpecialIconClassOperation operation)
+{
+    switch (operation) {
+        case CNDHailMarySpecialIconClassOperationApply: return @"apply";
+        case CNDHailMarySpecialIconClassOperationRestore: return @"restore";
+        case CNDHailMarySpecialIconClassOperationVerifyRedirected:
+            return @"verify-redirected";
+        case CNDHailMarySpecialIconClassOperationVerifyOriginal:
+            return @"verify-original";
+    }
+    return @"unknown";
+}
+
+static void settings_run_hail_mary_special_icon_class_action_with_hook(
+    BOOL permission,
+    CNDHailMarySpecialIconClassOperation operation,
+    void (^hook)(NSDictionary<NSString *, id> *report))
+{
+    NSString *actionName = permission
+        ? @"Special-Class GOT Probe"
+        : @"Special-Class GOT Redirect";
+    NSString *operationName = permission
+        ? @"permission-probe"
+        : settings_hail_mary_special_icon_class_operation_name(operation);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                actionName.UTF8String,
+                "[HAIL_MARY_SPECIAL_CLASS] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, [NSString stringWithFormat:
+                    @"%@ blocked: another action is running.", actionName]);
+            return;
+        }
+
+        log_session_begin();
+        log_user("[HAIL_MARY_SPECIAL_CLASS] operation=%s acquiring or reusing validated KRW. The Clock/Calendar class selection redirect targets the two SpringBoardHome __got slots in .33.dylddata; it does not touch the .19 method-list text page, the legacy transparency dispatch entry, or the earlier preoptimized-cache experiment.\n",
+            operationName.UTF8String);
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[HAIL_MARY_SPECIAL_CLASS] Validated KRW is unavailable.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, [NSString stringWithFormat:
+                    @"%@ failed to acquire validated KRW.", actionName]);
+            return;
+        }
+
+        pid_t spotlightPID = 0;
+        if (!settings_hail_mary_spotlight_identity(&spotlightPID)) {
+            log_user("[HAIL_MARY_SPECIAL_CLASS] Spotlight is absent; opening global search and retaining its lifetime assertion through one bounded SpringBoard RemoteCall.\n");
+            NSDictionary<NSString *, id> *presentation =
+                CNDIconServicesConsumerHookPresentSpotlight();
+            BOOL presented = [presentation[@"ok"] boolValue];
+            log_user("[HAIL_MARY_SPECIAL_CLASS] Spotlight presentation stage=%s ok=%s spotlight-pid=%d message=%s\n",
+                [settings_lsreg_text(presentation[@"stage"]) UTF8String],
+                presented ? "yes" : "no",
+                [presentation[@"spotlightPID"] intValue],
+                [settings_lsreg_text(presentation[@"message"]) UTF8String]);
+            if (!presented ||
+                !settings_hail_mary_spotlight_identity(&spotlightPID)) {
+                log_user("[HAIL_MARY_SPECIAL_CLASS] Refused: Spotlight did not settle to one validated live identity; the shared-pair proof cannot proceed.\n");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    NO, [NSString stringWithFormat:
+                        @"%@ could not open and bind Spotlight.", actionName]);
+                return;
+            }
+        } else {
+            log_user("[HAIL_MARY_SPECIAL_CLASS] Reusing live Spotlight pid=%d; no toggle was sent.\n",
+                spotlightPID);
+        }
+
+        CNDHailMarySpecialIconClassCompletion completion =
+            ^(NSDictionary<NSString *, id> *report) {
+            dispatch_async(dispatch_get_global_queue(
+                QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *result = settings_lsreg_text(report[@"result"]);
+                BOOL confirmed = [report[@"confirmed"] boolValue];
+                NSDictionary<NSString *, id> *readback = report[@"readback"];
+                NSDictionary<NSString *, id> *postTranslation =
+                    report[@"postWriteTranslation"];
+                log_user("[HAIL_MARY_SPECIAL_CLASS] operation=%s result=%s confirmed=%s mutation-confirmed=%s slide-candidates=%lu exact-matches=%lu readback-exact=%s post-translation-stable=%s writes=%lu semantic-mutations=%lu consumer-rebuild-required=%s\n",
+                    operationName.UTF8String,
+                    result.UTF8String ?: "unknown-result",
+                    confirmed ? "yes" : "no",
+                    [report[@"mutationConfirmed"] boolValue] ? "yes" : "no",
+                    (unsigned long)[report[@"slideScan"][@"candidateCount"]
+                        unsignedIntegerValue],
+                    (unsigned long)[report[@"slideScan"]
+                        [@"matchingCandidateCount"] unsignedIntegerValue],
+                    [readback[@"exactDesiredGuard"] boolValue] ||
+                            [readback[@"exactOfflineGuard"] boolValue]
+                        ? "yes" : "no",
+                    [postTranslation[@"stable"] boolValue] ? "yes" : "no",
+                    (unsigned long)[report[
+                        @"kernelWritePrimitiveInvocationCount"]
+                        unsignedIntegerValue],
+                    (unsigned long)[report[
+                        @"dispatchEntrySemanticMutationCount"]
+                        unsignedIntegerValue],
+                    [report[@"consumerRebuildRequired"] boolValue]
+                        ? "yes" : "no");
+                if ([report[@"stage"] isEqual:
+                         @"armed-got-apply"] ||
+                    [report[@"stage"] isEqual:
+                         @"armed-got-restore"]) {
+                    log_user("[HAIL_MARY_SPECIAL_CLASS] Journal stopped at the armed checkpoint; the two .33 __got class-pointer writes are in flight and readback is pending.\n");
+                }
+                log_user("[HAIL_MARY_SPECIAL_CLASS] %s\n",
+                    [settings_lsreg_text(report[@"message"]) UTF8String]);
+                log_user("[HAIL_MARY_SPECIAL_CLASS] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    confirmed,
+                    [NSString stringWithFormat:@"%@ finished: %@.",
+                        actionName,
+                        result.length ? result : @"unknown-result"]);
+                if (hook) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        hook(report);
+                    });
+                }
+            });
+        };
+
+        if (permission) {
+            CNDHailMarySpecialIconClassPermissionRun(completion);
+        } else {
+            CNDHailMarySpecialIconClassRedirectRun(operation, completion);
+        }
+    });
+}
+
+static void settings_run_hail_mary_special_icon_class_action(
+    BOOL permission,
+    CNDHailMarySpecialIconClassOperation operation)
+{
+    settings_run_hail_mary_special_icon_class_action_with_hook(
+        permission, operation, nil);
+}
+
+void settings_run_hail_mary_special_icon_class_probe_action(void)
+{
+    settings_run_hail_mary_special_icon_class_action(YES,
+        CNDHailMarySpecialIconClassOperationApply);
+}
+
+void settings_run_hail_mary_special_icon_class_apply_action(void)
+{
+    settings_run_hail_mary_special_icon_class_action(NO,
+        CNDHailMarySpecialIconClassOperationApply);
+}
+
+void settings_run_hail_mary_special_icon_class_restore_action(void)
+{
+    settings_run_hail_mary_special_icon_class_action(NO,
+        CNDHailMarySpecialIconClassOperationRestore);
+}
+
+void settings_run_hail_mary_special_icon_class_verify_redirected_action(void)
+{
+    settings_run_hail_mary_special_icon_class_action(NO,
+        CNDHailMarySpecialIconClassOperationVerifyRedirected);
+}
+
+void settings_run_hail_mary_special_icon_class_verify_original_action(void)
+{
+    settings_run_hail_mary_special_icon_class_action(NO,
+        CNDHailMarySpecialIconClassOperationVerifyOriginal);
+}
+
+static NSString *
+settings_hail_mary_special_icon_class_dispatch_operation_name(
+    CNDHailMarySpecialIconClassDispatchOperation operation)
+{
+    switch (operation) {
+        case CNDHailMarySpecialIconClassDispatchOperationApply:
+            return @"apply";
+        case CNDHailMarySpecialIconClassDispatchOperationRestore:
+            return @"restore";
+        case CNDHailMarySpecialIconClassDispatchOperationVerifyRedirected:
+            return @"verify-redirected";
+        case CNDHailMarySpecialIconClassDispatchOperationVerifyOriginal:
+            return @"verify-original";
+    }
+    return @"unknown";
+}
+
+static void
+settings_run_hail_mary_special_icon_class_dispatch_action_with_hook(
+    BOOL permission,
+    CNDHailMarySpecialIconClassDispatchOperation operation,
+    void (^hook)(NSDictionary<NSString *, id> *report))
+{
+    NSString *actionName = permission
+        ? @"Per-Boot Static-Icon Dispatch Probe"
+        : @"Per-Boot Static-Icon Dispatch Redirect";
+    NSString *operationName = permission
+        ? @"permission-probe"
+        : settings_hail_mary_special_icon_class_dispatch_operation_name(
+            operation);
+    dispatch_async(dispatch_get_global_queue(
+        QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                actionName.UTF8String,
+                "[HAIL_MARY_SPECIAL_DISPATCH] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, [NSString stringWithFormat:
+                    @"%@ blocked: another action is running.",
+                    actionName]);
+            return;
+        }
+
+        log_session_begin();
+        log_user("[HAIL_MARY_SPECIAL_DISPATCH] operation=%s acquiring or reusing validated KRW. The route targets the pinned SBHIconModel and SBIconModel preoptimized-cache entries in .34.dyldreadonly; it does not modify .19 text, the legacy transparency entry, or the .33 GOT slots.\n",
+            operationName.UTF8String);
+        if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+            log_user("[HAIL_MARY_SPECIAL_DISPATCH] Validated KRW is unavailable.\n");
+            log_session_end();
+            settings_release_actions_lock();
+            settings_post_actions_complete_async(
+                NO, [NSString stringWithFormat:
+                    @"%@ failed to acquire validated KRW.",
+                    actionName]);
+            return;
+        }
+
+        pid_t spotlightPID = 0;
+        if (!settings_hail_mary_spotlight_identity(&spotlightPID)) {
+            log_user("[HAIL_MARY_SPECIAL_DISPATCH] Spotlight is absent; opening global search so the shared-pair proof has two live consumers.\n");
+            NSDictionary<NSString *, id> *presentation =
+                CNDIconServicesConsumerHookPresentSpotlight();
+            BOOL presented = [presentation[@"ok"] boolValue];
+            log_user("[HAIL_MARY_SPECIAL_DISPATCH] Spotlight presentation stage=%s ok=%s spotlight-pid=%d message=%s\n",
+                [settings_lsreg_text(presentation[@"stage"]) UTF8String],
+                presented ? "yes" : "no",
+                [presentation[@"spotlightPID"] intValue],
+                [settings_lsreg_text(presentation[@"message"]) UTF8String]);
+            if (!presented ||
+                !settings_hail_mary_spotlight_identity(&spotlightPID)) {
+                log_user("[HAIL_MARY_SPECIAL_DISPATCH] Refused: Spotlight did not settle to one validated live identity.\n");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    NO, [NSString stringWithFormat:
+                        @"%@ could not open and bind Spotlight.",
+                        actionName]);
+                return;
+            }
+        } else {
+            log_user("[HAIL_MARY_SPECIAL_DISPATCH] Reusing live Spotlight pid=%d; no toggle was sent.\n",
+                spotlightPID);
+        }
+
+        CNDHailMarySpecialIconClassDispatchCompletion completion =
+            ^(NSDictionary<NSString *, id> *report) {
+            dispatch_async(dispatch_get_global_queue(
+                QOS_CLASS_USER_INITIATED, 0), ^{
+                NSString *result =
+                    settings_lsreg_text(report[@"result"]);
+                BOOL confirmed = [report[@"confirmed"] boolValue];
+                log_user("[HAIL_MARY_SPECIAL_DISPATCH] operation=%s result=%s confirmed=%s mutation-confirmed=%s writes=%lu semantic-mutations=%lu post-translation-stable=%s consumer-rebuild-required=%s\n",
+                    operationName.UTF8String,
+                    result.UTF8String ?: "unknown-result",
+                    confirmed ? "yes" : "no",
+                    [report[@"mutationConfirmed"] boolValue]
+                        ? "yes" : "no",
+                    (unsigned long)[report[
+                        @"kernelWritePrimitiveInvocationCount"]
+                        unsignedIntegerValue],
+                    (unsigned long)[report[
+                        @"dispatchEntrySemanticMutationCount"]
+                        unsignedIntegerValue],
+                    [report[@"postWriteTranslation"][@"stable"]
+                        boolValue] ? "yes" : "no",
+                    [report[@"consumerRebuildRequired"] boolValue]
+                        ? "yes" : "no");
+                log_user("[HAIL_MARY_SPECIAL_DISPATCH] %s\n",
+                    [settings_lsreg_text(report[@"message"])
+                        UTF8String]);
+                log_user("[HAIL_MARY_SPECIAL_DISPATCH] JSON: %s\n",
+                    [report[@"reportPath"] UTF8String] ?: "unavailable");
+                log_session_end();
+                settings_release_actions_lock();
+                settings_post_actions_complete_async(
+                    confirmed,
+                    [NSString stringWithFormat:@"%@ finished: %@.",
+                        actionName,
+                        result.length ? result : @"unknown-result"]);
+                if (hook) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        hook(report);
+                    });
+                }
+            });
+        };
+
+        if (permission) {
+            CNDHailMarySpecialIconClassDispatchPermissionRun(
+                completion);
+        } else {
+            CNDHailMarySpecialIconClassDispatchRedirectRun(
+                operation, completion);
+        }
+    });
+}
+
+static void
+settings_run_hail_mary_special_icon_class_dispatch_action(
+    BOOL permission,
+    CNDHailMarySpecialIconClassDispatchOperation operation)
+{
+    settings_run_hail_mary_special_icon_class_dispatch_action_with_hook(
+        permission, operation, nil);
+}
+
+void settings_run_hail_mary_special_icon_class_dispatch_probe_action(void)
+{
+    settings_run_hail_mary_special_icon_class_dispatch_action(
+        YES, CNDHailMarySpecialIconClassDispatchOperationApply);
+}
+
+void settings_run_hail_mary_special_icon_class_dispatch_apply_action(void)
+{
+    settings_run_hail_mary_special_icon_class_dispatch_action(
+        NO, CNDHailMarySpecialIconClassDispatchOperationApply);
+}
+
+void settings_run_hail_mary_special_icon_class_dispatch_restore_action(void)
+{
+    settings_run_hail_mary_special_icon_class_dispatch_action(
+        NO, CNDHailMarySpecialIconClassDispatchOperationRestore);
+}
+
+void
+settings_run_hail_mary_special_icon_class_dispatch_verify_redirected_action(
+    void)
+{
+    settings_run_hail_mary_special_icon_class_dispatch_action(
+        NO,
+        CNDHailMarySpecialIconClassDispatchOperationVerifyRedirected);
+}
+
+void settings_run_hail_mary_special_icon_class_dispatch_verify_original_action(
+    void)
+{
+    settings_run_hail_mary_special_icon_class_dispatch_action(
+        NO, CNDHailMarySpecialIconClassDispatchOperationVerifyOriginal);
+}
+
+static volatile int gSettingsIconClassAuditRunning;
+static volatile int gSettingsIconObjectMigrationRunning;
+
+static void settings_run_icon_class_audit_action_with_hook(void (^hook)(void))
+{
+    NSString *actionName = @"Clock/Calendar Icon Class Audit";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                actionName.UTF8String,
+                "[ICON_CLASS_AUDIT] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO,
+                @"Clock/Calendar icon class audit blocked: another action is running.");
+            return;
+        }
+        __sync_lock_test_and_set(&gSettingsIconClassAuditRunning, 1);
+        log_session_begin();
+        log_user("[ICON_CLASS_AUDIT] Read-only SpringBoard consumer audit for com.apple.mobiletimer and com.apple.mobilecal. It reports the class of the canonical icon object and its leaves; it writes no memory, refreshes no icon, and changes no process.\n");
+        BOOL ok = NO;
+        @try {
+            if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+                log_user("[ICON_CLASS_AUDIT] Validated KRW is unavailable.\n");
+            } else {
+                NSDictionary<NSString *, id> *report =
+                    CNDIconServicesConsumerHookAuditSpringBoard(
+                        @[@"com.apple.mobiletimer",
+                          @"com.apple.mobilecal"]);
+                ok = [report[@"ok"] boolValue];
+                log_user("[ICON_CLASS_AUDIT] result=%s stage=%s model=0x%llx message=%s\n",
+                    ok ? "ok" : "failed",
+                    [settings_lsreg_text(report[@"stage"]) UTF8String],
+                    (unsigned long long)[report[@"modelPointer"]
+                        unsignedLongLongValue],
+                    [settings_lsreg_text(report[@"message"]) UTF8String]);
+                log_user("[ICON_CLASS_AUDIT] modelClass=%s modelClassPtr=0x%llx modelCachePtr=0x%llx\n",
+                    [settings_lsreg_text(report[@"modelClassName"])
+                        UTF8String],
+                    (unsigned long long)[report[@"modelClassPointer"]
+                        unsignedLongLongValue],
+                    (unsigned long long)[report[@"modelCachePointer"]
+                        unsignedLongLongValue]);
+                NSArray<NSDictionary *> *applications =
+                    [report[@"applications"] isKindOfClass:NSArray.class]
+                        ? report[@"applications"] : @[];
+                for (NSDictionary *application in applications) {
+                    if (![application isKindOfClass:NSDictionary.class]) {
+                        continue;
+                    }
+                    NSString *bundle = application[@"bundleIdentifier"];
+                    if (![bundle isKindOfClass:NSString.class]) continue;
+                    if (![bundle isEqualToString:@"com.apple.mobiletimer"] &&
+                        ![bundle isEqualToString:@"com.apple.mobilecal"]) {
+                        continue;
+                    }
+                    NSDictionary *canonical =
+                        [application[@"canonical"]
+                            isKindOfClass:NSDictionary.class]
+                            ? application[@"canonical"] : @{};
+                    NSArray<NSDictionary *> *leaves =
+                        [application[@"leafIcons"]
+                            isKindOfClass:NSArray.class]
+                            ? application[@"leafIcons"] : @[];
+                    NSMutableArray<NSString *> *leafClasses =
+                        [NSMutableArray array];
+                    for (NSDictionary *leaf in leaves) {
+                        NSString *className = leaf[@"class"];
+                        if ([className isKindOfClass:NSString.class] &&
+                            className.length > 0) {
+                            [leafClasses addObject:className];
+                        }
+                    }
+                    NSArray<NSDictionary *> *switcherItems =
+                        [application[@"switcherItems"]
+                            isKindOfClass:NSArray.class]
+                            ? application[@"switcherItems"] : @[];
+                    NSMutableArray<NSString *> *switcherClasses =
+                        [NSMutableArray array];
+                    for (NSDictionary *item in switcherItems) {
+                        NSDictionary *icon =
+                            [item[@"icon"] isKindOfClass:NSDictionary.class]
+                                ? item[@"icon"] : @{};
+                        NSString *className = icon[@"class"];
+                        if ([className isKindOfClass:NSString.class] &&
+                            className.length > 0) {
+                            [switcherClasses addObject:className];
+                        }
+                    }
+                    log_user("[ICON_CLASS_AUDIT] bundle=%s canonical=%s leaves=%s switcher=%s modelSelection=%s\n",
+                        bundle.UTF8String,
+                        [settings_lsreg_text(canonical[@"class"])
+                            UTF8String],
+                        [[leafClasses componentsJoinedByString:@","]
+                            UTF8String],
+                        [[switcherClasses componentsJoinedByString:@","]
+                            UTF8String],
+                        [settings_lsreg_text(
+                            application[@"modelClassSelection"])
+                            UTF8String]);
+                }
+            }
+        } @catch (NSException *exception) {
+            ok = NO;
+            log_user("[ICON_CLASS_AUDIT] exception=%s:%s\n",
+                exception.name.UTF8String ?: "exception",
+                exception.reason.UTF8String ?: "unknown");
+        }
+        log_session_end();
+        __sync_lock_test_and_set(&gSettingsIconClassAuditRunning, 0);
+        settings_release_actions_lock();
+        settings_post_actions_complete_async(
+            ok,
+            ok
+                ? @"Clock/Calendar icon class audit completed; class names are in the session log."
+                : @"Clock/Calendar icon class audit failed; see the session log.");
+        if (hook) {
+            dispatch_async(dispatch_get_main_queue(), hook);
+        }
+    });
+}
+
+void settings_run_icon_class_audit_action(void)
+{
+    settings_run_icon_class_audit_action_with_hook(^{});
+}
+
+static void settings_run_special_icon_object_migration_action_with_hook(
+    BOOL useStaticClasses,
+    BOOL dryRun,
+    void (^hook)(NSDictionary<NSString *, id> *report))
+{
+    NSString *mode = useStaticClasses ? @"static" : @"live";
+    NSString *actionName = dryRun
+        ? [NSString stringWithFormat:
+            @"Clock/Calendar %@ Object Preflight", mode]
+        : [NSString stringWithFormat:
+            @"Clock/Calendar %@ Object Rebuild", mode];
+    dispatch_async(dispatch_get_global_queue(
+        QOS_CLASS_USER_INITIATED, 0), ^{
+        if (!settings_try_claim_actions_lock(
+                actionName.UTF8String,
+                "[SPECIAL_ICON_OBJECTS] Another action is already running.")) {
+            settings_post_actions_complete_async(
+                NO, [NSString stringWithFormat:
+                    @"%@ blocked: another action is running.", actionName]);
+            return;
+        }
+        __sync_lock_test_and_set(
+            &gSettingsIconObjectMigrationRunning, 1);
+        log_session_begin();
+        log_user("[SPECIAL_ICON_OBJECTS] mode=%s dry-run=%s. Both live consumers must pass the exact model, application-data-source, class-selection, and (for SpringBoard) relative-path preflight before the first object is removed. No process lifecycle or shared-cache mutation is part of this action.\n",
+            mode.UTF8String, dryRun ? "yes" : "no");
+
+        BOOL ok = NO;
+        NSMutableDictionary<NSString *, id> *report =
+            [NSMutableDictionary dictionaryWithDictionary:@{
+                @"ok": @NO,
+                @"stage": @"initializing",
+                @"message": @"The object migration did not start.",
+                @"mode": mode,
+                @"dryRun": @(dryRun),
+                @"mutationsIssued": @NO,
+            }];
+        @try {
+            if (!settings_ensure_kexploit() || !kexploit_krw_ready()) {
+                report[@"stage"] = @"krw-unavailable";
+                report[@"message"] =
+                    @"Validated kernel read/write is unavailable.";
+            } else {
+                pid_t spotlightPID = 0;
+                log_user("[SPECIAL_ICON_OBJECTS] Presenting global search and retaining its verified lifetime assertion before the Spotlight session; mere process residency is not accepted as an active target.\n");
+                NSDictionary<NSString *, id> *presentation =
+                    CNDIconServicesConsumerHookPresentSpotlight();
+                if ([presentation[@"ok"] boolValue]) {
+                    log_user("[SPECIAL_ICON_OBJECTS] Spotlight presentation and lifetime assertion verified; waiting 1.000s for its icon graph to finish materializing before preflight.\n");
+                    usleep(1000000);
+                }
+                if (![presentation[@"ok"] boolValue] ||
+                    !settings_hail_mary_spotlight_identity(
+                        &spotlightPID)) {
+                    report[@"stage"] = @"spotlight-presentation";
+                    report[@"message"] = presentation[@"message"] ?:
+                        @"Spotlight could not be opened and identity-bound.";
+                }
+
+                uint64_t springBoardProc = proc_find_by_name("SpringBoard");
+                pid_t springBoardPID = is_kaddr_valid(springBoardProc)
+                    ? (pid_t)kread32(
+                        springBoardProc + off_proc_p_pid) : 0;
+                BOOL springBoardIdentity = springBoardPID > 1 &&
+                    proc_find(springBoardPID) == springBoardProc &&
+                    strcmp(proc_get_p_name(springBoardProc) ?: "",
+                           "SpringBoard") == 0;
+                if (![report[@"stage"] isEqual:@"spotlight-presentation"] &&
+                    !springBoardIdentity) {
+                    report[@"stage"] = @"springboard-identity";
+                    report[@"message"] =
+                        @"SpringBoard's exact proc identity is unavailable.";
+                }
+
+                if (![report[@"stage"] isEqual:@"spotlight-presentation"] &&
+                    ![report[@"stage"] isEqual:@"springboard-identity"]) {
+                    NSDictionary<NSString *, id> *springBoardPreflight =
+                        CNDIconServicesConsumerHookRebuildSpecialIconClassesForPID(
+                            springBoardPID, @"SpringBoard",
+                            useStaticClasses, YES);
+                    NSDictionary<NSString *, id> *spotlightPreflight =
+                        CNDIconServicesConsumerHookRebuildSpecialIconClassesForPID(
+                            spotlightPID, @"Spotlight",
+                            useStaticClasses, YES);
+                    report[@"springBoardPreflight"] =
+                        springBoardPreflight;
+                    report[@"spotlightPreflight"] = spotlightPreflight;
+                    BOOL preflightOK =
+                        [springBoardPreflight[@"ok"] boolValue] &&
+                        [spotlightPreflight[@"ok"] boolValue];
+                    log_user("[SPECIAL_ICON_OBJECTS] preflight SpringBoard=%s/%s Spotlight=%s/%s\n",
+                        [settings_lsreg_text(
+                            springBoardPreflight[@"stage"]) UTF8String],
+                        [springBoardPreflight[@"ok"] boolValue]
+                            ? "ok" : "failed",
+                        [settings_lsreg_text(
+                            spotlightPreflight[@"stage"]) UTF8String],
+                        [spotlightPreflight[@"ok"] boolValue]
+                            ? "ok" : "failed");
+                    log_user("[SPECIAL_ICON_OBJECTS] preflight-detail SpringBoard=%s Spotlight=%s\n",
+                        [settings_lsreg_text(
+                            springBoardPreflight[@"message"]) UTF8String],
+                        [settings_lsreg_text(
+                            spotlightPreflight[@"message"]) UTF8String]);
+
+                    if (!preflightOK) {
+                        report[@"stage"] = @"preflight-refused";
+                        report[@"message"] =
+                            @"At least one consumer failed the zero-mutation preflight; neither consumer was changed.";
+                    } else if (dryRun) {
+                        ok = YES;
+                        report[@"ok"] = @YES;
+                        report[@"stage"] = @"preflight-complete";
+                        report[@"message"] =
+                            @"SpringBoard and Spotlight both passed the zero-mutation Clock/Calendar object preflight.";
+                    } else {
+                        /* Spotlight has no layout state and is migrated first.
+                         * SpringBoard is not touched unless Spotlight proves
+                         * both replacement classes. */
+                        NSDictionary<NSString *, id> *spotlightMigration =
+                            CNDIconServicesConsumerHookRebuildSpecialIconClassesForPID(
+                                spotlightPID, @"Spotlight",
+                                useStaticClasses, NO);
+                        report[@"spotlightMigration"] =
+                            spotlightMigration;
+                        NSDictionary<NSString *, id> *springBoardMigration =
+                            [spotlightMigration[@"ok"] boolValue]
+                                ? CNDIconServicesConsumerHookRebuildSpecialIconClassesForPID(
+                                    springBoardPID, @"SpringBoard",
+                                    useStaticClasses, NO)
+                                : @{
+                                    @"ok": @NO,
+                                    @"stage": @"not-run",
+                                    @"message": @"Spotlight migration failed first; SpringBoard was not changed.",
+                                };
+                        report[@"springBoardMigration"] =
+                            springBoardMigration;
+                        report[@"mutationsIssued"] = @(
+                            [spotlightMigration[@"mutationsIssued"] boolValue] ||
+                            [springBoardMigration[@"mutationsIssued"] boolValue]);
+                        ok = [spotlightMigration[@"ok"] boolValue] &&
+                            [springBoardMigration[@"ok"] boolValue];
+                        report[@"ok"] = @(ok);
+                        report[@"stage"] = ok
+                            ? @"both-consumers-rebuilt"
+                            : @"consumer-rebuild-failed";
+                        report[@"message"] = ok
+                            ? [NSString stringWithFormat:
+                                @"SpringBoard and Spotlight now use the %@ Clock/Calendar canonical classes; SpringBoard positions were preserved exactly.",
+                                mode]
+                            : @"The two-consumer canonical-object rebuild did not fully verify.";
+
+                        if (ok) {
+                            NSDictionary<NSString *, id> *audit =
+                                CNDIconServicesConsumerHookAuditSpringBoard(
+                                    @[@"com.apple.mobiletimer",
+                                      @"com.apple.mobilecal"]);
+                            report[@"springBoardPostAudit"] = audit;
+                            ok = [audit[@"ok"] boolValue];
+                            NSArray<NSDictionary *> *applications =
+                                [audit[@"applications"]
+                                    isKindOfClass:NSArray.class]
+                                    ? audit[@"applications"] : @[];
+                            NSString *desiredClock = useStaticClasses
+                                ? @"SBHApplicationIcon"
+                                : @"SBHClockApplicationIcon";
+                            NSString *desiredCalendar = useStaticClasses
+                                ? @"SBHApplicationIcon"
+                                : @"SBHCalendarApplicationIcon";
+                            for (NSDictionary *application in applications) {
+                                NSString *bundle =
+                                    application[@"bundleIdentifier"];
+                                NSString *className =
+                                    application[@"canonical"][@"class"];
+                                NSString *expected =
+                                    [bundle isEqualToString:
+                                        @"com.apple.mobiletimer"]
+                                        ? desiredClock : desiredCalendar;
+                                if (![className isEqualToString:expected]) {
+                                    ok = NO;
+                                }
+                                log_user("[SPECIAL_ICON_OBJECTS] post-audit bundle=%s canonical=%s expected=%s\n",
+                                    bundle.UTF8String ?: "?",
+                                    className.UTF8String ?: "?",
+                                    expected.UTF8String ?: "?");
+                            }
+                            report[@"ok"] = @(ok);
+                            if (!ok) {
+                                report[@"stage"] =
+                                    @"springboard-post-audit";
+                                report[@"message"] =
+                                    @"The rebuild returned, but SpringBoard's read-only post-audit did not prove both canonical classes.";
+                            }
+                        }
+                    }
+                    report[@"springBoardPID"] = @(springBoardPID);
+                    report[@"spotlightPID"] = @(spotlightPID);
+                }
+            }
+        } @catch (NSException *exception) {
+            ok = NO;
+            report[@"ok"] = @NO;
+            report[@"stage"] = @"exception";
+            report[@"message"] = [NSString stringWithFormat:@"%@:%@",
+                exception.name ?: @"exception",
+                exception.reason ?: @"unknown"];
+        }
+        log_user("[SPECIAL_ICON_OBJECTS] result=%s stage=%s mutations=%s message=%s\n",
+            [report[@"ok"] boolValue] ? "ok" : "failed",
+            [settings_lsreg_text(report[@"stage"]) UTF8String],
+            [report[@"mutationsIssued"] boolValue] ? "yes" : "no",
+            [settings_lsreg_text(report[@"message"]) UTF8String]);
+        log_session_end();
+        __sync_lock_test_and_set(
+            &gSettingsIconObjectMigrationRunning, 0);
+        settings_release_actions_lock();
+        settings_post_actions_complete_async(
+            [report[@"ok"] boolValue],
+            [NSString stringWithFormat:@"%@: %@",
+                actionName, settings_lsreg_text(report[@"message"])]);
+        if (hook) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                hook([report copy]);
+            });
+        }
+    });
+}
+
+void settings_run_special_icon_object_preflight_action(void)
+{
+    settings_run_special_icon_object_migration_action_with_hook(
+        YES, YES, nil);
+}
+
+void settings_run_special_icon_object_rebuild_static_action(void)
+{
+    settings_run_special_icon_object_migration_action_with_hook(
+        YES, NO, nil);
+}
+
+void settings_run_special_icon_object_rebuild_live_action(void)
+{
+    settings_run_special_icon_object_migration_action_with_hook(
+        NO, NO, nil);
 }
 
 void settings_run_hail_mary_app_library_miniature_refresh_action(void)
@@ -14240,9 +15116,7 @@ void settings_application_did_enter_background(void)
         (settings_typebanner_install_allowed() && [d boolForKey:kSettingsTypeBannerEnabled]) ||
         CNDIconServicesConsumerLifecycleIsRunning();
     if (anyLiveLoopNeeded) {
-        if ([d boolForKey:kSettingsKeepAlive]) {
-            ds_keepalive_apply_enabled(YES);
-        }
+        settings_reconcile_snowboard_automatic_repair_lifetime();
         settings_begin_statbar_background_task_async("entered background");
     }
 
@@ -15138,7 +16012,7 @@ static void settings_schedule_live_apply_for_key(NSString *key)
             if (g_springboard_rc_ready) {
                 dispatch_async(dispatch_get_global_queue(0, 0), ^{
                     @synchronized (settings_rc_lock()) {
-                        if (g_springboard_rc_ready) gravitylite_stop_in_session();
+                        if (g_springboard_rc_ready) gravitylite_restore_in_session();
                     }
                 });
             }
@@ -15448,7 +16322,7 @@ void settings_register_defaults(void)
         kSettingsSnowBoardLiteEnabled: @NO,
         kSettingsSnowBoardLiteSelectedThemeID: @"",
         kSettingsSnowBoardRemixSelectedThemeID: @"",
-        kSettingsSnowBoardRemixDebugThreeAppLimit: @YES,
+        kSettingsSnowBoardRemixDebugThreeAppLimit: @NO,
         kSettingsSnowBoardRemixInstallConsumerMappings: @NO,
         kSettingsSpotlightIconServicesCandidate:
             @(ThemerSpotlightIconServicesCandidateCanonicalMixedBag),
@@ -15903,7 +16777,6 @@ static void settings_run_actions_internal(BOOL pendingOnly,
                         log_user("[GRAVITY] Preparing icon physics state...\n");
                         __sync_lock_test_and_set(&g_gravitylite_background_armed, 0);
                         settings_stop_gravity_motion();
-                        gravitylite_stop_in_session();
                         GravityLiteConfig glConfig = settings_gravitylite_config_from_defaults(d);
                         bool ok = settings_apply_springboard_guarded("Gravity Lite", 1500, ^bool{
                             return gravitylite_apply_in_session(glConfig);
@@ -15925,9 +16798,9 @@ static void settings_run_actions_internal(BOOL pendingOnly,
                             runCompletionMessage = @"Gravity Lite did not start cleanly.";
                         }
                     } else if (!gravityLiteEnabled) {
-                        __sync_lock_test_and_set(&g_gravitylite_background_armed, 0);
-                        settings_stop_gravity_motion();
-                        gravitylite_stop_in_session();
+                        // Applied disabled tweaks were restored by the registered
+                        // cleanup stage. An SBC-only Run needs no Gravity RPCs.
+                        settings_request_gravitylite_stop();
                     }
 
                     if (runStatBar) {
@@ -16296,10 +17169,16 @@ typedef NS_ENUM(NSInteger, SettingsSection) {
 };
 
 typedef NS_ENUM(NSInteger, RootSection) {
-    // The Settings root is intentionally limited to actions and app
-    // information. Tweak configuration is opened from Installer package
-    // details, so the old duplicate bundle index is no longer shown here.
+    // The Settings root is intentionally limited to actions, the physical
+    // probe rows, and app information. Tweak configuration is opened from
+    // Installer package details, so the old duplicate bundle index is no
+    // longer shown here.
     RootSectionActions = 0,
+    // The two IOUserEthernet probes and the Hail Mary .34 experiments live
+    // here rather than in Quick Actions. The special-icon-class controls are
+    // operator-visible; the older Hail Mary diagnostics stay retained but
+    // unexposed behind launch flags.
+    RootSectionProbes,
     RootSectionAbout,
     RootSectionWarning,
     RootSectionCount,
@@ -16386,6 +17265,24 @@ static void settings_run_snowboard_remix_operation(
          * view, so an update/exit destroyed exactly the Apply/audit evidence
          * needed for reinstall diagnosis. Persist one bounded session log in
          * Documents for every explicit SnowBoard Remix operation. */
+        BOOL actionLockAcquired = settings_try_claim_actions_lock(
+            name.UTF8String,
+            "[SBR] Another system action is running; this operation was not started.");
+        if (!actionLockAcquired) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter]
+                    postNotificationName:kSettingsActionsDidCompleteNotification
+                                  object:nil
+                                userInfo:@{
+                                    kSettingsActionsDidCompleteSuccessKey: @NO,
+                                    kSettingsActionsDidCompleteMessageKey:
+                                        [NSString stringWithFormat:
+                                            @"%@ was blocked by another running action.",
+                                            name],
+                                }];
+            });
+            return;
+        }
         log_session_begin();
         NSDictionary<NSString *, id> *result = nil;
         @try {
@@ -16400,6 +17297,8 @@ static void settings_run_snowboard_remix_operation(
                     name, exception.name ?: @"an exception",
                     exception.reason ?: @"unknown reason"],
             };
+        } @finally {
+            settings_release_actions_lock();
         }
         BOOL ok = [result[@"ok"] boolValue];
         NSString *message = [result[@"message"] isKindOfClass:NSString.class]
@@ -16428,6 +17327,382 @@ static void settings_run_snowboard_remix_operation(
             cyanide_upload_log_if_enabled();
         });
     });
+}
+
+static dispatch_queue_t settings_snowboard_automatic_repair_queue(void)
+{
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = dispatch_queue_create(
+            "com.zeroxjf.cyanide.snowboard.automatic-repair",
+            DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
+
+static dispatch_semaphore_t settings_snowboard_mutation_gate(void)
+{
+    static dispatch_semaphore_t gate;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        gate = dispatch_semaphore_create(1);
+    });
+    return gate;
+}
+
+BOOL settings_begin_snowboard_mutation(BOOL wait)
+{
+    NSCAssert(!wait || !NSThread.isMainThread,
+              @"SnowBoard queue ownership must be awaited off-main");
+    return dispatch_semaphore_wait(settings_snowboard_mutation_gate(),
+        wait ? DISPATCH_TIME_FOREVER : DISPATCH_TIME_NOW) == 0;
+}
+
+void settings_end_snowboard_mutation(void)
+{
+    dispatch_semaphore_signal(settings_snowboard_mutation_gate());
+}
+
+static BOOL settings_snowboard_automatic_repair_is_active(void)
+{
+    return [NSUserDefaults.standardUserDefaults boolForKey:kSettingsKeepAlive] &&
+        CNDTransientAppliedStateIsActive(CNDTransientAppliedStateSnowBoardRemix) &&
+        [CNDSnowBoardRemix hasAutomaticRepairData];
+}
+
+static void settings_schedule_snowboard_automatic_repair_internal(
+    NSString *reason,
+    NSTimeInterval delay,
+    NSUInteger attempt);
+static void settings_arm_snowboard_automatic_repair(void);
+
+static BOOL settings_run_snowboard_automatic_repair(
+    NSString *reason,
+    NSUInteger attempt)
+{
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults boolForKey:kSettingsKeepAlive]) return NO;
+
+    if (!settings_snowboard_automatic_repair_is_active()) {
+        settings_reconcile_snowboard_automatic_repair_lifetime();
+        printf("[SBR_AUTO] no active SnowBoard journals; trigger=%s\n",
+               reason.UTF8String ?: "unknown");
+        return NO;
+    }
+
+    // Automatic mode never launches a fresh kernel acquisition from a
+    // background notification. It consumes the validated session the user
+    // already established and is rescheduled whenever acquisition succeeds.
+    if (!kexploit_krw_ready()) {
+        log_user("[SBR_AUTO] Automatic Repair is waiting for validated KRW (%s).\n",
+                 reason.UTF8String ?: "trigger");
+        return NO;
+    }
+
+    PackageQueue *packageQueue = [PackageQueue sharedQueue];
+    CNDQueuedTransaction *transaction = packageQueue.durableTransaction;
+    BOOL queueIsExecuting = packageQueue.commitInFlight ||
+        transaction.state == CNDQueuedTransactionStateRunningBeforeRespring ||
+        transaction.state == CNDQueuedTransactionStateAwaitingRespring ||
+        transaction.state == CNDQueuedTransactionStateReadyAfterRespring ||
+        transaction.state == CNDQueuedTransactionStateRunningAfterRespring;
+    if (queueIsExecuting) {
+        log_user("[SBR_AUTO] Installer queue is executing; Automatic Repair was deferred.\n");
+        if (attempt < 4) {
+            settings_schedule_snowboard_automatic_repair_internal(
+                reason, 30.0, attempt + 1);
+        }
+        return NO;
+    }
+
+    if (!settings_try_claim_actions_lock(
+            "SnowBoard Automatic Repair",
+            "[SBR_AUTO] Another action is running; Automatic Repair was deferred.")) {
+        if (attempt < 4) {
+            settings_schedule_snowboard_automatic_repair_internal(
+                reason, 30.0, attempt + 1);
+        }
+        return NO;
+    }
+
+    // The queue takes this same gate before mutating, closing the race after
+    // the advisory queue-state check above in either start order.
+    if (!settings_begin_snowboard_mutation(NO)) {
+        settings_release_actions_lock();
+        if (attempt < 4) {
+            settings_schedule_snowboard_automatic_repair_internal(
+                reason, 30.0, attempt + 1);
+        }
+        return NO;
+    }
+
+    __block BOOL hailMaryApplicable = NO;
+    __block BOOL hailMaryOK =
+        __sync_fetch_and_add(&g_sbl_automatic_hail_mary_confirmed, 0) != 0;
+    __block BOOL updateRepairOK = NO;
+    __block NSString *completionMessage = nil;
+    BOOL attempted = NO;
+    @try {
+        // A queued Restore may have finished between the earlier active-state
+        // check and gate acquisition. Never mutate its now-restored state.
+        if (!settings_snowboard_automatic_repair_is_active()) return NO;
+        log_session_begin();
+        log_user("[SBR_AUTO] Starting Automatic Repair trigger=%s attempt=%lu.\n",
+                 reason.UTF8String ?: "unknown", (unsigned long)(attempt + 1));
+        NSString *supportReason = nil;
+        hailMaryApplicable = CNDHailMaryImpRedirectIsSupported(&supportReason);
+        if (hailMaryApplicable && !hailMaryOK) {
+            attempted = YES;
+            NSDictionary<NSString *, id> *hailMary =
+                [CNDSnowBoardRemix setTransparencyFixEnabled:YES];
+            hailMaryOK = [hailMary[@"ok"] boolValue];
+            if (hailMaryOK) {
+                __sync_lock_test_and_set(
+                    &g_sbl_automatic_hail_mary_confirmed, 1);
+            } else {
+                log_user("[SBR_AUTO] Transparency Fix did not confirm: %s\n",
+                    [hailMary[@"message"] UTF8String] ?: "unknown failure");
+            }
+        } else if (!hailMaryApplicable) {
+            printf("[SBR_AUTO] Transparency Fix unavailable: %s\n",
+                   supportReason.UTF8String ?: "unsupported");
+        }
+
+        if ([defaults boolForKey:kSettingsKeepAlive]) {
+            attempted = YES;
+            NSDictionary<NSString *, id> *updateRepair =
+                settings_update_repair_snowboard_remix();
+            updateRepairOK = [updateRepair[@"ok"] boolValue];
+            if (!updateRepairOK) {
+                log_user("[SBR_AUTO] Update Repair did not complete: %s\n",
+                    [updateRepair[@"message"] UTF8String] ?: "unknown failure");
+            }
+        }
+
+        BOOL ok = updateRepairOK && (!hailMaryApplicable || hailMaryOK);
+        completionMessage = ok
+            ? @"Automatic Repair verified the Transparency Fix and repaired any changed or missing themed icon records."
+            : @"Automatic Repair was incomplete; it will retry after the current system activity settles.";
+        log_user("%s SnowBoard Automatic Repair: %s\n",
+                 ok ? "[OK]" : "[WARN]", completionMessage.UTF8String);
+
+        if (!ok && attempt < 2 &&
+            [defaults boolForKey:kSettingsKeepAlive]) {
+            settings_schedule_snowboard_automatic_repair_internal(
+                @"bounded retry", 60.0, attempt + 1);
+        }
+    } @catch (NSException *exception) {
+        completionMessage = [NSString stringWithFormat:
+            @"Automatic Repair raised %@: %@",
+            exception.name ?: @"an exception",
+            exception.reason ?: @"unknown reason"];
+        log_user("[WARN] %s\n", completionMessage.UTF8String);
+        if (attempt < 2 &&
+            [defaults boolForKey:kSettingsKeepAlive]) {
+            settings_schedule_snowboard_automatic_repair_internal(
+                @"exception retry", 60.0, attempt + 1);
+        }
+    } @finally {
+        settings_end_snowboard_mutation();
+        settings_release_actions_lock();
+        log_session_end();
+        settings_reconcile_snowboard_automatic_repair_lifetime();
+    }
+
+    NSString *message = completionMessage ?: @"Automatic Repair finished.";
+    BOOL success = updateRepairOK && (!hailMaryApplicable || hailMaryOK);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        settings_invalidate_snowboard_remix_status_cache();
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:PackageQueueDidChangeNotification
+                          object:[PackageQueue sharedQueue]];
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:kSettingsSnowBoardAutomaticRepairDidCompleteNotification
+                          object:nil
+                        userInfo:@{
+                            kSettingsActionsDidCompleteSuccessKey: @(success),
+                            kSettingsActionsDidCompleteMessageKey: message,
+                        }];
+        cyanide_upload_log_if_enabled();
+    });
+    return attempted;
+}
+
+static void settings_cancel_pending_snowboard_automatic_repair(void)
+{
+    NSCAssert(NSThread.isMainThread, @"Automatic Repair scheduling belongs on main");
+    if (g_sbl_automatic_repair_wakeup) {
+        dispatch_source_cancel(g_sbl_automatic_repair_wakeup);
+        g_sbl_automatic_repair_wakeup = nil;
+    }
+    g_sbl_automatic_repair_pending_reason = nil;
+    g_sbl_automatic_repair_pending_attempt = 0;
+    g_sbl_automatic_repair_pending_deadline = 0;
+    // Keep the running flag and cooldown across disable/restore/re-enable.
+}
+
+static void settings_arm_snowboard_automatic_repair(void)
+{
+    NSCAssert(NSThread.isMainThread, @"Automatic Repair scheduling belongs on main");
+    if (!settings_snowboard_automatic_repair_is_active()) {
+        settings_cancel_pending_snowboard_automatic_repair();
+        return;
+    }
+    if (g_sbl_automatic_repair_running ||
+        !g_sbl_automatic_repair_pending_reason) return;
+
+    if (!g_sbl_automatic_repair_wakeup) {
+        g_sbl_automatic_repair_wakeup = dispatch_source_create(
+            DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+        dispatch_source_t wakeup = g_sbl_automatic_repair_wakeup;
+        dispatch_source_set_event_handler(wakeup, ^{
+            // Ignore an already-enqueued handler from a canceled source after
+            // disable/re-enable has installed a new wakeup.
+            if (wakeup != g_sbl_automatic_repair_wakeup) return;
+            dispatch_source_cancel(wakeup);
+            g_sbl_automatic_repair_wakeup = nil;
+            if (!settings_snowboard_automatic_repair_is_active()) {
+                settings_cancel_pending_snowboard_automatic_repair();
+                return;
+            }
+            NSString *reason = g_sbl_automatic_repair_pending_reason;
+            NSUInteger attempt = g_sbl_automatic_repair_pending_attempt;
+            g_sbl_automatic_repair_pending_reason = nil;
+            g_sbl_automatic_repair_pending_attempt = 0;
+            g_sbl_automatic_repair_pending_deadline = 0;
+            g_sbl_automatic_repair_running = YES;
+            dispatch_async(settings_snowboard_automatic_repair_queue(), ^{
+                BOOL attempted = NO;
+                @try {
+                    attempted = settings_run_snowboard_automatic_repair(reason, attempt);
+                } @finally {
+                    NSTimeInterval completedAt = NSProcessInfo.processInfo.systemUptime;
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        g_sbl_automatic_repair_running = NO;
+                        if (attempted) {
+                            g_sbl_automatic_repair_not_before =
+                                completedAt + kSBLAutomaticRepairCooldown;
+                        }
+                        settings_arm_snowboard_automatic_repair();
+                    });
+                }
+            });
+        });
+        dispatch_resume(wakeup);
+    }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    NSTimeInterval deadline = MAX(g_sbl_automatic_repair_pending_deadline,
+                                 g_sbl_automatic_repair_not_before);
+    int64_t delayNS = (int64_t)(MAX(0.0, deadline - now) * NSEC_PER_SEC);
+    dispatch_source_set_timer(g_sbl_automatic_repair_wakeup,
+        dispatch_time(DISPATCH_TIME_NOW, delayNS), DISPATCH_TIME_FOREVER,
+        1ULL * NSEC_PER_SEC);
+}
+
+static void settings_schedule_snowboard_automatic_repair_internal(
+    NSString *reason,
+    NSTimeInterval delay,
+    NSUInteger attempt)
+{
+    NSString *reasonCopy = [reason copy] ?: @"scheduled audit";
+    // Capture arrival time before hopping queues so a long repair cannot
+    // turn an event received during that pass into a new debounce window.
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + MAX(0.0, delay);
+    dispatch_block_t schedule = ^{
+        if (!settings_snowboard_automatic_repair_is_active()) {
+            settings_cancel_pending_snowboard_automatic_repair();
+            return;
+        }
+        BOOL hadPending = g_sbl_automatic_repair_pending_reason != nil;
+        if (!hadPending ||
+            deadline < g_sbl_automatic_repair_pending_deadline) {
+            g_sbl_automatic_repair_pending_reason = reasonCopy;
+            g_sbl_automatic_repair_pending_deadline = deadline;
+        }
+        // Fresh events can start a new bounded retry sequence, while an
+        // internal retry must not replace a pending fresh event's budget.
+        g_sbl_automatic_repair_pending_attempt =
+            hadPending ? MIN(g_sbl_automatic_repair_pending_attempt, attempt) : attempt;
+        settings_arm_snowboard_automatic_repair();
+    };
+    if (NSThread.isMainThread) schedule();
+    else dispatch_async(dispatch_get_main_queue(), schedule);
+}
+
+static void settings_schedule_snowboard_automatic_repair(
+    NSString *reason,
+    NSTimeInterval delay)
+{
+    settings_schedule_snowboard_automatic_repair_internal(
+        reason, delay, 0);
+}
+
+void settings_request_snowboard_automatic_repair(NSString *reason)
+{
+    settings_reconcile_snowboard_automatic_repair_lifetime();
+    // A completed queue may have explicitly restored or replaced the guarded
+    // dispatch entry. Force the next active-theme pass to prove it again.
+    __sync_lock_test_and_set(&g_sbl_automatic_hail_mary_confirmed, 0);
+    settings_schedule_snowboard_automatic_repair(
+        reason.length > 0 ? reason : @"completed SnowBoard operation", 5.0);
+}
+
+void settings_reconcile_snowboard_automatic_repair_lifetime(void)
+{
+    // Read the current state when the block runs, rather than capturing an
+    // earlier enable decision that a concurrent Restore/toggle can supersede.
+    dispatch_block_t reconcile = ^{
+        BOOL active = settings_snowboard_automatic_repair_is_active();
+        ds_keepalive_apply_enabled(active);
+        if (!active) {
+            settings_cancel_pending_snowboard_automatic_repair();
+            __sync_lock_test_and_set(&g_sbl_automatic_hail_mary_confirmed, 0);
+            if (g_sbl_automatic_repair_timer) {
+                dispatch_source_cancel(g_sbl_automatic_repair_timer);
+                g_sbl_automatic_repair_timer = nil;
+            }
+            return;
+        }
+
+        if (!g_sbl_automatic_repair_timer) {
+            g_sbl_automatic_repair_timer = dispatch_source_create(
+                DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                dispatch_get_main_queue());
+            dispatch_source_set_timer(
+                g_sbl_automatic_repair_timer,
+                dispatch_time(DISPATCH_TIME_NOW,
+                              2LL * 60LL * NSEC_PER_SEC),
+                30ULL * 60ULL * NSEC_PER_SEC,
+                30ULL * NSEC_PER_SEC);
+            dispatch_source_set_event_handler(
+                g_sbl_automatic_repair_timer, ^{
+                    settings_reconcile_snowboard_automatic_repair_lifetime();
+                    settings_schedule_snowboard_automatic_repair(
+                        @"periodic integrity audit", 0.0);
+                });
+            dispatch_resume(g_sbl_automatic_repair_timer);
+        }
+    };
+    if (NSThread.isMainThread) reconcile();
+    else dispatch_async(dispatch_get_main_queue(), reconcile);
+}
+
+void settings_apply_snowboard_automatic_repair_enabled(BOOL enabled)
+{
+    settings_reconcile_snowboard_automatic_repair_lifetime();
+    if (enabled) {
+        settings_schedule_snowboard_automatic_repair(
+            @"Automatic Repair enabled", 5.0);
+    }
+}
+
+void settings_run_snowboard_remix_reapply_action(void)
+{
+    settings_run_snowboard_remix_operation(
+        @"SnowBoard Remix Recovery Reapply", YES, ^{
+            return settings_apply_snowboard_remix();
+        });
 }
 
 @interface SettingsViewController () <UIDocumentPickerDelegate, PHPickerViewControllerDelegate>
@@ -17023,8 +18298,6 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     return @[
         @{ @"key": kSettingsAutoRunKexploit,    @"title": @"Auto-run kexploit on launch" },
         @{ @"key": kSettingsRunSandboxEscape,   @"title": @"Sandbox escape (escape_sbx_demo2)" },
-        @{ @"key": kSettingsKeepAlive,          @"title": @"Keep app alive in background",
-           @"subtitle": @"Required for app-driven live tweaks to persist while minimized, including StatBar receiving fresh live data." },
     ];
 }
 
@@ -17565,6 +18838,10 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"kind": @"info",
            @"title": @"Themed Apps / Status",
            @"subtitle": remixStatusSubtitle },
+        @{ @"kind": @"toggle",
+           @"key": kSettingsKeepAlive,
+           @"title": @"Automatic Repair",
+           @"subtitle": @"Keeps Cyanide alive in the background, watches app and LaunchServices updates, runs journal-aware Update Repair, and keeps the per-boot Transparency Fix active." },
         @{ @"kind": @"toggle",
            @"key": kSettingsSnowBoardRemixDebugThreeAppLimit,
            @"title": @"Debug: Apply 4 Named Apps",
@@ -18273,6 +19550,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     }
     switch ((RootSection)section) {
         case RootSectionActions:        return 6;
+        case RootSectionProbes:         return 17;
         case RootSectionAbout:          return 6;
         case RootSectionWarning:        return 0;
         case RootSectionCount:          return 0;
@@ -18285,6 +19563,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
     if (self.detailMode) return nil;
     switch ((RootSection)section) {
         case RootSectionActions:        return @"Quick Actions";
+        case RootSectionProbes:         return @"Probes";
         case RootSectionAbout:          return @"About";
         default:                        return nil;
     }
@@ -18526,6 +19805,566 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
             break;
     }
     return cell;
+}
+
+#pragma mark - Probe rows (root mode)
+
+// The two IOUserEthernet probes. Both run entirely on the app's own kexploit
+// KRW; neither uses a provider, root, socket, pgrep or the VM kcall backend.
+- (UITableViewCell *)buildProbeCellAtRow:(NSInteger)row tableView:(UITableView *)tableView
+{
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"probe"];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"probe"];
+        cell.detailTextLabel.numberOfLines = 1;
+    }
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.detailTextLabel.text = nil;
+
+    BOOL device = settings_device_supported();
+    NSString *reason = nil;
+    BOOL supported = NO;
+    BOOL running = NO;
+    NSString *symbol = nil;
+    UIColor *color = nil;
+    NSString *detail = nil;
+
+    if (row == 0) {
+        supported = device && CNDPhysicalKCall1ProbeIsSupported(&reason);
+        running = CNDPhysicalKCall1ProbeIsRunning();
+        symbol = @"bolt.horizontal.circle.fill";
+        color = UIColor.systemTealColor;
+        cell.textLabel.text = running
+            ? @"KCall1 Canary Running…"
+            : @"Run IOUserEthernet KCall1 Canary";
+    } else if (row == 1) {
+        supported = device &&
+            CNDPhysicalIOUserEthernetSignerProbeIsSupported(&reason);
+        running = CNDPhysicalIOUserEthernetSignerProbeIsRunning();
+        symbol = @"signature";
+        color = UIColor.systemPinkColor;
+        cell.textLabel.text = running
+            ? @"Signer Probe Running…"
+            : @"Run IOUserEthernet Signer Probe";
+    } else if (row == 2) {
+        supported = device &&
+            CNDPhysicalEntitlementAuditProbeIsSupported(&reason);
+        running = CNDPhysicalEntitlementAuditProbeIsRunning();
+        symbol = @"checklist";
+        color = UIColor.systemIndigoColor;
+        detail = @"Reads only • no borrow, writes or kcall";
+        cell.textLabel.text = running
+            ? @"Entitlement Audit Running…"
+            : @"Audit IOUserEthernet Entitlement";
+    } else if (row == 3) {
+        supported = device && CNDHailMaryPageWireIsSupported(&reason);
+        running = CNDHailMaryPageWireIsRunning();
+        symbol = @"memorychip";
+        color = UIColor.systemGreenColor;
+        detail = @"Read-only • SpringBoard mlock • no write";
+        cell.textLabel.text = running
+            ? @"Hail Mary .34 Wire Running…"
+            : @"Run Hail Mary .34 Page Wire";
+    } else if (row == 4) {
+        supported = device &&
+            CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+        running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+            CNDHailMarySpecialIconClassRedirectIsRunning();
+        symbol = @"checkmark.shield.fill";
+        color = UIColor.systemYellowColor;
+        detail = @"Read-only .33 __got proof • per-boot ticket";
+        cell.textLabel.text = running
+            ? @"Special-Class Probe Running…"
+            : @"Run Special-Class GOT Probe";
+    } else if (row == 5) {
+        supported = device &&
+            CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+        running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+            CNDHailMarySpecialIconClassRedirectIsRunning();
+        symbol = @"paintbrush.fill";
+        color = UIColor.systemBlueColor;
+        detail = @"Two __got writes • static Clock/Calendar • respring after";
+        cell.textLabel.text = running
+            ? @"Applying Static Icons…"
+            : @"Apply Static Clock + Calendar Icons";
+    } else if (row == 6) {
+        supported = device &&
+            CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+        running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+            CNDHailMarySpecialIconClassRedirectIsRunning();
+        symbol = @"arrow.uturn.backward.circle.fill";
+        color = UIColor.systemGreenColor;
+        detail = @"Two __got writes • restores live Clock/Calendar";
+        cell.textLabel.text = running
+            ? @"Restoring Live Icons…"
+            : @"Restore Live Clock + Calendar Icons";
+    } else if (row == 7) {
+        supported = device &&
+            CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+        running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+            CNDHailMarySpecialIconClassRedirectIsRunning();
+        symbol = @"checkmark.circle.fill";
+        color = UIColor.systemTealColor;
+        detail = @"Read-only • expects the __got redirect";
+        cell.textLabel.text = running
+            ? @"Verifying Redirect…"
+            : @"Verify Static Clock + Calendar State";
+    } else if (row == 8) {
+        supported = device &&
+            CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+        running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+            CNDHailMarySpecialIconClassRedirectIsRunning();
+        symbol = @"checkmark.circle";
+        color = UIColor.systemGrayColor;
+        detail = @"Read-only • expects the original __got classes";
+        cell.textLabel.text = running
+            ? @"Verifying Original…"
+            : @"Verify Original Clock + Calendar State";
+    } else if (row == 9) {
+        supported = device;
+        running = gSettingsIconClassAuditRunning != 0;
+        symbol = @"list.bullet.rectangle";
+        color = UIColor.systemIndigoColor;
+        detail = @"Read-only • SpringBoard RemoteCall • class names";
+        cell.textLabel.text = running
+            ? @"Icon Class Audit Running…"
+            : @"Audit Clock/Calendar Icon Classes";
+    } else if (row <= 14) {
+        supported = device &&
+            CNDHailMarySpecialIconClassDispatchRedirectIsSupported(
+                &reason);
+        running =
+            CNDHailMarySpecialIconClassDispatchPermissionIsRunning() ||
+            CNDHailMarySpecialIconClassDispatchRedirectIsRunning();
+        if (row == 10) {
+            symbol = @"checkmark.shield.fill";
+            color = UIColor.systemOrangeColor;
+            detail = @"Two identical .34 writes • same-boot ticket";
+            cell.textLabel.text = running
+                ? @"Dispatch Probe Running…"
+                : @"Run Per-Boot Static-Icon Dispatch Probe";
+        } else if (row == 11) {
+            symbol = @"paintbrush.pointed.fill";
+            color = UIColor.systemPurpleColor;
+            detail = @"Two .34 low-word writes • rebuild objects after";
+            cell.textLabel.text = running
+                ? @"Applying Per-Boot Static Icons…"
+                : @"Apply Per-Boot Static Clock + Calendar";
+        } else if (row == 12) {
+            symbol = @"arrow.uturn.backward.circle.fill";
+            color = UIColor.systemGreenColor;
+            detail = @"Restores both original dispatch entries";
+            cell.textLabel.text = running
+                ? @"Restoring Per-Boot Dispatch…"
+                : @"Restore Per-Boot Live Clock + Calendar";
+        } else if (row == 13) {
+            symbol = @"checkmark.circle.fill";
+            color = UIColor.systemTealColor;
+            detail = @"Read-only • expects both .34 redirects";
+            cell.textLabel.text = running
+                ? @"Verifying Per-Boot Redirect…"
+                : @"Verify Per-Boot Static-Icon Dispatch";
+        } else {
+            symbol = @"checkmark.circle";
+            color = UIColor.systemGrayColor;
+            detail = @"Read-only • expects both original entries";
+            cell.textLabel.text = running
+                ? @"Verifying Original Dispatch…"
+                : @"Verify Original Per-Boot Dispatch";
+        }
+    } else {
+        supported = device &&
+            CNDHailMarySpecialIconClassDispatchRedirectIsSupported(
+                &reason);
+        running = gSettingsIconObjectMigrationRunning != 0;
+        if (row == 15) {
+            symbol = @"arrow.triangle.2.circlepath.circle.fill";
+            color = UIColor.systemPurpleColor;
+            detail = @"Two bundles • both consumers • positions preserved";
+            cell.textLabel.text = running
+                ? @"Rebuilding Static Icon Objects…"
+                : @"Rebuild Static Clock + Calendar Objects";
+        } else {
+            symbol = @"clock.arrow.circlepath";
+            color = UIColor.systemGreenColor;
+            detail = @"After dispatch restore • original live classes";
+            cell.textLabel.text = running
+                ? @"Rebuilding Live Icon Objects…"
+                : @"Rebuild Live Clock + Calendar Objects";
+        }
+    }
+
+    cell.imageView.image = [SettingsViewController iconBadgeWithSymbol:symbol
+                                                                 color:color
+                                                                  size:29.0];
+    cell.textLabel.textColor = (supported && !running)
+        ? UIColor.labelColor
+        : UIColor.secondaryLabelColor;
+    cell.detailTextLabel.text = !device
+        ? settings_unsupported_message()
+        : (supported ? (detail ?: @"KRW only • no kcall, provider or root")
+                     : reason);
+    return cell;
+}
+
+// Every probe row derives its title, tint and enablement from that probe's
+// live IsRunning() flag, and nothing else rebuilds this section. A probe
+// clears its flag and then calls completion, so without an explicit refresh
+// here the row keeps reading "… Running…" for the rest of the session even
+// though the run has ended and the report is on disk.
+- (void)reloadProbeRows
+{
+    if (!self.isViewLoaded || self.detailMode) return;
+    [self.tableView reloadSections:
+        [NSIndexSet indexSetWithIndex:RootSectionProbes]
+        withRowAnimation:UITableViewRowAnimationNone];
+}
+
+// The probe rows present the same Activity sheet the installer uses, and that
+// sheet's footer (spinner + "Running — stay here until complete.") only stops
+// when it hears the actions-complete notification.  The probe rows used to log
+// the result and stop there, so a finished probe left the footer reading as if
+// the run were still live.  Resolve the row's own report into that
+// notification, then let the row rebuild so its title stops saying "Running…".
+- (void)finishProbeActivityForRow:(NSInteger)row
+                           report:(NSDictionary<NSString *, id> *)report
+{
+    NSString *result = [report[@"result"] isKindOfClass:NSString.class]
+        ? report[@"result"] : @"unknown-result";
+    NSString *label = nil;
+    NSString *successResult = nil;
+    switch (row) {
+        case 0:
+            successResult = @"physical-krw-kcall1-chosen-pc-chosen-x0";
+            label = @"KCall1 canary";
+            break;
+        case 1:
+            successResult = @"physical-krw-triggered-normal-signer-path";
+            label = @"Signer probe";
+            break;
+        case 2:
+            successResult = @"physical-krw-entitlement-audit-complete";
+            label = @"Entitlement audit";
+            break;
+        default:
+            successResult = @"read-only-data-page-wire-confirmed";
+            label = @"Hail Mary .34 page wire";
+            break;
+    }
+    [self reloadProbeRows];
+    settings_post_actions_complete_async(
+        [result isEqualToString:successResult],
+        [NSString stringWithFormat:@"%@: %@", label, result]);
+}
+
+- (void)runProbeRow:(NSInteger)row
+{
+    BOOL device = settings_device_supported();
+    NSString *reason = nil;
+    BOOL supported = NO;
+    BOOL running = NO;
+    NSString *confirmTitle = nil;
+    NSString *confirmMessage = nil;
+    NSString *runTitle = nil;
+    switch (row) {
+        case 0:
+            supported = device && CNDPhysicalKCall1ProbeIsSupported(&reason);
+            running = CNDPhysicalKCall1ProbeIsRunning();
+            confirmTitle = @"Run IOUserEthernet KCall1 Canary?";
+            confirmMessage = @"Exact iPhone17,2 / 23A341 canary, run entirely on the app's own kexploit KRW. It borrows bluetoothd's MAC label for one entitlement-gated open and restores it before any selector runs, then creates three IOUserEthernetInterface objects to harvest the kernel's own PAC-signed check_multi callbacks. The dispatcher's backing ifnet is staged so SIOCADDMULTI executes a chosen PC with a chosen X0 and returns EINPROGRESS. Every field and the GOT are restored and read back; no provider, root, socket or kcall is used.";
+            runTitle = @"Run Canary";
+            break;
+        case 1:
+            supported = device &&
+                CNDPhysicalIOUserEthernetSignerProbeIsSupported(&reason);
+            running = CNDPhysicalIOUserEthernetSignerProbeIsRunning();
+            confirmTitle = @"Run IOUserEthernet Signer Probe?";
+            confirmMessage = @"Exact iPhone17,2 / 23A341 probe on the app's own kexploit KRW. It records the expected denied open of the resource, borrows bluetoothd's MAC label, opens it, restores the label before the selector, and confirms the kernel signs and returns normal check_multi callbacks for the created interfaces. No provider, root, socket or kcall is used.";
+            runTitle = @"Run Probe";
+            break;
+        case 2:
+            supported = device &&
+                CNDPhysicalEntitlementAuditProbeIsSupported(&reason);
+            running = CNDPhysicalEntitlementAuditProbeIsRunning();
+            confirmTitle = @"Audit IOUserEthernet Entitlement?";
+            confirmMessage = @"Read-only iPhone17,2 / 23A341 audit on the app's own kexploit KRW. It resolves bluetoothd's credential label, reads the AMFI policy object out of it and walks that object's reachable entitlement data for com.apple.networking.ethernet.user-access, then reports the same for configd, nehelper, symptomsd and wifid as fallbacks. Nothing is written, no label is borrowed, and no kernel call is issued.";
+            runTitle = @"Run Audit";
+            break;
+        case 3:
+            supported = device && CNDHailMaryPageWireIsSupported(&reason);
+            running = CNDHailMaryPageWireIsRunning();
+            confirmTitle = @"Run Hail Mary .34 Page Wire?";
+            confirmMessage = @"Read-only iPhone17,2 / 23A341 probe on the app's own kexploit KRW. It re-proves the exact .34 read-only-data frame that carries the dispatch redirect through both live pmaps, then asks SpringBoard over one bounded RemoteCall to mlock that 16 KiB frame, plus an anonymous read/write and an anonymous read-only control page. It invokes no kernel write primitive and changes no page byte; a successful wire is retained until SpringBoard exits and is released automatically when it does. Spotlight must be live, and the page is re-proved after the call.";
+            runTitle = @"Run Wire Probe";
+            break;
+        case 4:
+            supported = device &&
+                CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+            running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassRedirectIsRunning();
+            confirmTitle = @"Run Special-Class GOT Probe?";
+            confirmMessage = @"Read-only iPhone17,2 / 23A341 probe of the two SpringBoardHome __got slots in .33.dylddata that carry the Clock/Calendar special-class pointers. It proves both slots through SpringBoard and Spotlight, reads the exact 8-byte class values, and writes a per-boot ticket. It performs no kernel write and changes no byte. It requires validated KRW and live Spotlight. No class selection changes.";
+            runTitle = @"Run Probe";
+            break;
+        case 5:
+            supported = device &&
+                CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+            running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassRedirectIsRunning();
+            confirmTitle = @"Apply Static Clock + Calendar Icons?";
+            confirmMessage = @"Requires the special-class GOT probe ticket from this boot. It re-proves both .33.dylddata __got slots through the live pmaps, checks that they still contain the original special classes, journals the inverse, writes SBHApplicationIcon into both slots with one kwrite64 each, and requires exact readback and stable translations. The target is the non-executable data-page family already proved writable, not the .19 text page. A controlled respring is required before SpringBoard rebuilds the icons. Clock hands and the Calendar date stop updating; the static theme image is what shows. No automatic rollback or process restart.";
+            runTitle = @"Apply";
+            break;
+        case 6:
+            supported = device &&
+                CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+            running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassRedirectIsRunning();
+            confirmTitle = @"Restore Live Clock + Calendar Icons?";
+            confirmMessage = @"Requires the same-boot GOT probe ticket. It proves that both .33.dylddata __got slots currently contain SBHApplicationIcon, journals the inverse, restores the original special class pointers with one kwrite64 each, and requires exact readback and stable translations. A controlled respring is then required to rebuild the live Clock face and Calendar date. No automatic rollback or process restart.";
+            runTitle = @"Restore";
+            break;
+        case 7:
+            supported = device &&
+                CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+            running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassRedirectIsRunning();
+            confirmTitle = @"Verify Static Clock + Calendar State?";
+            confirmMessage = @"Read-only proof that both .33.dylddata __got slots currently contain SBHApplicationIcon. It resolves the slots through the live pmaps and writes nothing. It refuses if either slot is still the original special class. A respring is still required for the live icons to show the change.";
+            runTitle = @"Verify";
+            break;
+        case 8:
+            supported = device &&
+                CNDHailMarySpecialIconClassRedirectIsSupported(&reason);
+            running = CNDHailMarySpecialIconClassPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassRedirectIsRunning();
+            confirmTitle = @"Verify Original Clock + Calendar State?";
+            confirmMessage = @"Read-only proof that both .33.dylddata __got slots currently contain the original special Clock/Calendar classes. It resolves the slots through the live pmaps and writes nothing. It refuses if either slot is redirected.";
+            runTitle = @"Verify";
+            break;
+        case 9:
+            supported = device;
+            running = gSettingsIconClassAuditRunning != 0;
+            confirmTitle = @"Audit Clock/Calendar Icon Classes?";
+            confirmMessage = @"Read-only SpringBoard RemoteCall audit. It asks the live icon model for the canonical Clock and Calendar objects, then reports each object's actual Objective-C class (for example SBApplicationIcon versus SBHClockApplicationIcon) along with its leaf and switcher classes. It does not write memory, refresh icons, or restart any process. This is the runtime check that the byte-level redirect verification cannot provide.";
+            runTitle = @"Run Audit";
+            break;
+        case 10:
+            supported = device &&
+                CNDHailMarySpecialIconClassDispatchRedirectIsSupported(
+                    &reason);
+            running =
+                CNDHailMarySpecialIconClassDispatchPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassDispatchRedirectIsRunning();
+            confirmTitle = @"Run Per-Boot Static-Icon Dispatch Probe?";
+            confirmMessage = @"Exact iPhone17,2 / 23A341 permission probe for the SBHIconModel and SBIconModel preoptimized dispatch entries in .34.dyldreadonly. It proves both pinned 32-byte guards through SpringBoard and Spotlight, journals the targets, writes each existing low word back unchanged with kwrite32, and requires exact readback plus stable translations. It makes no semantic change. A confirmed report is required before Apply or Restore.";
+            runTitle = @"Run Probe";
+            break;
+        case 11:
+            supported = device &&
+                CNDHailMarySpecialIconClassDispatchRedirectIsSupported(
+                    &reason);
+            running =
+                CNDHailMarySpecialIconClassDispatchPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassDispatchRedirectIsRunning();
+            confirmTitle = @"Apply Per-Boot Static Clock + Calendar?";
+            confirmMessage = @"Requires the matching same-boot dispatch probe. It re-proves both .34.dyldreadonly guards, journals the exact inverse, and changes only each packed entry's low word so SBHIconModel and SpringBoard's SBIconModel subclass dispatch to +applicationIconClass. Exact 32-byte readback and stable translations are required. Existing archived Clock/Calendar objects are unchanged; run Rebuild Static Clock + Calendar Objects afterward. No automatic rollback or restart.";
+            runTitle = @"Apply";
+            break;
+        case 12:
+            supported = device &&
+                CNDHailMarySpecialIconClassDispatchRedirectIsSupported(
+                    &reason);
+            running =
+                CNDHailMarySpecialIconClassDispatchPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassDispatchRedirectIsRunning();
+            confirmTitle = @"Restore Per-Boot Live Clock + Calendar?";
+            confirmMessage = @"Requires a matching same-boot dispatch probe and both exact redirected guards. It journals the inverse, restores the original low word in both .34 entries, requires exact 32-byte readback and stable translations, then leaves the process lifecycle unchanged. Existing archived ordinary objects are unchanged; run Rebuild Live Clock + Calendar Objects afterward.";
+            runTitle = @"Restore";
+            break;
+        case 13:
+            supported = device &&
+                CNDHailMarySpecialIconClassDispatchRedirectIsSupported(
+                    &reason);
+            running =
+                CNDHailMarySpecialIconClassDispatchPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassDispatchRedirectIsRunning();
+            confirmTitle = @"Verify Per-Boot Static-Icon Dispatch?";
+            confirmMessage = @"Read-only proof that the SBHIconModel and SBIconModel .34 preoptimized-cache entries both contain their exact redirected 32-byte guards. It writes nothing and does not restart a process.";
+            runTitle = @"Verify";
+            break;
+        case 14:
+            supported = device &&
+                CNDHailMarySpecialIconClassDispatchRedirectIsSupported(
+                    &reason);
+            running =
+                CNDHailMarySpecialIconClassDispatchPermissionIsRunning() ||
+                CNDHailMarySpecialIconClassDispatchRedirectIsRunning();
+            confirmTitle = @"Verify Original Per-Boot Dispatch?";
+            confirmMessage = @"Read-only proof that both .34 preoptimized-cache entries contain their exact original 32-byte guards. It writes nothing and refuses mixed state.";
+            runTitle = @"Verify";
+            break;
+        case 15:
+            supported = device &&
+                CNDHailMarySpecialIconClassDispatchRedirectIsSupported(
+                    &reason);
+            running = gSettingsIconObjectMigrationRunning != 0;
+            confirmTitle = @"Rebuild Static Clock + Calendar Objects?";
+            confirmMessage = @"Use this after the per-boot static-icon dispatch is verified. It first performs a zero-mutation exact-ABI preflight in both SpringBoard and Spotlight. It then removes and re-adds only Clock and Calendar through each live icon model, requires SBHApplicationIcon afterward, and proves that each SpringBoard relative path is exactly unchanged. It does not respring, restart a process, reset layout, or write shared-cache memory.";
+            runTitle = @"Rebuild";
+            break;
+        case 16:
+            supported = device &&
+                CNDHailMarySpecialIconClassDispatchRedirectIsSupported(
+                    &reason);
+            running = gSettingsIconObjectMigrationRunning != 0;
+            confirmTitle = @"Rebuild Live Clock + Calendar Objects?";
+            confirmMessage = @"Use this only after restoring the original per-boot dispatch. It preflights both consumers, then removes and re-adds only Clock and Calendar and requires Apple's SBHClockApplicationIcon and SBHCalendarApplicationIcon classes afterward. SpringBoard relative paths must remain exactly unchanged. It does not respring, restart a process, reset layout, or write shared-cache memory.";
+            runTitle = @"Rebuild";
+            break;
+        default:
+            return;
+    }
+    if (!supported) {
+        UIAlertController *ac = [UIAlertController
+            alertControllerWithTitle:@"Unsupported Device"
+                             message:reason ?: settings_unsupported_message()
+                      preferredStyle:UIAlertControllerStyleAlert];
+        [ac addAction:[UIAlertAction actionWithTitle:@"OK"
+                                               style:UIAlertActionStyleCancel
+                                             handler:nil]];
+        settings_present_controller(ac, self);
+        return;
+    }
+    if (running) return;
+
+    UIAlertController *ac = [UIAlertController
+        alertControllerWithTitle:confirmTitle
+                         message:confirmMessage
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel"
+                                           style:UIAlertActionStyleCancel
+                                         handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [ac addAction:[UIAlertAction actionWithTitle:runTitle
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *_) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        [strongSelf presentActivityLogWithCompletion:^{
+            if (row == 0) {
+                CNDPhysicalKCall1ProbeRun(
+                    ^(NSDictionary<NSString *, id> *report) {
+                        log_user("[KCALL1] result=%s success=%s report=%s\n",
+                            [report[@"result"] UTF8String] ?: "unknown-result",
+                            [report[@"ifnetKCall1Success"] boolValue]
+                                ? "yes" : "no",
+                            [report[@"reportPath"] UTF8String]
+                                ?: "unavailable");
+                        [strongSelf finishProbeActivityForRow:row
+                                                       report:report];
+                    });
+            } else if (row == 1) {
+                CNDPhysicalIOUserEthernetSignerProbeRun(
+                    ^(NSDictionary<NSString *, id> *report) {
+                        log_user("[IOUSERETHERNET_SIGNER] result=%s report=%s\n",
+                            [report[@"result"] UTF8String] ?: "unknown-result",
+                            [report[@"reportPath"] UTF8String]
+                                ?: "unavailable");
+                        [strongSelf finishProbeActivityForRow:row
+                                                       report:report];
+                    });
+            } else if (row == 2) {
+                CNDPhysicalEntitlementAuditProbeRun(
+                    ^(NSDictionary<NSString *, id> *report) {
+                        NSString *holders =
+                            [report[@"processesWithEntitlement"]
+                                componentsJoinedByString:@","];
+                        log_user("[ENTITLEMENT_AUDIT] result=%s donor=%s "
+                            "holders=%s report=%s\n",
+                            [report[@"result"] UTF8String]
+                                ?: "unknown-result",
+                            [report[@"donorHasEntitlement"] boolValue]
+                                ? "yes" : "no",
+                            holders.UTF8String ?: "none",
+                            [report[@"reportPath"] UTF8String]
+                                ?: "unavailable");
+                        [strongSelf finishProbeActivityForRow:row
+                                                       report:report];
+                    });
+            } else if (row == 3) {
+                /* The wire probe owns the actions lock and the Spotlight
+                 * bootstrap inside its shared body; the hook resolves this
+                 * row's activity sheet and title instead of a second
+                 * actions-complete notification. */
+                settings_run_hail_mary_page_wire_with_hook(
+                    ^(NSDictionary<NSString *, id> *report) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [strongSelf finishProbeActivityForRow:row
+                                                           report:report];
+                        });
+                    });
+            } else if (row == 9) {
+                settings_run_icon_class_audit_action_with_hook(^{
+                    [strongSelf reloadProbeRows];
+                });
+            } else if (row == 15 || row == 16) {
+                settings_run_special_icon_object_migration_action_with_hook(
+                    row == 15, NO,
+                    ^(NSDictionary<NSString *, id> *report) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [strongSelf reloadProbeRows];
+                        });
+                    });
+            } else if (row >= 10) {
+                BOOL permission = (row == 10);
+                CNDHailMarySpecialIconClassDispatchOperation operation =
+                    CNDHailMarySpecialIconClassDispatchOperationApply;
+                if (row == 12) {
+                    operation =
+                        CNDHailMarySpecialIconClassDispatchOperationRestore;
+                } else if (row == 13) {
+                    operation =
+                        CNDHailMarySpecialIconClassDispatchOperationVerifyRedirected;
+                } else if (row == 14) {
+                    operation =
+                        CNDHailMarySpecialIconClassDispatchOperationVerifyOriginal;
+                }
+                settings_run_hail_mary_special_icon_class_dispatch_action_with_hook(
+                    permission, operation,
+                    ^(NSDictionary<NSString *, id> *report) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [strongSelf reloadProbeRows];
+                        });
+                    });
+            } else {
+                /* The special-class body owns the actions lock, the
+                 * Spotlight bootstrap and the actions-complete post. The
+                 * hook only refreshes the four row titles after it ends. */
+                BOOL permission = (row == 4);
+                CNDHailMarySpecialIconClassOperation operation =
+                    CNDHailMarySpecialIconClassOperationApply;
+                if (row == 6) {
+                    operation = CNDHailMarySpecialIconClassOperationRestore;
+                } else if (row == 7) {
+                    operation =
+                        CNDHailMarySpecialIconClassOperationVerifyRedirected;
+                } else if (row == 8) {
+                    operation =
+                        CNDHailMarySpecialIconClassOperationVerifyOriginal;
+                }
+                settings_run_hail_mary_special_icon_class_action_with_hook(
+                    permission, operation,
+                    ^(NSDictionary<NSString *, id> *report) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [strongSelf reloadProbeRows];
+                        });
+                    });
+            }
+        }];
+    }]];
+    settings_present_controller(ac, self);
 }
 
 - (void)logUploadSwitchChanged:(UISwitch *)sw {
@@ -20710,6 +22549,8 @@ void cyanide_present_contact(UIViewController *host)
             case RootSectionActions:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionActions];
                 break;
+            case RootSectionProbes:
+                return [self buildProbeCellAtRow:indexPath.row tableView:tableView];
             case RootSectionAbout:
                 return [self buildAboutCellAtRow:indexPath.row tableView:tableView];
             case RootSectionCount:
@@ -21395,7 +23236,7 @@ void cyanide_present_contact(UIViewController *host)
     [[NSUserDefaults standardUserDefaults] setBool:sender.isOn forKey:key];
     printf("[SETTINGS] toggle %s=%d\n", key.UTF8String, sender.isOn);
     if ([key isEqualToString:kSettingsKeepAlive]) {
-        ds_keepalive_apply_enabled(sender.isOn);
+        settings_apply_snowboard_automatic_repair_enabled(sender.isOn);
         return;
     }
     if ([key isEqualToString:
@@ -22018,7 +23859,7 @@ void cyanide_present_contact(UIViewController *host)
                 @synchronized (settings_rc_lock()) {
                     if (g_springboard_rc_ready) {
                         actionOK = restore
-                            ? gravitylite_stop_in_session()
+                            ? gravitylite_restore_in_session()
                             : gravitylite_explosion_in_session(settings_gravitylite_config_from_defaults(d).explosionForce);
                     } else {
                         RemoteCallSession *springboardSession =
@@ -22030,7 +23871,7 @@ void cyanide_present_contact(UIViewController *host)
                         } else {
                             remote_call_with_session(springboardSession, ^{
                                 actionOK = restore
-                                    ? gravitylite_stop_in_session()
+                                    ? gravitylite_restore_in_session()
                                     : gravitylite_explosion_in_session(settings_gravitylite_config_from_defaults(d).explosionForce);
                             });
                             [springboardSession destroyRemoteCall];
@@ -22435,6 +24276,9 @@ void cyanide_present_contact(UIViewController *host)
             case RootSectionActions:
                 indexPath = [NSIndexPath indexPathForRow:indexPath.row inSection:SectionActions];
                 break;
+            case RootSectionProbes:
+                [self runProbeRow:indexPath.row];
+                return;
             case RootSectionAbout: {
                 switch (indexPath.row) {
                     case 0: [self openTwitter]; break;

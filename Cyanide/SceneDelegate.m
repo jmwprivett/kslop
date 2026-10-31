@@ -6,6 +6,7 @@
 //
 
 #import "SceneDelegate.h"
+#import "AppDelegate.h"
 #import "SettingsViewController.h"
 #import "UpdateChecker.h"
 
@@ -33,6 +34,17 @@
             [inv setArgument:&onScrollDown atIndex:2];
             [inv invoke];
         }
+    }
+    for (UIOpenURLContext *context in connectionOptions.URLContexts) {
+        if (CNDHandleCommandURL(context.URL, "scene-connect-url")) break;
+    }
+}
+
+- (void)scene:(UIScene *)scene
+    openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts
+{
+    for (UIOpenURLContext *context in URLContexts) {
+        if (CNDHandleCommandURL(context.URL, "scene-open-url")) break;
     }
 }
 

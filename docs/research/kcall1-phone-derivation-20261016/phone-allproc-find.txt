@@ -1,0 +1,259 @@
+# phone allproc derivation (iPhone17,2 / iOS 26.0 23A341); Level: implemented (static derivation; nothing ran on the phone)
+# Producers: scripts/ghidra/CndKcall1ProcIterateScan.java (program-wide proc_iterate-shape scan) and scripts/ghidra/CndKcall1AllProcFind.java (per-function head-load detail + program-wide references)
+# Ghidra 12.1.4 headless, -noanalysis -readOnly, projects research-kernel-23A341 and physical-kernel-23A341 (program com.apple.kernel), build/ghidra-projects/
+# Method: in proc_iterate the allproc head is the 64-bit adrp+ldr static guarded by `tbz/tbnz wN,#0` (PROC_ALLPROCLIST == 1) and zombproc the one guarded by bit 1 (PROC_ZOMBPROCLIST == 2), zombproc == allproc + 8 (kern_proc.c declaration order).
+# The scan selects the function by that shape alone (no symbol, no address); the detail run then reads the head loads of that function. Raw adrp/add/ldr decoding; Ghidra references are used only for the REF-TO witness lines.
+# DIS lines are omitted below; REF-TO lines are kept only for the allproc static. Raw outputs: build/kcall1-allproc-20261016/ (gitignored).
+
+## VM SELF-CHECK 1: program-wide scan on research-kernel-23A341 (pin 0xfffffe0009813020 = cnd_iouserethernet_krw_trigger.m:26-27 CNDStaticAllProc)
+PROGRAM com.apple.kernel base fffffe0007008000
+MATCH fffffe0007fc4ef0 name FUN_fffffe0007fc4ef0 symbol FUN_fffffe0007fc4ef0 size 2152 instructions 538 allproc fffffe0009813020 zombproc fffffe0009813028
+FUNCTIONS-SCANNED 20771
+MATCH-COUNT 1
+SELF-CHECK expect fffffe0009813020 match true
+
+## VM SELF-CHECK 2: head-load detail of the unique scan match (fffffe0007fc4ef0; the research program has no proc_iterate symbol)
+PROGRAM com.apple.kernel base fffffe0007008000
+FUNCTION proc_iterate entry fffffe0007fc4ef0 size 2152 name FUN_fffffe0007fc4ef0
+  ADRP +0x40 x8 page fffffe0009809000
+  ADRP-ADD +0x44 x8 static fffffe0009809380
+  ADRP +0x4c x22 page fffffe0009813000
+  ADRP +0x50 x26 page fffffe0007795000
+  ADRP-ADD +0x54 x26 static fffffe00077950c0
+  HEAD-LOAD +0x70 width 32 adrp+ldr static fffffe0009813750 block __common symbol DAT_fffffe0009813750 flag-test "-"
+  ADRP +0xbc x0 page fffffe0009809000
+  ADRP-ADD +0xc0 x0 static fffffe0009809380
+  ADRP +0xd8 x0 page fffffe0009809000
+  ADRP-ADD +0xdc x0 static fffffe0009809380
+  ADRP +0xf8 x8 page fffffe0009813000
+  HEAD-LOAD +0xfc width 64 adrp+ldr static fffffe0009813020 block __common symbol DAT_fffffe0009813020 flag-test "+0xf4 tbz w28;IMM0x0;ADDR"
+  ADRP +0x108 x20 page fffffe0009809000
+  ADRP +0x110 x28 page fffffe0007684000
+  ADRP-ADD +0x114 x28 static fffffe0007684638
+  HEAD-LOAD +0x18c width 64 adrp+ldr static fffffe0009809330 block __common symbol DAT_fffffe0009809330 flag-test "+0x168 tbnz w8;IMM0x5;ADDR"
+  FIELD-LOAD +0x1ac width 64 static fffffe0007684638 + 0x50
+  ADRP +0x1cc x8 page fffffe0007789000
+  HEAD-LOAD +0x1d0 width 64 adrp+ldr static fffffe0007789168 block __const symbol DAT_fffffe0007789168 flag-test "+0x168 tbnz w8;IMM0x5;ADDR"
+  ADRP +0x21c x8 page fffffe0009813000
+  HEAD-LOAD +0x220 width 64 adrp+ldr static fffffe0009813028 block __common symbol DAT_fffffe0009813028 flag-test "+0x210 tbz w8;IMM0x1;ADDR"
+  ADRP +0x228 x20 page fffffe0009809000
+  ADRP +0x22c x28 page fffffe0007684000
+  ADRP-ADD +0x230 x28 static fffffe0007684638
+  HEAD-LOAD +0x29c width 64 adrp+ldr static fffffe0009809330 block __common symbol DAT_fffffe0009809330 flag-test "+0x278 tbnz w8;IMM0x5;ADDR"
+  FIELD-LOAD +0x2bc width 64 static fffffe0007684638 + 0x50
+  ADRP +0x2dc x8 page fffffe0007789000
+  HEAD-LOAD +0x2e0 width 64 adrp+ldr static fffffe0007789168 block __const symbol DAT_fffffe0007789168 flag-test "+0x278 tbnz w8;IMM0x5;ADDR"
+  ADRP +0x334 x28 page fffffe0007684000
+  ADRP-ADD +0x338 x28 static fffffe0007684638
+  ADRP +0x420 x8 page fffffe0009809000
+  HEAD-LOAD +0x424 width 64 adrp+ldr static fffffe0009809330 block __common symbol DAT_fffffe0009809330 flag-test "+0x3cc tbnz w20;IMM0x6;ADDR"
+  ADRP +0x558 x0 page fffffe0009809000
+  ADRP-ADD +0x55c x0 static fffffe0009809380
+  ADRP +0x5b0 x2 page fffffe0007081000
+  ADRP-ADD +0x5b4 x2 static fffffe000708134d
+  ADRP +0x5ec x8 page fffffe0007789000
+  HEAD-LOAD +0x5f0 width 64 adrp+ldr static fffffe0007789168 block __const symbol DAT_fffffe0007789168 flag-test "+0x5d0 tbz w20;IMM0x5;ADDR"
+  ADRP +0x610 x0 page fffffe0009809000
+  ADRP-ADD +0x614 x0 static fffffe0009809380
+  ADRP +0x63c x8 page fffffe0009809000
+  HEAD-LOAD +0x640 width 64 adrp+ldr static fffffe0009809330 block __common symbol DAT_fffffe0009809330 flag-test "+0x62c tbnz w8;IMM0x4;ADDR"
+  ADRP +0x6f4 x8 page fffffe0007795000
+  ADRP-ADD +0x6f8 x8 static fffffe0007795100
+  ADRP +0x784 x0 page fffffe0009809000
+  ADRP-ADD +0x788 x0 static fffffe0009809380
+  ADRP +0x7a8 x9 page fffffe0007080000
+  ADRP-ADD +0x7ac x9 static fffffe0007080555
+  ADRP +0x7b0 x10 page fffffe0007080000
+  ADRP-ADD +0x7b4 x10 static fffffe000708063d
+  ADRP +0x7c0 x0 page fffffe0007080000
+  ADRP-ADD +0x7c4 x0 static fffffe000708064a
+  ADRP +0x7d8 x0 page fffffe0009809000
+  ADRP-ADD +0x7dc x0 static fffffe0009809380
+  ADRP +0x7f8 x0 page fffffe0009809000
+  ADRP-ADD +0x7fc x0 static fffffe0009809380
+  ADRP +0x824 x9 page fffffe0007080000
+  ADRP-ADD +0x828 x9 static fffffe0007080555
+  ADRP +0x82c x10 page fffffe0007080000
+  ADRP-ADD +0x830 x10 static fffffe000708063d
+  ADRP +0x83c x0 page fffffe0007080000
+  ADRP-ADD +0x840 x0 static fffffe000708061b
+  ADRP +0x84c x8 page fffffe0007080000
+  ADRP-ADD +0x850 x8 static fffffe0007080555
+  ADRP +0x85c x0 page fffffe0007080000
+  ADRP-ADD +0x860 x0 static fffffe000708096b
+HEAD-LOAD-COUNT 10 width64 9 distinct64 4
+HEAD-STATIC 0 fffffe0009813020 block __common symbol DAT_fffffe0009813020
+HEAD-STATIC 1 fffffe0009809330 block __common symbol DAT_fffffe0009809330
+HEAD-STATIC 2 fffffe0007789168 block __const symbol DAT_fffffe0007789168
+HEAD-STATIC 3 fffffe0009813028 block __common symbol DAT_fffffe0009813028
+ALLPROC-CANDIDATE-COUNT 1
+ALLPROC-CANDIDATE fffffe0009813020 (bit-0 guarded head load)
+ZOMBPROC-CANDIDATE-COUNT 1
+ZOMBPROC-CANDIDATE fffffe0009813028 (bit-1 guarded head load)
+ZOMBPROC-MINUS-ALLPROC 0x8
+SELF-CHECK expect fffffe0009813020 candidate fffffe0009813020 match true
+  REF-TO fffffe0009813020 from fffffe0007fc2040 in FUN_fffffe0007fc1d40 READ
+  REF-TO fffffe0009813020 from fffffe0007fc2058 in FUN_fffffe0007fc1d40 READ
+  REF-TO fffffe0009813020 from fffffe0007fc2068 in FUN_fffffe0007fc1d40 WRITE
+  REF-TO fffffe0009813020 from fffffe0007fc206c in FUN_fffffe0007fc1d40 DATA
+  REF-TO fffffe0009813020 from fffffe0007f711d4 in FUN_fffffe0007f70da8 READ
+  REF-TO fffffe0009813020 from fffffe0007f711f8 in FUN_fffffe0007f70da8 READ
+  REF-TO fffffe0009813020 from fffffe0007f7120c in FUN_fffffe0007f70da8 WRITE
+  REF-TO fffffe0009813020 from fffffe0007f71210 in FUN_fffffe0007f70da8 DATA
+  REF-TO fffffe0009813020 from fffffe0007fd0964 in FUN_fffffe0007fd0780 READ
+  REF-TO fffffe0009813020 from fffffe0007fd0a24 in FUN_fffffe0007fd0780 READ
+  REF-TO fffffe0009813020 from fffffe0007f778a8 in FUN_fffffe0007f77750 READ
+  REF-TO fffffe0009813020 from fffffe0007fc57c8 in FUN_fffffe0007fc5758 READ
+  REF-TO fffffe0009813020 from fffffe0007fc4fec in FUN_fffffe0007fc4ef0 READ
+  REF-TO fffffe0009813020 from fffffe000806476c in FUN_fffffe0008064650 READ
+  REF-TO fffffe0009813020 from fffffe0007fcc2c4 in FUN_fffffe0007fcc01c READ
+  REF-TO-COUNT fffffe0009813020 15 functions 8
+  REF-TO-FUNCTION fffffe0009813020 FUN_fffffe0007fc1d40 4
+  REF-TO-FUNCTION fffffe0009813020 FUN_fffffe0007f70da8 4
+  REF-TO-FUNCTION fffffe0009813020 FUN_fffffe0007fd0780 2
+  REF-TO-FUNCTION fffffe0009813020 FUN_fffffe0007f77750 1
+  REF-TO-FUNCTION fffffe0009813020 FUN_fffffe0007fc5758 1
+  REF-TO-FUNCTION fffffe0009813020 FUN_fffffe0007fc4ef0 1
+  REF-TO-FUNCTION fffffe0009813020 FUN_fffffe0008064650 1
+  REF-TO-FUNCTION fffffe0009813020 FUN_fffffe0007fcc01c 1
+  REF-TO-COUNT fffffe0009809330 113 functions 80
+  REF-TO-COUNT fffffe0007789168 979 functions 695
+  REF-TO-COUNT fffffe0009813028 8 functions 4
+
+## PHONE 1: program-wide scan on physical-kernel-23A341 (no pin; the match is named by the pinned symbol map)
+PROGRAM com.apple.kernel base fffffff00700c000
+MATCH fffffff008726f6c name FUN_fffffff008726f6c symbol FUN_fffffff008726f6c size 2092 instructions 523 allproc fffffff00b2faa18 zombproc fffffff00b2faa20
+FUNCTIONS-SCANNED 21490
+MATCH-COUNT 1
+SYMBOL-MAP fffffff008726f6c _proc_iterate (build/lab-cs-allow-invalid/kernel-23A341/symbols/kernelcache.release.iphone17.decompressed.symbols.json)
+
+## PHONE 2: head-load detail of _proc_iterate (fffffff008726f6c, resolved by address; the Ghidra project carries no names)
+PROGRAM com.apple.kernel base fffffff00700c000
+FUNCTION proc_iterate entry fffffff008726f6c size 2092 name FUN_fffffff008726f6c
+  ADRP +0x40 x8 page fffffff00b2f1000
+  ADRP-ADD +0x44 x8 static fffffff00b2f10e0
+  ADRP +0x4c x23 page fffffff00b2fb000
+  ADRP +0x50 x26 page fffffff007cb9000
+  ADRP-ADD +0x54 x26 static fffffff007cb9150
+  HEAD-LOAD +0x70 width 32 adrp+ldr static fffffff00b2fb080 block __common symbol DAT_fffffff00b2fb080 flag-test "-"
+  ADRP +0xbc x0 page fffffff00b2f1000
+  ADRP-ADD +0xc0 x0 static fffffff00b2f10e0
+  ADRP +0xd8 x0 page fffffff00b2f1000
+  ADRP-ADD +0xdc x0 static fffffff00b2f10e0
+  ADRP +0xfc x8 page fffffff00b2fa000
+  HEAD-LOAD +0x100 width 64 adrp+ldr static fffffff00b2faa18 block __common symbol DAT_fffffff00b2faa18 flag-test "+0xf8 tbz w28;IMM0x0;ADDR"
+  ADRP +0x10c x20 page fffffff00b2f1000
+  ADRP +0x110 x23 page fffffff007cac000
+  ADRP +0x118 x28 page fffffff007c0e000
+  ADRP-ADD +0x11c x28 static fffffff007c0e188
+  HEAD-LOAD +0x17c width 64 adrp+ldr static fffffff00b2f1090 block __common symbol DAT_fffffff00b2f1090 flag-test "+0x158 tbnz w8;IMM0x5;ADDR"
+  FIELD-LOAD +0x19c width 64 static fffffff007c0e188 + 0x50
+  HEAD-LOAD +0x1bc width 64 adrp+ldr static fffffff007cacd80 block __const symbol DAT_fffffff007cacd80 flag-test "+0x158 tbnz w8;IMM0x5;ADDR"
+  ADRP +0x208 x8 page fffffff00b2fa000
+  HEAD-LOAD +0x20c width 64 adrp+ldr static fffffff00b2faa20 block __common symbol DAT_fffffff00b2faa20 flag-test "+0x1fc tbz w8;IMM0x1;ADDR"
+  ADRP +0x214 x20 page fffffff00b2f1000
+  ADRP +0x218 x28 page fffffff007c0e000
+  ADRP-ADD +0x21c x28 static fffffff007c0e188
+  ADRP +0x220 x23 page fffffff007cac000
+  HEAD-LOAD +0x274 width 64 adrp+ldr static fffffff00b2f1090 block __common symbol DAT_fffffff00b2f1090 flag-test "+0x250 tbnz w8;IMM0x5;ADDR"
+  FIELD-LOAD +0x294 width 64 static fffffff007c0e188 + 0x50
+  HEAD-LOAD +0x2b4 width 64 adrp+ldr static fffffff007cacd80 block __const symbol DAT_fffffff007cacd80 flag-test "+0x250 tbnz w8;IMM0x5;ADDR"
+  ADRP +0x308 x24 page fffffff007090000
+  ADRP-ADD +0x30c x24 static fffffff007090485
+  ADRP +0x3d8 x8 page fffffff00b2f1000
+  HEAD-LOAD +0x3dc width 64 adrp+ldr static fffffff00b2f1090 block __common symbol DAT_fffffff00b2f1090 flag-test "+0x390 tbnz w20;IMM0x6;ADDR"
+  ADRP +0x3e4 x10 page fffffff007c0e000
+  ADRP-ADD +0x3e8 x10 static fffffff007c0e188
+  HEAD-LOAD +0x3f0 width 64 adrp+add+ldr static fffffff007c0e188 block __const symbol DAT_fffffff007c0e188 flag-test "+0x390 tbnz w20;IMM0x6;ADDR"
+  FIELD-LOAD +0x404 width 64 static fffffff007c0e188 + 0x8
+  FIELD-LOAD +0x410 width 64 static fffffff007c0e188 + 0x50
+  ADRP +0x518 x0 page fffffff00b2f1000
+  ADRP-ADD +0x51c x0 static fffffff00b2f10e0
+  ADRP +0x5a8 x8 page fffffff007cac000
+  HEAD-LOAD +0x5ac width 64 adrp+ldr static fffffff007cacd80 block __const symbol DAT_fffffff007cacd80 flag-test "+0x58c tbz w20;IMM0x5;ADDR"
+  ADRP +0x5cc x0 page fffffff00b2f1000
+  ADRP-ADD +0x5d0 x0 static fffffff00b2f10e0
+  ADRP +0x5f8 x8 page fffffff00b2f1000
+  HEAD-LOAD +0x5fc width 64 adrp+ldr static fffffff00b2f1090 block __common symbol DAT_fffffff00b2f1090 flag-test "+0x5e8 tbnz w8;IMM0x4;ADDR"
+  ADRP +0x604 x10 page fffffff007c0e000
+  ADRP-ADD +0x608 x10 static fffffff007c0e188
+  HEAD-LOAD +0x610 width 64 adrp+add+ldr static fffffff007c0e188 block __const symbol DAT_fffffff007c0e188 flag-test "+0x5e8 tbnz w8;IMM0x4;ADDR"
+  FIELD-LOAD +0x624 width 64 static fffffff007c0e188 + 0x8
+  FIELD-LOAD +0x630 width 64 static fffffff007c0e188 + 0x50
+  ADRP +0x6b8 x8 page fffffff007cb9000
+  ADRP-ADD +0x6bc x8 static fffffff007cb9190
+  ADRP +0x748 x0 page fffffff00b2f1000
+  ADRP-ADD +0x74c x0 static fffffff00b2f10e0
+  ADRP +0x76c x9 page fffffff00708f000
+  ADRP-ADD +0x770 x9 static fffffff00708f68d
+  ADRP +0x774 x10 page fffffff00708f000
+  ADRP-ADD +0x778 x10 static fffffff00708f775
+  ADRP +0x784 x0 page fffffff00708f000
+  ADRP-ADD +0x788 x0 static fffffff00708f782
+  ADRP +0x79c x0 page fffffff00b2f1000
+  ADRP-ADD +0x7a0 x0 static fffffff00b2f10e0
+  ADRP +0x7bc x0 page fffffff00b2f1000
+  ADRP-ADD +0x7c0 x0 static fffffff00b2f10e0
+  ADRP +0x7e8 x9 page fffffff00708f000
+  ADRP-ADD +0x7ec x9 static fffffff00708f68d
+  ADRP +0x7f0 x10 page fffffff00708f000
+  ADRP-ADD +0x7f4 x10 static fffffff00708f775
+  ADRP +0x800 x0 page fffffff00708f000
+  ADRP-ADD +0x804 x0 static fffffff00708f753
+  ADRP +0x810 x8 page fffffff00708f000
+  ADRP-ADD +0x814 x8 static fffffff00708f68d
+  ADRP +0x820 x0 page fffffff00708f000
+  ADRP-ADD +0x824 x0 static fffffff00708faa3
+HEAD-LOAD-COUNT 12 width64 11 distinct64 5
+HEAD-STATIC 0 fffffff00b2faa18 block __common symbol DAT_fffffff00b2faa18
+HEAD-STATIC 1 fffffff00b2f1090 block __common symbol DAT_fffffff00b2f1090
+HEAD-STATIC 2 fffffff007cacd80 block __const symbol DAT_fffffff007cacd80
+HEAD-STATIC 3 fffffff00b2faa20 block __common symbol DAT_fffffff00b2faa20
+HEAD-STATIC 4 fffffff007c0e188 block __const symbol DAT_fffffff007c0e188
+ALLPROC-CANDIDATE-COUNT 1
+ALLPROC-CANDIDATE fffffff00b2faa18 (bit-0 guarded head load)
+ZOMBPROC-CANDIDATE-COUNT 1
+ZOMBPROC-CANDIDATE fffffff00b2faa20 (bit-1 guarded head load)
+ZOMBPROC-MINUS-ALLPROC 0x8
+  REF-TO fffffff00b2faa18 from fffffff008727808 in FUN_fffffff008727798 READ
+  REF-TO fffffff00b2faa18 from fffffff008724194 in FUN_fffffff008723ea8 READ
+  REF-TO fffffff00b2faa18 from fffffff0087241ac in FUN_fffffff008723ea8 READ
+  REF-TO fffffff00b2faa18 from fffffff0087241bc in FUN_fffffff008723ea8 WRITE
+  REF-TO fffffff00b2faa18 from fffffff0087241c0 in FUN_fffffff008723ea8 DATA
+  REF-TO fffffff00b2faa18 from fffffff0087324d0 in FUN_fffffff0087322ec READ
+  REF-TO fffffff00b2faa18 from fffffff008732590 in FUN_fffffff0087322ec READ
+  REF-TO fffffff00b2faa18 from fffffff0087c3164 in FUN_fffffff0087c3044 READ
+  REF-TO fffffff00b2faa18 from fffffff00872706c in FUN_fffffff008726f6c READ
+  REF-TO fffffff00b2faa18 from fffffff0086d61ac in FUN_fffffff0086d5d98 READ
+  REF-TO fffffff00b2faa18 from fffffff0086d61d0 in FUN_fffffff0086d5d98 READ
+  REF-TO fffffff00b2faa18 from fffffff0086d61e4 in FUN_fffffff0086d5d98 WRITE
+  REF-TO fffffff00b2faa18 from fffffff0086d61e8 in FUN_fffffff0086d5d98 DATA
+  REF-TO fffffff00b2faa18 from fffffff0086dc624 in FUN_fffffff0086dc4cc READ
+  REF-TO fffffff00b2faa18 from fffffff00872dfbc in FUN_fffffff00872dd14 READ
+  REF-TO-COUNT fffffff00b2faa18 15 functions 8
+  REF-TO-FUNCTION fffffff00b2faa18 FUN_fffffff008727798 1
+  REF-TO-FUNCTION fffffff00b2faa18 FUN_fffffff008723ea8 4
+  REF-TO-FUNCTION fffffff00b2faa18 FUN_fffffff0087322ec 2
+  REF-TO-FUNCTION fffffff00b2faa18 FUN_fffffff0087c3044 1
+  REF-TO-FUNCTION fffffff00b2faa18 FUN_fffffff008726f6c 1
+  REF-TO-FUNCTION fffffff00b2faa18 FUN_fffffff0086d5d98 4
+  REF-TO-FUNCTION fffffff00b2faa18 FUN_fffffff0086dc4cc 1
+  REF-TO-FUNCTION fffffff00b2faa18 FUN_fffffff00872dd14 1
+  REF-TO-COUNT fffffff00b2f1090 114 functions 81
+  REF-TO-COUNT fffffff007cacd80 981 functions 696
+  REF-TO-COUNT fffffff00b2faa20 8 functions 4
+  REF-TO-COUNT fffffff007c0e188 291 functions 211
+SYMBOL-MAP fffffff008727798 (unnamed)
+SYMBOL-MAP fffffff008723ea8 _pinsertchild
+SYMBOL-MAP fffffff0087322ec _proc_shutdown
+SYMBOL-MAP fffffff0087c3044 (unnamed)
+SYMBOL-MAP fffffff008726f6c _proc_iterate
+SYMBOL-MAP fffffff0086d5d98 _bsd_init
+SYMBOL-MAP fffffff0086dc4cc (unnamed)
+SYMBOL-MAP fffffff00872dd14 getpriority
+SYMBOL-MAP fffffff00b2faa18 (no symbol; nearest fffffff00b278bc8 mig_kern_subsystem / fffffff00b2fb9c0 OSArray::gMetaClass)
+
+## RESULT
+VM-SELF-CHECK scan unique match fffffe0007fc4ef0 allproc fffffe0009813020 == pin true; detail bit-0 candidate fffffe0009813020 == pin true; zombproc +8; 15 references from 8 functions
+PHONE-ALLPROC fffffff00b2faa18 (unique scan match == _proc_iterate; detail bit-0 candidate; zombproc fffffff00b2faa20 == +8; 15 references from 8 functions including _pinsertchild (LIST_INSERT_HEAD writer), _proc_shutdown, _bsd_init, getpriority)
+PHONE-ALLPROC-CANDIDATE-COUNT 1

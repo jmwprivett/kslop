@@ -70,6 +70,15 @@ CNDIconServicesPublisherAuditVariantInBatch(
     NSString *bundleIdentifier,
     NSDictionary<NSString *, NSNumber *> *descriptorSpecification);
 
+/// Audits an ordered descriptor matrix for one application. The transport
+/// reuses the app-scoped canonical icon/cache and current LaunchServices source
+/// identity while retaining independent per-descriptor cache/index/store
+/// evidence. The result's `audits` array preserves the requested order.
+NSDictionary<NSString *, id> *
+CNDIconServicesPublisherAuditVariantsInBatch(
+    NSString *bundleIdentifier,
+    NSArray<NSDictionary<NSString *, NSNumber *> *> *descriptorSpecifications);
+
 /*
  * Transport-neutral publisher result contract.
  *

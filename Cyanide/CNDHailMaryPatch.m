@@ -38,6 +38,14 @@ static const uint32_t kCNDHailMaryPatchReplacementWord =
  * produced the persistent patch: final guard read, kwrite32, no readback. */
 static const BOOL kCNDHailMaryPatchAttemptSpringBoardMlock = NO;
 
+/* Bounded control beats used by the .34 read-only-data page wire probe. They
+ * only ever mlock freshly mapped anonymous pages inside SpringBoard, so they
+ * can distinguish "this caller cannot mlocks" from "a read-only maxProt
+ * mapping cannot be mlocked" without touching system state. */
+static const uint64_t kCNDHailMaryPatchProtectionRead = UINT64_C(0x1);
+static const uint64_t kCNDHailMaryPatchProtectionReadWrite = UINT64_C(0x3);
+static const uint64_t kCNDHailMaryPatchMapPrivateAnonymous = UINT64_C(0x1002);
+
 static volatile int gCNDHailMaryPatchRunning;
 
 static NSString *CNDHailMaryPatchHex(uint64_t value)
@@ -278,6 +286,75 @@ static BOOL CNDHailMaryPatchTranslationPathMatches(
     return matches && terminalAddress != 0 && expectedTerminalValue != 0;
 }
 
+/* A wire may legitimately move one attribute bit in the leaf descriptor.
+ *
+ * Wiring is a property of one pmap. When the target page's leaf entry was
+ * shared between SpringBoard and Spotlight, the kernel must give SpringBoard a
+ * private entry before it can mark it wired. XNU marks that transition with
+ * ARM_PTE_NG (bit 11), the bit it also sets on every user PTE installed
+ * through pmap_enter (osfmk/arm/pmap/pmap.c). The first physical run on
+ * 23A341 changed exactly that bit and nothing else: same output address, same
+ * physical frame, same guard bytes. Accept only that single bit, and only
+ * when the output-address field (bits 47:12) did not move; any other delta is
+ * an identity change and fails closed. */
+static const uint64_t kCNDHailMaryPatchPrivateLeafEntryBit = 0x800;
+static const uint64_t kCNDHailMaryPatchLeafAddressMask =
+    UINT64_C(0x0000FFFFFFFFF000);
+
+static BOOL CNDHailMaryPatchTranslationPathMatchesAfterWire(
+    id candidate,
+    uint64_t expectedTerminalAddress,
+    uint64_t expectedTerminalValue,
+    uint64_t *observedTerminalValueOut,
+    uint64_t *deltaOut,
+    unsigned *changedBitsOut)
+{
+    if (![candidate isKindOfClass:NSArray.class]) return NO;
+    NSArray *path = candidate;
+    if (path.count != 3) return NO;
+
+    uint64_t observedTerminalValue = 0;
+    for (NSUInteger index = 0; index < path.count; index++) {
+        NSDictionary<NSString *, id> *node = path[index];
+        BOOL terminal = index == path.count - 1;
+        uint64_t entryAddress = 0;
+        uint64_t entryValue = 0;
+        if (![node isKindOfClass:NSDictionary.class] ||
+            [node[@"level"] unsignedIntegerValue] != index + 1 ||
+            [node[@"terminal"] boolValue] != terminal ||
+            !CNDHailMaryPatchParseHex(node[@"entryAddress"],
+                                      &entryAddress) ||
+            !CNDHailMaryPatchParseHex(node[@"entryValue"], &entryValue) ||
+            !is_kaddr_valid(entryAddress) || (entryAddress & 7U) != 0 ||
+            entryValue == 0) {
+            return NO;
+        }
+        uint64_t observedValue = kread64(entryAddress);
+        if (!terminal) {
+            /* Wiring touches only the leaf; the upper tables must not move. */
+            if (observedValue != entryValue) return NO;
+            continue;
+        }
+        if (entryAddress != expectedTerminalAddress ||
+            entryValue != expectedTerminalValue) {
+            return NO;
+        }
+        observedTerminalValue = observedValue;
+    }
+
+    if (observedTerminalValue == 0) return NO;
+    uint64_t delta = observedTerminalValue ^ expectedTerminalValue;
+    unsigned changedBits = 0;
+    for (uint64_t bits = delta; bits != 0; bits &= bits - 1) changedBits++;
+    if (observedTerminalValueOut) {
+        *observedTerminalValueOut = observedTerminalValue;
+    }
+    if (deltaOut) *deltaOut = delta;
+    if (changedBitsOut) *changedBitsOut = changedBits;
+    return (delta & kCNDHailMaryPatchLeafAddressMask) == 0 &&
+        (delta == 0 || delta == kCNDHailMaryPatchPrivateLeafEntryBit);
+}
+
 static NSDictionary<NSString *, id> *CNDHailMaryPatchValidateProof(
     NSDictionary<NSString *, id> *report,
     BOOL expectPatched,
@@ -493,9 +570,96 @@ static NSDictionary<NSString *, id> *CNDHailMaryPatchValidateProof(
     };
 }
 
-static NSDictionary<NSString *, id> *
+/* Read the target's per-thread errno slot immediately after a failing call.
+ * The synthetic call thread is persistent, so its TLS errno slot stays valid
+ * for the whole session; any intervening target-side call could overwrite the
+ * value we are trying to diagnose. */
+static int CNDHailMaryPatchTargetErrno(
+    uint64_t errnoAddress, BOOL *capturedOut)
+{
+    if (capturedOut) *capturedOut = NO;
+    if (errnoAddress == 0) return 0;
+    int value = 0;
+    if (!remote_read(errnoAddress, &value, sizeof(value))) return 0;
+    if (capturedOut) *capturedOut = YES;
+    return value;
+}
+
+static NSString *CNDHailMaryPatchErrnoDescription(
+    BOOL captured, int value)
+{
+    if (!captured) return @"unavailable";
+    const char *text = strerror(value);
+    return text ? [NSString stringWithUTF8String:text] : @"unknown";
+}
+
+/* One control beat: map a fresh 16 KiB anonymous page with the supplied
+ * protections, mlock it, and always unmap it again. Returns the observed
+ * outcome; never throws and never leaves a mapping behind. */
+static NSDictionary<NSString *, id> *CNDHailMaryPatchAnonymousMlockControl(
+    uint64_t errnoAddress,
+    uint64_t protections)
+{
+    uint64_t page = r_dlsym_call(
+        R_TIMEOUT, "mmap", 0, kCNDHailMaryPatchPageSize, protections,
+        kCNDHailMaryPatchMapPrivateAnonymous, UINT64_MAX, 0, 0, 0);
+    BOOL mapCallHealthy = remote_call_current_success();
+    BOOL mapFailed = page == UINT64_MAX || page == 0;
+    BOOL mapAligned = !mapFailed &&
+        (page & (kCNDHailMaryPatchPageSize - 1)) == 0;
+    BOOL mapErrnoCaptured = NO;
+    int mapErrno = 0;
+    if (mapCallHealthy && !mapAligned) {
+        mapErrno = CNDHailMaryPatchTargetErrno(
+            errnoAddress, &mapErrnoCaptured);
+    }
+
+    uint64_t mlockReturn = UINT64_MAX;
+    BOOL mlockCallHealthy = NO;
+    BOOL mlockErrnoCaptured = NO;
+    int mlockErrno = 0;
+    BOOL unmapCallHealthy = NO;
+    if (mapCallHealthy && mapAligned) {
+        mlockReturn = r_dlsym_call(
+            R_TIMEOUT, "mlock", page, kCNDHailMaryPatchPageSize,
+            0, 0, 0, 0, 0, 0);
+        mlockCallHealthy = remote_call_current_success();
+        if (mlockCallHealthy && mlockReturn != 0) {
+            mlockErrno = CNDHailMaryPatchTargetErrno(
+                errnoAddress, &mlockErrnoCaptured);
+        }
+        uint64_t unmapReturn = r_dlsym_call(
+            R_TIMEOUT, "munmap", page, kCNDHailMaryPatchPageSize,
+            0, 0, 0, 0, 0, 0);
+        unmapCallHealthy = remote_call_current_success() &&
+            unmapReturn == 0;
+    }
+
+    return @{
+        @"protections": CNDHailMaryPatchHex(protections),
+        @"page": CNDHailMaryPatchHex(page),
+        @"mapCallHealthy": @(mapCallHealthy),
+        @"mapFailed": @(mapFailed),
+        @"mapAligned": @(mapAligned),
+        @"mapErrno": @(mapErrno),
+        @"mapErrnoCaptured": @(mapErrnoCaptured),
+        @"mapErrnoDescription": CNDHailMaryPatchErrnoDescription(
+            mapErrnoCaptured, mapErrno),
+        @"mlockReturn": CNDHailMaryPatchHex(mlockReturn),
+        @"mlockCallHealthy": @(mlockCallHealthy),
+        @"mlockWired": @(mlockCallHealthy && mlockReturn == 0),
+        @"mlockErrno": @(mlockErrno),
+        @"mlockErrnoCaptured": @(mlockErrnoCaptured),
+        @"mlockErrnoDescription": CNDHailMaryPatchErrnoDescription(
+            mlockErrnoCaptured, mlockErrno),
+        @"unmapCallHealthy": @(unmapCallHealthy),
+    };
+}
+
+NSDictionary<NSString *, id> *
 CNDHailMaryPatchWireSpringBoardPage(
-    NSDictionary<NSString *, id> *context)
+    NSDictionary<NSString *, id> *context,
+    NSDictionary<NSString *, id> *options)
 {
     uint64_t targetVirtualAddress = 0;
     uint64_t expectedProc = 0;
@@ -590,6 +754,10 @@ CNDHailMaryPatchWireSpringBoardPage(
 
     BOOL identityBound = session.pid == expectedPID &&
         session.taskAddr == expectedTask;
+    BOOL runDiagnosticControls =
+        [options[@"diagnosticControls"] boolValue];
+    __block NSMutableDictionary<NSString *, id> *controls =
+        runDiagnosticControls ? [NSMutableDictionary dictionary] : nil;
     __block uint64_t mlockResult = UINT64_MAX;
     __block BOOL mlockErrnoAddressResolved = NO;
     __block BOOL mlockErrnoCaptured = NO;
@@ -608,11 +776,26 @@ CNDHailMaryPatchWireSpringBoardPage(
                 mlockErrnoAddressResolved =
                     remote_call_current_success() &&
                     remoteErrnoAddress != 0;
+
+                /* Both controls allocate only their own anonymous pages, so a
+                 * failure here is a property of mlock in this process rather
+                 * than of any system page. */
+                if (runDiagnosticControls && mlockErrnoAddressResolved) {
+                    controls[@"anonymousReadWrite"] =
+                        CNDHailMaryPatchAnonymousMlockControl(
+                            remoteErrnoAddress,
+                            kCNDHailMaryPatchProtectionReadWrite);
+                    controls[@"anonymousReadOnly"] =
+                        CNDHailMaryPatchAnonymousMlockControl(
+                            remoteErrnoAddress,
+                            kCNDHailMaryPatchProtectionRead);
+                }
+
                 mlockResult = r_dlsym_call(
                     R_TIMEOUT, "mlock", pageBase,
                     kCNDHailMaryPatchPageSize, 0, 0, 0, 0, 0, 0);
                 BOOL mlockCallHealthy = remote_call_current_success();
-                if (mlockCallHealthy && mlockResult == UINT64_MAX &&
+                if (mlockCallHealthy && mlockResult != 0 &&
                     mlockErrnoAddressResolved) {
                     int value = 0;
                     mlockErrnoCaptured = remote_read(
@@ -644,19 +827,20 @@ CNDHailMaryPatchWireSpringBoardPage(
     BOOL finalIdentity = finalProc == expectedProc &&
         finalTask == expectedTask &&
         strcmp(proc_get_p_name(finalProc) ?: "", "SpringBoard") == 0;
-    uint64_t finalPathTerminalAddress = 0;
-    uint64_t finalPathExpectedValue = 0;
     uint64_t finalLeafEntryValue = 0;
+    uint64_t finalLeafEntryDelta = 0;
+    unsigned finalLeafChangedBits = 0;
     BOOL translationPathStable = finalIdentity &&
-        CNDHailMaryPatchTranslationPathMatches(
-            springBoardTranslationPath, &finalPathTerminalAddress,
-            &finalPathExpectedValue, &finalLeafEntryValue) &&
-        finalPathTerminalAddress == springBoardLeafEntryAddress &&
-        finalPathExpectedValue == provenLeafEntryValue;
+        CNDHailMaryPatchTranslationPathMatchesAfterWire(
+            springBoardTranslationPath, springBoardLeafEntryAddress,
+            provenLeafEntryValue, &finalLeafEntryValue,
+            &finalLeafEntryDelta, &finalLeafChangedBits);
     BOOL leafStable = translationPathStable &&
         finalLeafEntryValue == provenLeafEntryValue;
+    BOOL privateLeafEntry = finalLeafEntryDelta ==
+        kCNDHailMaryPatchPrivateLeafEntryBit;
     BOOL ok = identityBound && remoteOK && mlockResult == 0 && closed &&
-        !teardownDeferred && finalIdentity && leafStable;
+        !teardownDeferred && finalIdentity && translationPathStable;
     NSString *mlockErrnoDescription = mlockErrnoCaptured
         ? ([NSString stringWithUTF8String:strerror(mlockErrno)] ?:
             @"unknown")
@@ -668,7 +852,9 @@ CNDHailMaryPatchWireSpringBoardPage(
         @"wired": @(ok),
         @"stage": ok ? @"springboard-page-wired" : @"springboard-page-wire-failed",
         @"message": ok
-            ? @"SpringBoard mlock wired the exact proven 16 KiB shared-cache page and its mapping identity remained stable."
+            ? (privateLeafEntry
+                ? @"SpringBoard mlock wired the exact proven 16 KiB shared-cache page. The kernel gave SpringBoard a private leaf entry (one attribute bit, ARM_PTE_NG); the output address and mapping identity did not move."
+                : @"SpringBoard mlock wired the exact proven 16 KiB shared-cache page and its mapping identity remained stable.")
             : @"SpringBoard did not retain one clean, identity-stable mlock of the proven shared-cache page.",
         @"expectedPID": @(expectedPID),
         @"sessionPID": @(session.pid),
@@ -695,8 +881,22 @@ CNDHailMaryPatchWireSpringBoardPage(
         @"expectedLeafEntryValue": CNDHailMaryPatchHex(
             provenLeafEntryValue),
         @"finalLeafEntryValue": CNDHailMaryPatchHex(finalLeafEntryValue),
+        @"leafEntryDelta": CNDHailMaryPatchHex(finalLeafEntryDelta),
+        @"leafEntryChangedBits": @(finalLeafChangedBits),
+        @"privateLeafEntry": @(privateLeafEntry),
     } mutableCopy];
     if (exceptionText) report[@"exception"] = exceptionText;
+    report[@"mlockLanded"] = @(
+        identityBound && remoteOK && mlockResult == 0);
+    report[@"diagnosticControlsRequested"] = @(runDiagnosticControls);
+    if (controls) report[@"diagnosticControls"] = [controls copy];
+    report[@"inverse"] = @{
+        @"operation": @"munlock",
+        @"process": @"SpringBoard",
+        @"pageBase": CNDHailMaryPatchHex(pageBase),
+        @"byteLength": @(kCNDHailMaryPatchPageSize),
+        @"releasedAutomaticallyOnSpringBoardExit": @YES,
+    };
     return report;
 }
 
@@ -913,7 +1113,7 @@ void CNDHailMaryPatchRun(CNDHailMaryPatchOperation operation,
 
             NSDictionary<NSString *, id> *pageWire = nil;
             if (apply && kCNDHailMaryPatchAttemptSpringBoardMlock) {
-                pageWire = CNDHailMaryPatchWireSpringBoardPage(context);
+                pageWire = CNDHailMaryPatchWireSpringBoardPage(context, nil);
             } else if (apply) {
                 pageWire = @{
                     @"ok": @YES,

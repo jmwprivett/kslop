@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 REMIX = ROOT / "Cyanide/installer/CNDSnowBoardRemix.m"
+SETTINGS = ROOT / "Cyanide/SettingsViewController.m"
 
 HARNESS = r'''
 static NSMutableDictionary *untouchedReport(void) {
@@ -184,14 +185,20 @@ class RemixRecoveryTests(unittest.TestCase):
         self.assertIn('BOOL ok = YES;', early)
         self.assertIn('@"persistentDataClean": @YES', early)
         self.assertIn('@"persistentRecoveryOK": @(ok)', early)
-        self.assertIn('@"journalCleanupOK": @(discardFailures == 0)', early)
+        self.assertIn('discardFailures == 0 &&', early)
+        self.assertIn('verifiedStockCleanupFailures == 0', early)
         self.assertIn('NSUInteger failed = 0, plannedVariants = 0;', self.restore)
-        self.assertIn("persistentClean = discardedUnmutated + discardFailures;", self.restore)
+        self.assertIn(
+            "persistentClean = discardedUnmutated + discardFailures +",
+            self.restore,
+        )
 
     def test_restore_checkpoints_only_the_descriptor_about_to_mutate(self) -> None:
         audit = self.restore.index("CNDIconServicesPublisherAuditVariantInBatch(")
         restoring = self.restore.index('dispatchVariant[@"state"] = @"restoring";')
-        checkpoint = self.restore.index("CNDRemixWriteIconServicesJournal(journal)", restoring)
+        checkpoint = self.restore.index(
+            "CNDRemixAppendIconServicesJournalCheckpoint(", restoring
+        )
         generation = self.restore.index("CNDIconServicesPublisherRestoreStockVariantInBatch(")
         self.assertLess(audit, restoring)
         self.assertLess(restoring, checkpoint)
@@ -203,36 +210,27 @@ class RemixRecoveryTests(unittest.TestCase):
         self.assertIn('@"ok": @(appVerified)', self.restore)
         self.assertIn('@"journalCleanupOK": @(journalCleanupFailures == 0)', self.restore)
 
-    def test_restore_springboard_session_is_not_skipped(self) -> None:
+    def test_restore_defers_springboard_cleanup_to_respring(self) -> None:
         helper_start = self.source.index(
-            "CNDRemixRestoreSpringBoardPresentationIfNeeded("
+            "CNDRemixDeferredSpringBoardPresentationRestore("
         )
         helper_end = self.source.index(
             "static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(",
             helper_start,
         )
         helper = self.source[helper_start:helper_end]
-        repair = helper.index(
-            "CNDIconServicesConsumerLifecycleRepairProcess("
-        )
-        self.assertGreater(repair, 0)
-        self.assertNotIn("springboard-session-not-required", helper)
-        self.assertIn("CNDRemixEnableSpringBoardCacheInvalidation", helper)
-        self.assertIn("CNDRemixRemoveSpringBoardDynamicPresentationState()", helper)
-        self.assertIn(
-            "CNDRemixRestoreSpringBoardPresentationIfNeeded(YES)",
-            self.restore,
-        )
+        self.assertIn('@"stage": @"deferred-to-respring"', helper)
+        self.assertIn('@"deferredToRespring": @YES', helper)
+        self.assertIn('@"remoteCallUsed": @NO', helper)
+        self.assertNotIn("CNDIconServicesConsumerLifecycleRepair", helper)
+        self.assertNotIn("CNDKernelTaskBridgeResolveProcessPID", helper)
+        self.assertNotIn("CNDRemixRestoreSpringBoardPresentationIfNeeded", self.source)
+        self.assertNotIn("CNDIconServicesConsumerLifecycleRepair", self.restore)
 
-    def test_dynamic_presentation_marker_is_pid_bound_and_durable(self) -> None:
-        self.assertIn(
-            '@"SpringBoardDynamicPresentation.plist"', self.source
-        )
-        self.assertIn(
-            'CNDKernelTaskBridgeResolveProcessPID(\n        @"SpringBoard"',
-            self.source,
-        )
-        self.assertIn("livePID == recordedPID", self.source)
+    def test_process_local_presentation_needs_no_durable_restore_marker(self) -> None:
+        self.assertNotIn('@"SpringBoardDynamicPresentation.plist"', self.source)
+        self.assertNotIn("CNDRemixWriteSpringBoardDynamicPresentationState", self.source)
+        self.assertNotIn("CNDRemixRemoveSpringBoardDynamicPresentationState", self.source)
         apply_start = self.source.index(
             "+ (NSDictionary<NSString *, id> *)applySpringBoardTweaks"
         )
@@ -241,19 +239,109 @@ class RemixRecoveryTests(unittest.TestCase):
             apply_start,
         )
         apply = self.source[apply_start:apply_end]
-        self.assertIn(
-            "CNDRemixWriteSpringBoardDynamicPresentationState(", apply
-        )
+        self.assertIn('@"dynamicPresentationStateRequired"', apply)
         self.assertIn('@"dynamicPresentationStateRecorded"', apply)
+        self.assertIn('@"presentationRestorePolicy"] = @"natural-respring"', apply)
         restore_all_start = self.source.index(
             "+ (NSDictionary<NSString *, id> *)restoreAllWithProgress:"
         )
         restore_all = self.source[restore_all_start:]
-        self.assertIn("hasLiveDynamicPresentation", restore_all)
-        self.assertIn(
-            "if (hasIconServicesJournals || hasLiveDynamicPresentation)",
-            restore_all,
+        self.assertNotIn("hasLiveDynamicPresentation", restore_all)
+        self.assertIn("if (hasIconServicesJournals)", restore_all)
+
+    def test_restore_reuses_verified_stock_checkpoints(self) -> None:
+        helper_start = self.source.index(
+            "static BOOL CNDRemixVariantHasVerifiedStockCheckpoint("
         )
+        helper_end = self.source.index(
+            "static BOOL CNDRemixJournalHasVerifiedStockCheckpoint(", helper_start
+        )
+        helper = self.source[helper_start:helper_end]
+        self.assertIn('isEqualToString:@"persistent-stock-verified"', helper)
+        self.assertIn("CNDIconServicesPublisherRestorationResultIsVerified", helper)
+        self.assertIn("CNDRemixAuditProvesSavedStock", helper)
+        skip = self.restore.index("skippedVerifiedStockVariants++;")
+        generation = self.restore.index(
+            "CNDIconServicesPublisherRestoreStockVariantInBatch("
+        )
+        self.assertLess(skip, generation)
+        self.assertIn('@"stage": @"verified-stock-checkpoint"', self.restore)
+        begin = self.restore.index("CNDIconServicesPublisherBeginBatch(")
+        cleanup = self.restore.index(
+            "CNDRemixJournalHasVerifiedStockCheckpoint(journal)"
+        )
+        self.assertLess(cleanup, begin)
+
+    def test_full_apply_is_not_debug_limited_by_default(self) -> None:
+        settings = SETTINGS.read_text(encoding="utf-8")
+        self.assertIn(
+            "kSettingsSnowBoardRemixDebugThreeAppLimit: @NO,", settings
+        )
+
+    def test_apply_cleanup_does_not_manufacture_a_persistent_retry(self) -> None:
+        start = self.source.index(
+            "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
+        )
+        end = self.source.index(
+            "CNDRemixDeferredSpringBoardPresentationRestore(", start
+        )
+        apply = self.source[start:end]
+        self.assertIn(
+            "BOOL persistentApplyOK = sessionClosed && !cancelled && failed == 0;",
+            apply,
+        )
+        self.assertIn("BOOL cleanupOK = presentationOK && indexOK;", apply)
+        self.assertIn("CNDRemixCoordinatorResult(persistentApplyOK,", apply)
+        self.assertIn('@"complete-cleanup-partial"', apply)
+
+    def test_apply_coalesces_result_and_next_dispatch_checkpoint(self) -> None:
+        start = self.source.index("BOOL currentDispatchCheckpointed = NO;")
+        end = self.source.index(
+            "BOOL failedPublicationVerifiedStock", start
+        )
+        publication_loop = self.source[start:end]
+        self.assertIn("if (!currentDispatchCheckpointed)", publication_loop)
+        result = publication_loop.index(
+            'variantJournal[@"publication"] ='
+        )
+        next_dispatch = publication_loop.index(
+            "NSMutableDictionary *nextDispatch", result
+        )
+        checkpoint = publication_loop.index(
+            "CNDRemixAppendIconServicesJournalCheckpoint(", next_dispatch
+        )
+        self.assertLess(result, next_dispatch)
+        self.assertLess(next_dispatch, checkpoint)
+        self.assertIn(
+            "currentDispatchCheckpointed =\n"
+            "                            batchHealthy && hasNext;",
+            publication_loop,
+        )
+
+    def test_descriptor_loops_use_bounded_deltas_not_full_journal_rewrites(self) -> None:
+        apply_start = self.source.index("for (NSUInteger variantIndex = 0;", self.source.index(
+            "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
+        ))
+        apply_end = self.source.index("BOOL appVerified =", apply_start)
+        apply_loop = self.source[apply_start:apply_end]
+        self.assertIn("CNDRemixAppendIconServicesJournalCheckpoint(", apply_loop)
+        self.assertNotIn("CNDRemixWriteIconServicesJournal(", apply_loop)
+
+        restore_start = self.restore.index("for (NSUInteger variantIndex = 0;")
+        restore_end = self.restore.index('journal[@"state"] = allVerified &&', restore_start)
+        restore_loop = self.restore[restore_start:restore_end]
+        self.assertIn("CNDRemixAppendIconServicesJournalCheckpoint(", restore_loop)
+        self.assertNotIn("CNDRemixWriteIconServicesJournal(", restore_loop)
+
+        helper_start = self.source.index(
+            "static BOOL CNDRemixAppendIconServicesJournalCheckpoint("
+        )
+        helper_end = self.source.index(
+            "static BOOL CNDRemixRemoveIconServicesJournal(", helper_start
+        )
+        helper = self.source[helper_start:helper_end]
+        self.assertIn("CNDRemixIconServicesCheckpointMaximumVariantUpdates", helper)
+        self.assertIn("variantIndexes.count", helper)
 
 
 if __name__ == "__main__":

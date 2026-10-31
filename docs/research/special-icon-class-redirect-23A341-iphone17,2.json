@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "purpose": "Offline derivation of a shared SBHIconModel Clock/Calendar special-class dispatch redirect; no writer included",
+  "purpose": "Offline derivation of the shared SBHIconModel method-list Clock/Calendar redirect; SpringBoard's live SBIconModel subclass inherits the selector, so the preoptimized cache entry is bypassed. No writer included.",
   "runtimeVerified": false,
   "os": {
     "productVersion": "26.0",
@@ -100,6 +100,41 @@
       "sha256": "acea5ab6a319392b3d2790ecb483dbae5df81e38bb15252e6311c0f4bdf18f0f"
     }
   },
+  "methodListRedirect": {
+    "entryUnslidVMAddress": "0x1be1ef2ec",
+    "impFieldUnslidVMAddress": "0x1be1ef2f4",
+    "writeOffsetWithinGuard": 8,
+    "originalImpWord": "0xfffae848",
+    "redirectedImpWord": "0xfffae6f4",
+    "originalImpUnslidVMAddress": "0x1be19db3c",
+    "replacementIMPUnslidVMAddress": "0x1be19d9e8",
+    "signedOriginalOffset": "0xfffae848",
+    "signedRedirectedOffset": "0xfffae6f4",
+    "entryBytesHex": "2d1089001867040048e8faff",
+    "redirectedEntryBytesHex": "2d10890018670400f4e6faff",
+    "entryValueLE": "0x00891800fffae848",
+    "redirectedEntryValueLE": "0x00891800fffae6f4",
+    "mapping": {
+      "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+      "fileName": "dyld_shared_cache_arm64e.19",
+      "initProt": 5,
+      "maxProt": 5
+    },
+    "guard": {
+      "unslidVMAddress": "0x1be1ef2ec",
+      "byteLength": 32,
+      "originalBytesHex": "2d1089001867040048e8faff0018890075470400dc59fbff00ac8900c8650400",
+      "originalSHA256": "acea5ab6a319392b3d2790ecb483dbae5df81e38bb15252e6311c0f4bdf18f0f",
+      "redirectedBytesHex": "2d10890018670400f4e6faff0018890075470400dc59fbff00ac8900c8650400",
+      "redirectedSHA256": "077d85cd71ab73be8630318eed46dfffe60d47814084bd639badae9e56ea72c3"
+    },
+    "subclassBypass": {
+      "runtimeModelClass": "SBIconModel",
+      "runtimeModelSuperclass": "SBHIconModel",
+      "runtimeEvidence": "Runtime audit lines: modelClass=SBIconModel; canonical and modelSelection remain SBHClockApplicationIcon / SBHCalendarApplicationIcon after the preoptimized-entry redirect.",
+      "reason": "SBIconModel has its own class object and method cache; it inherits iconClassForApplicationWithBundleIdentifier: and resolves the IMP from the superclass relative method list. The preoptimized entry belongs to exact SBHIconModel and is not consulted for subclass dispatch."
+    }
+  },
   "preoptimizedDispatchEntry": {
     "cacheHeaderUnslidVMAddress": "0x1ffc32e78",
     "cacheHeader": {
@@ -189,10 +224,20 @@
     "status": "offline-derived-runtime-unverified",
     "priorConfirmedReadOnlyEntry": "0x1ffc27458",
     "priorConfirmed16KPage": "0x1ffc24000",
-    "target16KPage": "0x1ffc30000",
+    "priorPreoptimizedTarget16KPage": "0x1ffc30000",
+    "target16KPage": "0x1be1ec000",
+    "targetPageIsTextSubcache": true,
     "samePageAsPriorPermissionProof": false,
-    "requiredNextStep": "Run an identical-bytes-only permission and shared-frame proof against this exact .34 page before a semantic write.",
-    "objectLifecycleCaveat": "The dispatch redirect changes future class selection; it does not reclassify Clock/Calendar icon objects that already exist in a consumer process.",
-    "staticRouteHypothesis": "After the redirect is installed and consumers rebuild their models, ordinary persistent mobiletimer/mobilecal IconServices records should supply static themed icons without per-PID source bridges. This remains a runtime test, not an offline proof."
+    "requiredNextStep": "Run an identical-bytes-only permission and shared-frame proof against this exact .19 method-list page before a semantic write.",
+    "objectLifecycleCaveat": "The method-list redirect changes future class selection; it does not reclassify Clock/Calendar icon objects that already exist in a consumer process.",
+    "staticRouteHypothesis": "After the method-list IMP redirect is installed and consumers rebuild their models, ordinary persistent mobiletimer/mobilecal IconServices records should supply static themed icons without per-PID source bridges. This remains a runtime test, not an offline proof."
+  },
+  "methodListWriteShape": {
+    "semanticWriteCount": 1,
+    "widthBits": 32,
+    "targetField": "relative method-list IMP field at guard +8",
+    "originalLowWord": "0xfffae848",
+    "redirectedLowWord": "0xfffae6f4",
+    "neighborBytesUnchanged": true
   }
 }

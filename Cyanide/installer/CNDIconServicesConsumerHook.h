@@ -155,4 +155,16 @@ NSDictionary<NSString *, id> *
 CNDIconServicesConsumerHookAuditSpringBoard(
     NSArray<NSString *> *bundleIdentifiers);
 
+/// Opens one exact PID-bound SpringBoard or Spotlight session and performs
+/// the bounded Clock/Calendar canonical-object migration. A dry run validates
+/// the complete model/application/layout ABI without invoking a mutating
+/// selector. Static mode requires the model to select SBHApplicationIcon;
+/// live mode requires the original Clock/Calendar subclasses.
+NSDictionary<NSString *, id> *
+CNDIconServicesConsumerHookRebuildSpecialIconClassesForPID(
+    pid_t pid,
+    NSString *expectedProcessName,
+    BOOL useStaticClasses,
+    BOOL dryRun);
+
 NS_ASSUME_NONNULL_END

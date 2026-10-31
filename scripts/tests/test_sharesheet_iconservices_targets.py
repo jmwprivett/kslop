@@ -90,7 +90,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
             "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
         )
         apply_end = self.remix.index(
-            "CNDRemixRestoreSpringBoardPresentationIfNeeded(", apply_start
+            "CNDRemixDeferredSpringBoardPresentationRestore(", apply_start
         )
         apply = self.remix[apply_start:apply_end]
         admission = apply.index(
@@ -101,7 +101,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         )
         bounded = apply[admission:publication]
         self.assertIn("CNDRemixSupportedPseudoBundleIdentifiers()", bounded)
-        self.assertIn("if (themeLookup[folded]", bounded)
+        self.assertIn("if (!repairLivePersistentRecords && themeLookup[folded]", bounded)
         self.assertIn("[matched addObject:pseudoBundleIdentifier]", bounded)
         self.assertNotIn("CNDIconServicesPublisherBeginBatch(", bounded)
 
@@ -110,14 +110,15 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
             "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
         )
         end = self.remix.index(
-            "CNDRemixRestoreSpringBoardPresentationIfNeeded(", start
+            "CNDRemixDeferredSpringBoardPresentationRestore(", start
         )
         apply = self.remix[start:end]
         installed_start = apply.index("for (NSString *bundleIdentifier in installed)")
         installed_end = apply.index("BOOL debugApplicationLimit", installed_start)
         self.assertIn(
             "CNDRemixIsSupportedPseudoBundleIdentifier(bundleIdentifier) &&\n"
-            "                    ![foldedBundleFilter containsObject:folded]) continue;",
+            "                    (repairLivePersistentRecords ||\n"
+            "                     ![foldedBundleFilter containsObject:folded])) continue;",
             apply[installed_start:installed_end],
         )
         admission = apply[apply.index("Pseudo-bundles are not part of"):]
@@ -159,7 +160,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         )
         self.assertIn(
             "CNDRemixApplyIconServicesTheme(\n"
-            "            target, NO, YES, nil, nil);", isolated_apply
+            "            target, NO, YES, NO, nil, nil);", isolated_apply
         )
         start = self.remix.index(
             "+ (NSDictionary<NSString *, id> *)restoreIsolatedAirDropTest"
@@ -178,7 +179,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
             "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
         )
         apply_end = self.remix.index(
-            "CNDRemixRestoreSpringBoardPresentationIfNeeded(", apply_start
+            "CNDRemixDeferredSpringBoardPresentationRestore(", apply_start
         )
         apply = self.remix[apply_start:apply_end]
         admission = apply.index("[SBR_SHARE] airdrop asset=")
@@ -249,7 +250,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
             "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
         )
         apply_end = self.remix.index(
-            "CNDRemixRestoreSpringBoardPresentationIfNeeded(", apply_start
+            "CNDRemixDeferredSpringBoardPresentationRestore(", apply_start
         )
         apply = self.remix[apply_start:apply_end]
         persistent = apply.index("[SBR_SHARE] airdrop active=")
@@ -331,7 +332,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
             "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
         )
         apply_end = remix.index(
-            "CNDRemixRestoreSpringBoardPresentationIfNeeded(", apply_start
+            "CNDRemixDeferredSpringBoardPresentationRestore(", apply_start
         )
         apply = remix[apply_start:apply_end]
         upgrade = apply.index("airDropSourceRegistryUpgradeRequired")
@@ -371,7 +372,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         self.assertIn(
             "CNDIconServicesSourceRegistryNodeHeader23A341", resolve
         )
-        self.assertIn("bucketReferenceAddress", resolve)
+        self.assertIn("bucketReferenceOffset", resolve)
         self.assertIn("uuidWords[0] ^ uuidWords[1]", resolve)
         self.assertNotIn('r_msg2(\n        registry, "dataForUUID:"', resolve)
 
@@ -386,7 +387,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         )
         self.assertNotIn('"dataForUUID:"', repair)
         self.assertIn("cnd_publisher_source_registry_entries(", repair)
-        self.assertIn('"msync", pageStart, syncLength, MS_SYNC', repair)
+        self.assertIn('"msync", writableMap, fileLength, MS_SYNC', repair)
         self.assertIn('r_msg2(registry, "release"', repair)
         self.assertIn("batch.auditSourceRegistry = 0;", repair)
         self.assertGreaterEqual(
@@ -484,7 +485,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         isolated_apply = self.remix[apply_start:apply_end]
         self.assertIn("NSSet<NSString *> *target = [NSSet setWithObject:", isolated_apply)
         self.assertIn("CNDRemixAirDropPseudoBundleIdentifier];", isolated_apply)
-        self.assertIn("NO, YES, nil, nil", isolated_apply)
+        self.assertIn("NO, YES, NO, nil, nil", isolated_apply)
         self.assertIn('@"ordinaryApplicationTargets"] = @0', isolated_apply)
         self.assertIn('@"expectedDescriptorCount"] = @2', isolated_apply)
         self.assertIn('@"airDropVerifiedSourceVariants"', isolated_apply)
@@ -493,7 +494,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
             "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
         )
         core_end = self.remix.index(
-            "static NSDictionary<NSString *, id> *\nCNDRemixRestoreSpringBoardPresentationIfNeeded(",
+            "static NSDictionary<NSString *, id> *\nCNDRemixDeferredSpringBoardPresentationRestore(",
             core_start,
         )
         core = self.remix[core_start:core_end]
@@ -536,7 +537,9 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         )
         audit = self.remix[audit_start:audit_end]
         self.assertIn("specifications.count != 2 || variants.count != 2", audit)
-        self.assertIn("CNDIconServicesPublisherAuditVariantInBatch(", audit)
+        self.assertIn("CNDIconServicesPublisherAuditVariantsInBatch(", audit)
+        self.assertIn('@"applicationContextSetupCount"', audit)
+        self.assertIn('@"applicationContextReuseCount"', audit)
         self.assertIn(
             "CNDRemixAppliedAuditRecordProvesThemedPersistence(record)", audit
         )
@@ -553,10 +556,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         )
         restore = self.remix[restore_start:restore_end]
         self.assertIn("BOOL isolatedAirDropOnly = bundleFilter.count == 1", restore)
-        self.assertIn(
-            "persistentThemeMutationWasRestored && !isolatedAirDropOnly",
-            restore,
-        )
+        self.assertNotIn("persistentThemeMutationWasRestored", restore)
         self.assertIn(
             "NSDictionary *restorePresentation = isolatedAirDropOnly",
             restore,
@@ -565,7 +565,9 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         self.assertIn(
             "CNDRemixRefreshAirDropPresentationIfNeeded(", restore
         )
-        self.assertIn('@"springBoardPresentationSkipped": @(isolatedAirDropOnly)', restore)
+        self.assertIn("CNDRemixDeferredSpringBoardPresentationRestore()", restore)
+        self.assertIn('@"springBoardPresentationSkipped": @YES', restore)
+        self.assertNotIn("CNDIconServicesConsumerLifecycleRepair", restore)
 
     def test_airdrop_recovery_accepts_only_byte_exact_stock_readback(self) -> None:
         proof_start = self.remix.index(

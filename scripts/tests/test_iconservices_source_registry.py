@@ -18,6 +18,7 @@ MOCKS = r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 static const NSUInteger CNDIconServicesPublisherMaximumPersistentIndexLength = 64U << 20;
 static const NSUInteger CNDIconServicesPublisherMaximumPersistentIdentifierLength = 128U;
@@ -54,17 +55,22 @@ static uint64_t r_msg2(uint64_t object, const char *selector,
 static uint64_t r_dlsym_call(uint64_t timeout, const char *symbol,
     uint64_t a, uint64_t b, uint64_t c, uint64_t d,
     uint64_t e, uint64_t f, uint64_t g, uint64_t h) {
-    (void)timeout; (void)d; (void)e; (void)f; (void)g; (void)h;
+    (void)timeout; (void)e; (void)f; (void)g; (void)h;
     if (!strcmp(symbol, "object_getClass")) return 1;
-    if (!strcmp(symbol, "CFDataGetLength")) return mapData.length;
-    if (!strcmp(symbol, "CFDataGetBytePtr")) return (uintptr_t)mapData.bytes;
-    if (strcmp(symbol, "memcpy")) return 0;
+    if (!strcmp(symbol, "fstat")) {
+        struct stat status = {0};
+        status.st_mode = S_IFREG | 0600;
+        status.st_size = mapData.length;
+        memcpy((void *)(uintptr_t)b, &status, sizeof(status));
+        return 0;
+    }
+    if (strcmp(symbol, "pread")) return 0;
+    (void)a;
     if (++copyNumber == rejectCopyNumber) return 0;
-    uintptr_t mapStart = (uintptr_t)mapData.bytes;
-    if (b < mapStart || b - mapStart > mapData.length ||
-        c > mapData.length - (b - mapStart)) abort();
-    memcpy((void *)(uintptr_t)a, (const void *)(uintptr_t)b, c);
-    return a;
+    if (d > mapData.length || c > mapData.length - d) return 0;
+    memcpy((void *)(uintptr_t)b,
+           (const uint8_t *)mapData.bytes + d, c);
+    return c;
 }
 static BOOL cnd_publisher_copy_remote_uuid_bytes(
     uint64_t uuid, uint64_t scratch, uint8_t bytes[16]) {
@@ -105,7 +111,8 @@ static uint64_t addNode(uint32_t offset, const uint8_t uuid[16],
 }
 static NSArray *readEntries(NSString **failure) {
     return cnd_publisher_source_registry_entries(
-        1, 1, (uintptr_t)scratchBytes, failure);
+        1, 1, (uintptr_t)scratchBytes,
+        1, mapData.length, failure);
 }
 static BOOL failedAt(NSString *expected) {
     NSString *failure = nil;
@@ -164,6 +171,8 @@ int main(void) {
         }
         rejectCopyNumber = 0;
 
+        resetMap(42); set32(0, 12); CHECK(failedAt(@"header"));
+        resetMap(42); set32(4, 2); CHECK(failedAt(@"header"));
         resetMap(42); set32(0x0c, 0); CHECK(failedAt(@"capacity"));
         resetMap(42); set32(0x10, 43); CHECK(failedAt(@"extent"));
         resetMap(42); set64(0x14, ((uint64_t)43 << 32));
@@ -204,7 +213,7 @@ int main(void) {
 
 
 class IconServicesSourceRegistryTests(unittest.TestCase):
-    def test_mapped_data_access_stays_inside_target_corefoundation(self) -> None:
+    def test_mapped_data_access_uses_separate_bounded_file_mapping(self) -> None:
         source = TRANSPORT.read_text(encoding="utf-8")
         reader_start = source.index(
             "static NSArray<NSData *> *cnd_publisher_source_registry_entries("
@@ -213,10 +222,22 @@ class IconServicesSourceRegistryTests(unittest.TestCase):
             "static BOOL cnd_publisher_source_array_contains_all(", reader_start
         )
         reader = source[reader_start:reader_end]
-        self.assertIn('"CFDataGetLength", mapData', reader)
-        self.assertIn('"CFDataGetBytePtr", mapData', reader)
+        self.assertIn("int fileDescriptor, uint64_t fileLength", reader)
+        self.assertIn('"pread", (uint64_t)fileDescriptor', reader)
+        self.assertNotIn('"CFDataGetLength"', reader)
+        self.assertNotIn('"CFDataGetBytePtr"', reader)
         self.assertNotIn('r_msg2(mapData, "length"', reader)
         self.assertNotIn('r_msg2(mapData, "bytes"', reader)
+
+        mapper_start = source.index(
+            "static uint64_t cnd_publisher_source_registry_map("
+        )
+        mapper = source[mapper_start:reader_start]
+        self.assertIn('"CFURLGetFileSystemRepresentation"', mapper)
+        self.assertIn("memchr(pathBytes, '\\0', sizeof(pathBytes))", mapper)
+        self.assertIn('(writableFile ? O_RDWR : O_RDONLY) | O_CLOEXEC', mapper)
+        self.assertIn('"fstat", (uint64_t)fileDescriptor, scratch', mapper)
+        self.assertNotIn('"mmap"', mapper)
 
         repair_start = source.index(
             "static BOOL cnd_publisher_repair_airdrop_source_registry("
@@ -226,10 +247,14 @@ class IconServicesSourceRegistryTests(unittest.TestCase):
             repair_start,
         )
         repair = source[repair_start:repair_end]
-        self.assertIn('"CFDataGetLength", mapData', repair)
-        self.assertIn('"CFDataGetBytePtr", mapData', repair)
+        self.assertNotIn('"CFDataGetLength"', repair)
+        self.assertNotIn('"CFDataGetBytePtr"', repair)
         self.assertNotIn('r_msg2(mapData, "length"', repair)
         self.assertNotIn('r_msg2(mapData, "bytes"', repair)
+        self.assertIn("batch.auditSourceRegistryFileDescriptor", repair)
+        self.assertIn("cnd_publisher_close_source_registry_file(batch)", repair)
+        self.assertIn("PROT_READ | PROT_WRITE, MAP_SHARED", repair)
+        self.assertIn('"msync", writableMap, fileLength, MS_SYNC', repair)
 
     def test_precise_readback_failure_survives_publication_reporting(self) -> None:
         source = TRANSPORT.read_text(encoding="utf-8")

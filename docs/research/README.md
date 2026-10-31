@@ -5,7 +5,10 @@ records through a pinned `iconservicesagent` session. The iOS 26.0 (`23A341`,
 `iPhone17,3`) descriptor profile comes from VM traces and physical-device
 checks. Apply and Restore use recovery journals that retain exact original
 stock records; Restore and application-update rebasing have been verified.
-**Update Repair** is a manual operation for newly installed or updated apps.
+**Update Repair** remains manually available and is also driven by the
+SnowBoard **Automatic Repair** mode. The mode coalesces application and
+LaunchServices notifications, runs periodic integrity audits, reuses only an
+already validated KRW session, and keeps the per-boot Transparency Fix active.
 SpringBoard cache invalidation is temporarily disabled while the consumer
 refresh path remains under investigation. The persistent index-token repair
 has host-build and static-test coverage; its full physical

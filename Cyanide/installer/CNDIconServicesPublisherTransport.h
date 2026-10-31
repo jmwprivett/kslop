@@ -23,6 +23,8 @@ NS_ASSUME_NONNULL_BEGIN
                                            descriptorSpecification:(NSDictionary<NSString *, NSNumber *> *)descriptorSpecification;
 - (NSDictionary<NSString *, id> *)auditBundleIdentifier:(NSString *)bundleIdentifier
                                   descriptorSpecification:(NSDictionary<NSString *, NSNumber *> *)descriptorSpecification;
+- (NSDictionary<NSString *, id> *)auditBundleIdentifier:(NSString *)bundleIdentifier
+                                descriptorSpecifications:(NSArray<NSDictionary<NSString *, NSNumber *> *> *)descriptorSpecifications;
 - (BOOL)isHealthy;
 - (NSDictionary<NSString *, id> *)finishBatch;
 

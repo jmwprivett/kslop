@@ -1,0 +1,142 @@
+PROGRAM com.apple.kernel base fffffff00700c000
+FINGERPRINT-LENGTH 20
+FINGERPRINT 0 ldrb w8;x1,IMM0x1
+FINGERPRINT 1 cbz w8;ADDR
+FINGERPRINT 2 cmp w8;IMM0x12
+FINGERPRINT 3 b.ne ADDR
+FINGERPRINT 4 ldrb w8;x1,IMM0x5
+FINGERPRINT 5 add x9;x1;IMM0xff
+FINGERPRINT 6 add x8;x1;x8
+FINGERPRINT 7 add x8;x8;IMM0x8
+FINGERPRINT 8 cmp x8;x9
+FINGERPRINT 9 ccmp x8;x1;IMM0x0;
+FINGERPRINT 10 b.cs ADDR
+FINGERPRINT 11 brk IMM0x5519
+FINGERPRINT 12 add x8;x1;IMM0x2
+FINGERPRINT 13 ldrb w8;x8
+FINGERPRINT 14 tst w8;IMM0x1
+FINGERPRINT 15 mov w8;IMM0x31
+FINGERPRINT 16 csel w0;w8;wzr;
+FINGERPRINT 17 ret
+FINGERPRINT 18 mov w0;IMM0x2f
+FINGERPRINT 19 ret
+STOCK-EXACT-BTI fffffff00849044c size 84 name FUN_fffffff00849044c (entry is `bti`; body offsets below are from the entry)
+  DIS 0 bti
+  DIS 4 ldrb w8;x1,IMM0x1
+  DIS 8 cbz w8;ADDR
+  DIS 12 cmp w8;IMM0x12
+  DIS 16 b.ne ADDR
+  DIS 20 ldrb w8;x1,IMM0x5
+  DIS 24 add x9;x1;IMM0xff
+  DIS 28 add x8;x1;x8
+  DIS 32 add x8;x8;IMM0x8
+  DIS 36 cmp x8;x9
+  DIS 40 ccmp x8;x1;IMM0x0;
+  DIS 44 b.cs ADDR
+  DIS 48 brk IMM0x5519
+  DIS 52 add x8;x1;IMM0x2
+  DIS 56 ldrb w8;x8
+  DIS 60 tst w8;IMM0x1
+  DIS 64 mov w8;IMM0x31
+  DIS 68 csel w0;w8;wzr;
+  DIS 72 ret
+  DIS 76 mov w0;IMM0x2f
+  DIS 80 ret
+  REF fffffff008494004 DATA
+  REF fffffff0084583e4 DATA
+  REF fffffff0084983f8 DATA
+  REF fffffff0084a02a4 DATA
+  REF-COUNT 4
+STOCK-EXACT-COUNT 0
+STOCK-EXACT-BTI-COUNT 1
+STOCK-MNEMONIC-COUNT 0
+OUTLINE-RUN-COUNT 419
+OUTLINE-RUN fffffff008a4b118 elements 6 values ldr:0x20,ldr:0x20,ldr:,ldr:0x4,ldr:0x8,str:0x8
+  LOAD-SEQUENCE at element 2 middle-ok true
+  LOAD-CANDIDATE element 2 at fffffff008a4b130 middle "ldr w0;x0"
+    DIS 0 bti
+    DIS 4 ldr w0;x0
+    DIS 8 ret
+    REF fffffff008a49c58 UNCONDITIONAL_CALL
+    REF fffffff008a49f80 UNCONDITIONAL_CALL
+OUTLINE-RUN fffffff008a4b590 elements 13 values ldr:0x18,str:0x18,mov:0x1,mov:0x1,mov:0x2,mov:0x4,mov:0x8,mov:0x1,mov:0x2,mov:0x4,mov:0x8,mov:0x4,mov:0x8
+  ENOEXEC-SEQUENCE at element 6 middle-ok true
+  ENOEXEC-CANDIDATE element 6 at fffffff008a4b5d8 middle "mov w0;IMM0x8"
+    DIS 0 bti
+    DIS 4 mov w0;IMM0x8
+    DIS 8 ret
+    REF none
+ENOEXEC-SEQUENCE-COUNT 1
+LOAD-SEQUENCE-COUNT 1
+GOT-CANDIDATE fffffff00849044c
+GOT-CANDIDATE-BLOCK __text
+GOT-CANDIDATE-FUNCTION FUN_fffffff00849044c entry fffffff00849044c size 84 offset-in-function 0
+  DIS 0 bti
+  DIS 4 ldrb w8;x1,IMM0x1
+  DIS 8 cbz w8;ADDR
+  DIS 12 cmp w8;IMM0x12
+  DIS 16 b.ne ADDR
+  DIS 20 ldrb w8;x1,IMM0x5
+  DIS 24 add x9;x1;IMM0xff
+  DIS 28 add x8;x1;x8
+  DIS 32 add x8;x8;IMM0x8
+  DIS 36 cmp x8;x9
+  DIS 40 ccmp x8;x1;IMM0x0;
+  DIS 44 b.cs ADDR
+  DIS 48 brk IMM0x5519
+  DIS 52 add x8;x1;IMM0x2
+  DIS 56 ldrb w8;x8
+  DIS 60 tst w8;IMM0x1
+  DIS 64 mov w8;IMM0x31
+  DIS 68 csel w0;w8;wzr;
+  DIS 72 ret
+  DIS 76 mov w0;IMM0x2f
+  DIS 80 ret
+  DIS 84 bti
+  DIS 88 mov w0;IMM0x66
+  DIS 92 ret
+  DIS 96 pacibsp
+  DIS 100 sub sp;sp;IMM0x20
+  DIS 104 stp x29;x30;sp,IMM0x10
+  DIS 108 add x29;sp;IMM0x10
+  DIS 112 adrp x16;-0xff7b70000
+  DIS 116 add x16;x16;IMM0x598
+  DIS 120 mov x17;IMM0x50c7
+  DIS 124 pacia x16;x17
+  DIS 128 mov x2;x16
+  DIS 132 adrp x16;-0xff7b6f000
+  DIS 136 add x16;x16;IMM0x400
+  DIS 140 mov x17;IMM0xd507
+  DIS 144 pacia x16;x17
+  DIS 148 mov x3;x16
+  DIS 152 mov w0;IMM0x2
+  DIS 156 mov w1;IMM0x2
+  DIFF 0 vm=ldrb w8;x1,IMM0x1 this=bti
+  DIFF 1 vm=cbz w8;ADDR this=ldrb w8;x1,IMM0x1
+  DIFF 2 vm=cmp w8;IMM0x12 this=cbz w8;ADDR
+  DIFF 3 vm=b.ne ADDR this=cmp w8;IMM0x12
+  DIFF 4 vm=ldrb w8;x1,IMM0x5 this=b.ne ADDR
+  DIFF 5 vm=add x9;x1;IMM0xff this=ldrb w8;x1,IMM0x5
+  DIFF 6 vm=add x8;x1;x8 this=add x9;x1;IMM0xff
+  DIFF 7 vm=add x8;x8;IMM0x8 this=add x8;x1;x8
+  DIFF 8 vm=cmp x8;x9 this=add x8;x8;IMM0x8
+  DIFF 9 vm=ccmp x8;x1;IMM0x0; this=cmp x8;x9
+  DIFF 10 vm=b.cs ADDR this=ccmp x8;x1;IMM0x0;
+  DIFF 11 vm=brk IMM0x5519 this=b.cs ADDR
+  DIFF 12 vm=add x8;x1;IMM0x2 this=brk IMM0x5519
+  DIFF 13 vm=ldrb w8;x8 this=add x8;x1;IMM0x2
+  DIFF 14 vm=tst w8;IMM0x1 this=ldrb w8;x8
+  DIFF 15 vm=mov w8;IMM0x31 this=tst w8;IMM0x1
+  DIFF 16 vm=csel w0;w8;wzr; this=mov w8;IMM0x31
+  DIFF 17 vm=ret this=csel w0;w8;wzr;
+  DIFF 18 vm=mov w0;IMM0x2f this=ret
+  DIFF 19 vm=ret this=mov w0;IMM0x2f
+GOT-CANDIDATE-EXACT false
+GOT-CANDIDATE-SAME-MNEMONIC 2/20
+GOT-CANDIDATE-AFTER-BTI-EXACT true
+GOT-CANDIDATE-AFTER-BTI-SAME-MNEMONIC 20/20
+  REF fffffff008494004 DATA
+  REF fffffff0084583e4 DATA
+  REF fffffff0084983f8 DATA
+  REF fffffff0084a02a4 DATA
+GOT-CANDIDATE-REF-COUNT 4

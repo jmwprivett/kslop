@@ -214,14 +214,21 @@ class RemixJournalStateTests(unittest.TestCase):
                           "/* AirDrop's activity identity")
         sha = section("static BOOL CNDRemixIsSHA256String(NSString *value)\n{",
                       "static NSString *CNDRemixPayloadPlatformIdentifier(")
-        stock = section("static BOOL CNDRemixAuditProvesSavedStock(",
-                        "static void CNDRemixLogIconServicesTransaction(")
+        stock_proof = section(
+            "static BOOL CNDRemixAuditProvesSavedStock(",
+            "static BOOL CNDRemixVariantHasVerifiedStockCheckpoint(",
+        )
+        reconcile = section(
+            "static BOOL CNDRemixReconcileAirDropJournalToCurrentStockInBatch(",
+            "static void CNDRemixLogIconServicesTransaction(",
+        )
         with tempfile.TemporaryDirectory(prefix="cyanide-journal-state-") as directory:
             source = Path(directory) / "journal.m"
             executable = Path(directory) / "journal"
             source.write_text(
                 "#import <Foundation/Foundation.h>\n#include <stdio.h>\n" +
-                MOCKS + catalog + sha + proof + stock + HARNESS, encoding="utf-8",
+                MOCKS + catalog + sha + proof + stock_proof + reconcile + HARNESS,
+                encoding="utf-8",
             )
             subprocess.run(["clang", "-fobjc-arc", "-framework", "Foundation",
                             str(source), "-o", str(executable)],
@@ -267,12 +274,25 @@ class RemixJournalStateTests(unittest.TestCase):
         self.assertLess(reconcile, block)
 
     def test_each_publication_has_a_durable_dispatch_checkpoint_and_result(self) -> None:
-        start = self.source.index('dispatchVariant[@"publicationDispatchPossible"] = @YES;')
-        checkpoint = self.source.index("CNDRemixWriteIconServicesJournal(journal)", start)
-        publish = self.source.index("CNDIconServicesPublisherPublishVariantInBatch(", start)
+        start = self.source.index("if (!currentDispatchCheckpointed)")
+        dispatch = self.source.index(
+            'dispatchVariant[@"publicationDispatchPossible"]', start
+        )
+        checkpoint = self.source.index(
+            "CNDRemixAppendIconServicesJournalCheckpoint(", dispatch
+        )
+        publish = self.source.index(
+            "CNDIconServicesPublisherPublishVariantInBatch(", checkpoint
+        )
         result = self.source.index('variantJournal[@"publication"] =', publish)
-        result_checkpoint = self.source.index("CNDRemixWriteIconServicesJournal(journal)", result)
+        next_dispatch = self.source.index(
+            "NSMutableDictionary *nextDispatch", result
+        )
+        result_checkpoint = self.source.index(
+            "CNDRemixAppendIconServicesJournalCheckpoint(", next_dispatch
+        )
         self.assertLess(checkpoint, publish)
+        self.assertLess(result, next_dispatch)
         self.assertLess(result, result_checkpoint)
         self.assertIn('@"publicationDispatchPossible": @NO', self.source[:start])
 

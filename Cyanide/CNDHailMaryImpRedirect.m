@@ -338,7 +338,8 @@ BOOL CNDHailMaryImpRedirectIsRunning(void)
     return __sync_fetch_and_add(&gCNDHailMaryImpRedirectRunning, 0) != 0;
 }
 
-void CNDHailMaryImpRedirectRun(
+void CNDHailMaryImpRedirectRunWithMode(
+    CNDHailMaryProofMode mode,
     CNDHailMaryImpRedirectOperation operation,
     CNDHailMaryImpRedirectCompletion completion)
 {
@@ -358,6 +359,8 @@ void CNDHailMaryImpRedirectRun(
         @"schemaVersion": @1,
         @"experiment": @"hail-mary-preoptimized-dispatch-cache-redirect",
         @"operation": CNDHailMaryImpOperationName(operation),
+        @"translationMode": mode == CNDHailMaryProofModeSpringBoardOnly
+            ? @"springboard-only" : @"shared-pair",
         @"productType": @CND_HAIL_MARY_IMP_PRODUCT,
         @"productBuildVersion": @CND_HAIL_MARY_IMP_BUILD,
         @"reportPath": reportPath,
@@ -441,16 +444,16 @@ void CNDHailMaryImpRedirectRun(
 
     BOOL expectRedirectedBefore =
         CNDHailMaryImpExpectedRedirectedBefore(operation);
-    CNDHailMaryProbeRun(^(NSDictionary<NSString *, id> *preflightProbe) {
+    CNDHailMaryProbeRunWithMode(mode, ^(NSDictionary<NSString *, id> *preflightProbe) {
         dispatch_async(dispatch_get_global_queue(
             QOS_CLASS_USER_INITIATED, 0), ^{
             report[@"preflightProbe"] = preflightProbe ?: @{};
             NSDictionary<NSString *, id> *beforeContext = nil;
             NSData *beforeGuard = nil;
             NSString *resolveError = nil;
-            if (!CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
-                    preflightProbe, expectRedirectedBefore,
-                    &beforeContext, &beforeGuard, &resolveError)) {
+            if (!CNDHailMaryReadOnlyDataPageResolveDispatchEntryWithMode(
+                    mode, preflightProbe, expectRedirectedBefore,
+                    &beforeContext, &beforeGuard, nil, &resolveError)) {
                 report[@"result"] = @"preflight-refused";
                 report[@"message"] = resolveError ?:
                     @"The exact dispatch-entry guard was not proven.";
@@ -474,8 +477,8 @@ void CNDHailMaryImpRedirectRun(
                     ? @"dispatch-entry-redirect-confirmed"
                     : @"dispatch-entry-original-confirmed";
                 report[@"message"] = expectRedirectedBefore
-                    ? @"The exact redirected dispatch entry and 32-byte guard are present through one stable shared physical frame."
-                    : @"The exact original dispatch entry and 32-byte guard are present through one stable shared physical frame.";
+                    ? @"The exact redirected dispatch entry and 32-byte guard are present through one stable physical frame."
+                    : @"The exact original dispatch entry and 32-byte guard are present through one stable physical frame.";
                 CNDHailMaryImpFinish(report, completion);
                 return;
             }
@@ -618,9 +621,9 @@ void CNDHailMaryImpRedirectRun(
             NSData *postWriteGuard = nil;
             NSString *postWriteError = nil;
             BOOL postWriteTranslation =
-                CNDHailMaryReadOnlyDataPageResolveDispatchEntry(
-                    preflightProbe, desiredRedirected,
-                    &postWriteContext, &postWriteGuard, &postWriteError) &&
+                CNDHailMaryReadOnlyDataPageResolveDispatchEntryWithMode(
+                    mode, preflightProbe, desiredRedirected,
+                    &postWriteContext, &postWriteGuard, nil, &postWriteError) &&
                 [postWriteContext[@"physicalFrame"]
                     isEqual:beforeContext[@"physicalFrame"]] &&
                 [postWriteContext[@"physicalAddress"]
@@ -641,7 +644,7 @@ void CNDHailMaryImpRedirectRun(
                 };
             if (!postWriteTranslation) {
                 report[@"result"] = @"postwrite-translation-unconfirmed";
-                report[@"message"] = @"The desired guard read back exactly, but the original two-process translation proof did not remain stable. No Spotlight restart was attempted.";
+                report[@"message"] = @"The desired guard read back exactly, but the original translation proof did not remain stable. No Spotlight restart was attempted.";
                 CNDHailMaryImpFinish(report, completion);
                 return;
             }
@@ -677,4 +680,12 @@ void CNDHailMaryImpRedirectRun(
             CNDHailMaryImpFinish(report, completion);
         });
     });
+}
+
+void CNDHailMaryImpRedirectRun(
+    CNDHailMaryImpRedirectOperation operation,
+    CNDHailMaryImpRedirectCompletion completion)
+{
+    CNDHailMaryImpRedirectRunWithMode(
+        CNDHailMaryProofModeSharedPair, operation, completion);
 }

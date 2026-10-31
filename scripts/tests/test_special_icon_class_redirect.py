@@ -86,7 +86,7 @@ class SpecialIconClassRedirectTests(unittest.TestCase):
         self.assertEqual(
             self.manifest["writeShape"]["semanticWriteCount"], 1)
 
-    def test_new_page_needs_its_own_permission_and_shared_frame_proof(self):
+    def test_historical_method_list_target_is_distinct_from_dispatch_page(self):
         dispatch = self.manifest["preoptimizedDispatchEntry"]
         mapping = dispatch["mapping"]
         boundary = self.manifest["runtimeBoundary"]
@@ -95,8 +95,11 @@ class SpecialIconClassRedirectTests(unittest.TestCase):
         self.assertFalse(boundary["samePageAsPriorPermissionProof"])
         self.assertNotEqual(boundary["priorConfirmed16KPage"],
                             boundary["target16KPage"])
-        self.assertEqual(boundary["target16KPage"],
+        self.assertEqual(boundary["priorPreoptimizedTarget16KPage"],
                          dispatch["frameUnslidVMAddress"])
+        self.assertNotEqual(boundary["target16KPage"],
+                            dispatch["frameUnslidVMAddress"])
+        self.assertTrue(boundary["targetPageIsTextSubcache"])
         self.assertEqual(boundary["status"],
                          "offline-derived-runtime-unverified")
 

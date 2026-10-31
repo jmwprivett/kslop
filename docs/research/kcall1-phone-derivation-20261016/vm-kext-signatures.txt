@@ -1,0 +1,460 @@
+ROLE checkmulti_got_donor fffffe000799f588
+BLOCK __got
+FUNCTION none
+GOT-RAW8 0x10000000d253fc
+REFERENCES-TO-GOT
+  fffffe0008f87be8 READ in FUN_fffffe0008f87a38@fffffe0008f87a38
+GOT-SYMBOL PTR_DAT_fffffe000799f588
+
+ROLE stock_callback fffffe0007d293fc
+BLOCK none-in-this-program
+FUNCTION none
+
+ROLE init_ifnet_params fffffe0008f87a38
+BLOCK __text
+FUNCTION FUN_fffffe0008f87a38 entry fffffe0008f87a38 size 492
+OFFSET_IN_FUNCTION 0
+DIS 0 pacibsp
+DIS 4 stp x20;x19;sp,-0x20
+DIS 8 stp x29;x30;sp,IMM0x10
+DIS 12 add x29;sp;IMM0x10
+DIS 16 mov x19;x1
+DIS 20 mov x20;x0
+DIS 24 adrp x8;-0x1fff865e000
+DIS 28 add x8;x8;IMM0x3f0
+DIS 32 add x9;x8;IMM0x6c0
+DIS 36 ldr x8;x8,IMM0x6c0
+DIS 40 mov x17;x9
+DIS 44 movk x17;IMM0xe2f
+DIS 48 blraa x8;x17
+DIS 52 ldr x16;x20
+DIS 56 mov x17;x20
+DIS 60 movk x17;IMM0xcda1
+DIS 64 autda x16;x17
+DIS 68 mov x17;IMM0x370
+DIS 72 add x16;x16;x17
+DIS 76 ldr x8;x16
+DIS 80 mov x9;x16
+DIS 84 mov x0;x20
+DIS 88 mov x17;x9
+DIS 92 movk x17;IMM0x93b7
+DIS 96 blraa x8;x17
+DIS 100 mov x17;x0
+DIS 104 ldr x16;x0
+DIS 108 movk x17;IMM0xcda1
+DIS 112 autda x16;x17
+DIS 116 mov x17;x16
+DIS 120 xpacd x17
+DIS 124 cmp x16;x17
+DIS 128 b.eq ADDR
+DIS 132 brk IMM0xc472
+DIS 136 add x8;x16;IMM0x118
+DIS 140 ldr x9;x16,IMM0x118
+DIS 144 adrp x1;-0x1fff8c8a000
+DIS 148 add x1;x1;IMM0xabf
+DIS 152 mov x17;x8
+DIS 156 movk x17;IMM0x37a5
+DIS 160 blraa x9;x17
+DIS 164 adrp x8;-0x1fff8661000
+DIS 168 ldr x8;x8,IMM0x520
+DIS 172 ldr x1;x8
+DIS 176 bl ADDR
+DIS 180 cbz x0;ADDR
+DIS 184 mov x20;x0
+DIS 188 ldr x16;x0
+DIS 192 mov x17;x0
+DIS 196 movk x17;IMM0xcda1
+DIS 200 autda x16;x17
+DIS 204 ldr x8;x16,IMM0xa0
+DIS 208 mov x9;x16
+DIS 212 mov x17;x9
+DIS 216 movk x17;IMM0xbb9b
+DIS 220 blraa x8;x17
+DIS 224 cmp w0;IMM0x6
+DIS 228 b.ne ADDR
+DIS 232 ldr x16;x20
+DIS 236 mov x17;x20
+DIS 240 movk x17;IMM0xcda1
+DIS 244 autda x16;x17
+DIS 248 ldr x8;x16,IMM0xd8
+DIS 252 mov x9;x16
+DIS 256 mov x0;x20
+DIS 260 mov x17;x9
+DIS 264 movk x17;IMM0xd240
+DIS 268 blraa x8;x17
+DIS 272 mov x17;x20
+DIS 276 str x0;x19
+DIS 280 ldr x16;x20
+DIS 284 movk x17;IMM0xcda1
+DIS 288 autda x16;x17
+DIS 292 mov x17;x16
+DIS 296 xpacd x17
+DIS 300 cmp x16;x17
+DIS 304 b.eq ADDR
+DIS 308 brk IMM0xc472
+DIS 312 add x8;x16;IMM0xa0
+DIS 316 ldr x9;x16,IMM0xa0
+DIS 320 mov x0;x20
+DIS 324 mov x17;x8
+DIS 328 movk x17;IMM0xbb9b
+DIS 332 blraa x9;x17
+DIS 336 str w0;x19,IMM0x8
+DIS 340 mov w8;IMM0x2
+DIS 344 str w8;x19,IMM0x1c
+DIS 348 adrp x16;-0x1fff8661000
+DIS 352 ldr x16;x16,IMM0x598
+DIS 356 mov x17;IMM0x61de
+DIS 360 pacia x16;x17
+DIS 364 str x16;x19,IMM0x30
+DIS 368 adrp x16;-0x1fff8661000
+DIS 372 ldr x16;x16,IMM0x580
+DIS 376 mov x17;IMM0x629a
+DIS 380 pacia x16;x17
+DIS 384 str x16;x19,IMM0x38
+DIS 388 adrp x16;-0x1fff8661000
+DIS 392 ldr x16;x16,IMM0x590
+DIS 396 mov x17;IMM0x50c7
+DIS 400 pacia x16;x17
+DIS 404 str x16;x19,IMM0x40
+DIS 408 adrp x16;-0x1fff8661000
+DIS 412 ldr x16;x16,IMM0x5a0
+DIS 416 mov x17;IMM0xe28a
+DIS 420 pacia x16;x17
+DIS 424 str x16;x19,IMM0x50
+DIS 428 adrp x16;-0x1fff8661000
+DIS 432 ldr x16;x16,IMM0x588
+DIS 436 mov x17;IMM0xe4fe
+DIS 440 pacia x16;x17
+DIS 444 str x16;x19,IMM0x48
+DIS 448 adrp x8;-0x1fff8c8a000
+DIS 452 add x8;x8;IMM0x990
+DIS 456 str x8;x19,IMM0x80
+DIS 460 mov w8;IMM0x6
+DIS 464 str w8;x19,IMM0x88
+DIS 468 mov w0;IMM0x1
+DIS 472 b ADDR
+DIS 476 mov w0;IMM0x0
+DIS 480 ldp x29;x30;sp,IMM0x10
+DIS 484 ldp x20;x19;sp,IMM0x20
+DIS 488 retab
+DIS 492 pacibsp
+DIS 496 stp x20;x19;sp,-0x20
+DIS 500 stp x29;x30;sp,IMM0x10
+DIS 504 add x29;sp;IMM0x10
+DIS 508 mov x19;x0
+DIS 512 ldr x0;x0,IMM0x128
+DIS 516 cbz x0;ADDR
+DIS 520 ldr x16;x0
+DIS 524 mov x17;x0
+DIS 528 movk x17;IMM0xcda1
+DIS 532 autda x16;x17
+DIS 536 ldr x8;x16,IMM0x28
+DIS 540 mov x9;x16
+DIS 544 mov x17;x9
+DIS 548 movk x17;IMM0x3a87
+DIS 552 blraa x8;x17
+DIS 556 str xzr;x19,IMM0x128
+REFERENCES-TO-FUNCTION
+  fffffe00099b4098 DATA
+
+ROLE stock_signer fffffe0008f87bf0
+BLOCK __text
+FUNCTION FUN_fffffe0008f87a38 entry fffffe0008f87a38 size 492
+OFFSET_IN_FUNCTION 440
+DIS 0 pacibsp
+DIS 4 stp x20;x19;sp,-0x20
+DIS 8 stp x29;x30;sp,IMM0x10
+DIS 12 add x29;sp;IMM0x10
+DIS 16 mov x19;x1
+DIS 20 mov x20;x0
+DIS 24 adrp x8;-0x1fff865e000
+DIS 28 add x8;x8;IMM0x3f0
+DIS 32 add x9;x8;IMM0x6c0
+DIS 36 ldr x8;x8,IMM0x6c0
+DIS 40 mov x17;x9
+DIS 44 movk x17;IMM0xe2f
+DIS 48 blraa x8;x17
+DIS 52 ldr x16;x20
+DIS 56 mov x17;x20
+DIS 60 movk x17;IMM0xcda1
+DIS 64 autda x16;x17
+DIS 68 mov x17;IMM0x370
+DIS 72 add x16;x16;x17
+DIS 76 ldr x8;x16
+DIS 80 mov x9;x16
+DIS 84 mov x0;x20
+DIS 88 mov x17;x9
+DIS 92 movk x17;IMM0x93b7
+DIS 96 blraa x8;x17
+DIS 100 mov x17;x0
+DIS 104 ldr x16;x0
+DIS 108 movk x17;IMM0xcda1
+DIS 112 autda x16;x17
+DIS 116 mov x17;x16
+DIS 120 xpacd x17
+DIS 124 cmp x16;x17
+DIS 128 b.eq ADDR
+DIS 132 brk IMM0xc472
+DIS 136 add x8;x16;IMM0x118
+DIS 140 ldr x9;x16,IMM0x118
+DIS 144 adrp x1;-0x1fff8c8a000
+DIS 148 add x1;x1;IMM0xabf
+DIS 152 mov x17;x8
+DIS 156 movk x17;IMM0x37a5
+DIS 160 blraa x9;x17
+DIS 164 adrp x8;-0x1fff8661000
+DIS 168 ldr x8;x8,IMM0x520
+DIS 172 ldr x1;x8
+DIS 176 bl ADDR
+DIS 180 cbz x0;ADDR
+DIS 184 mov x20;x0
+DIS 188 ldr x16;x0
+DIS 192 mov x17;x0
+DIS 196 movk x17;IMM0xcda1
+DIS 200 autda x16;x17
+DIS 204 ldr x8;x16,IMM0xa0
+DIS 208 mov x9;x16
+DIS 212 mov x17;x9
+DIS 216 movk x17;IMM0xbb9b
+DIS 220 blraa x8;x17
+DIS 224 cmp w0;IMM0x6
+DIS 228 b.ne ADDR
+DIS 232 ldr x16;x20
+DIS 236 mov x17;x20
+DIS 240 movk x17;IMM0xcda1
+DIS 244 autda x16;x17
+DIS 248 ldr x8;x16,IMM0xd8
+DIS 252 mov x9;x16
+DIS 256 mov x0;x20
+DIS 260 mov x17;x9
+DIS 264 movk x17;IMM0xd240
+DIS 268 blraa x8;x17
+DIS 272 mov x17;x20
+DIS 276 str x0;x19
+DIS 280 ldr x16;x20
+DIS 284 movk x17;IMM0xcda1
+DIS 288 autda x16;x17
+DIS 292 mov x17;x16
+DIS 296 xpacd x17
+DIS 300 cmp x16;x17
+DIS 304 b.eq ADDR
+DIS 308 brk IMM0xc472
+DIS 312 add x8;x16;IMM0xa0
+DIS 316 ldr x9;x16,IMM0xa0
+DIS 320 mov x0;x20
+DIS 324 mov x17;x8
+DIS 328 movk x17;IMM0xbb9b
+DIS 332 blraa x9;x17
+DIS 336 str w0;x19,IMM0x8
+DIS 340 mov w8;IMM0x2
+DIS 344 str w8;x19,IMM0x1c
+DIS 348 adrp x16;-0x1fff8661000
+DIS 352 ldr x16;x16,IMM0x598
+DIS 356 mov x17;IMM0x61de
+DIS 360 pacia x16;x17
+DIS 364 str x16;x19,IMM0x30
+DIS 368 adrp x16;-0x1fff8661000
+DIS 372 ldr x16;x16,IMM0x580
+DIS 376 mov x17;IMM0x629a
+DIS 380 pacia x16;x17
+DIS 384 str x16;x19,IMM0x38
+DIS 388 adrp x16;-0x1fff8661000
+DIS 392 ldr x16;x16,IMM0x590
+DIS 396 mov x17;IMM0x50c7
+DIS 400 pacia x16;x17
+DIS 404 str x16;x19,IMM0x40
+DIS 408 adrp x16;-0x1fff8661000
+DIS 412 ldr x16;x16,IMM0x5a0
+DIS 416 mov x17;IMM0xe28a
+DIS 420 pacia x16;x17
+DIS 424 str x16;x19,IMM0x50
+DIS 428 adrp x16;-0x1fff8661000
+DIS 432 ldr x16;x16,IMM0x588
+DIS 436 mov x17;IMM0xe4fe
+DIS 440 pacia x16;x17
+DIS 444 str x16;x19,IMM0x48
+DIS 448 adrp x8;-0x1fff8c8a000
+DIS 452 add x8;x8;IMM0x990
+DIS 456 str x8;x19,IMM0x80
+DIS 460 mov w8;IMM0x6
+DIS 464 str w8;x19,IMM0x88
+DIS 468 mov w0;IMM0x1
+DIS 472 b ADDR
+DIS 476 mov w0;IMM0x0
+DIS 480 ldp x29;x30;sp,IMM0x10
+DIS 484 ldp x20;x19;sp,IMM0x20
+DIS 488 retab
+DIS 492 pacibsp
+DIS 496 stp x20;x19;sp,-0x20
+DIS 500 stp x29;x30;sp,IMM0x10
+DIS 504 add x29;sp;IMM0x10
+DIS 508 mov x19;x0
+DIS 512 ldr x0;x0,IMM0x128
+DIS 516 cbz x0;ADDR
+DIS 520 ldr x16;x0
+DIS 524 mov x17;x0
+DIS 528 movk x17;IMM0xcda1
+DIS 532 autda x16;x17
+DIS 536 ldr x8;x16,IMM0x28
+DIS 540 mov x9;x16
+DIS 544 mov x17;x9
+DIS 548 movk x17;IMM0x3a87
+DIS 552 blraa x8;x17
+DIS 556 str xzr;x19,IMM0x128
+REFERENCES-TO-FUNCTION
+  fffffe00099b4098 DATA
+
+ROLE enoexec_return_stub fffffe00082f6a38
+BLOCK none-in-this-program
+FUNCTION none
+
+ROLE load_w0_from_x0_stub fffffe00082f6590
+BLOCK none-in-this-program
+FUNCTION none
+
+ROLE ifnet_x0_dispatcher fffffe0008f94a8c
+BLOCK __text
+FUNCTION FUN_fffffe0008f94a8c entry fffffe0008f94a8c size 28
+OFFSET_IN_FUNCTION 0
+DIS 0 bti
+DIS 4 ldr x16;x0,IMM0xb0
+DIS 8 cbz x16;ADDR
+DIS 12 ldr x0;x0,IMM0x90
+DIS 16 mov x17;IMM0xe4fe
+DIS 20 braa x16;x17
+DIS 24 ret
+DIS 28 bti
+DIS 32 ldr x16;x0,IMM0xb8
+DIS 36 cbz x16;ADDR
+DIS 40 ldr x0;x0,IMM0x90
+DIS 44 mov x17;IMM0xe4fe
+DIS 48 braa x16;x17
+DIS 52 ret
+DIS 56 pacibsp
+DIS 60 stp x20;x19;sp,-0x20
+DIS 64 stp x29;x30;sp,IMM0x10
+DIS 68 add x29;sp;IMM0x10
+DIS 72 mov x19;x1
+DIS 76 add x20;x1;IMM0x10
+DIS 80 ldr w8;x1,IMM0x10
+DIS 84 ldr x9;x0,IMM0x108
+DIS 88 ldr w10;x1,IMM0x18
+DIS 92 ldr w11;x9,IMM0x28
+DIS 96 ldr w12;x9,IMM0x3c
+DIS 100 subs w12;w11;w12
+DIS 104 cneg w12;w12;
+DIS 108 stp w10;w12;x9,IMM0x50
+DIS 112 str w11;x9,IMM0x3c
+DIS 116 ldr w10;x9,IMM0x34
+DIS 120 ldr w11;x9,IMM0x48
+DIS 124 subs w11;w10;w11
+DIS 128 cneg w11;w11;
+DIS 132 str w11;x9,IMM0x64
+DIS 136 add x3;x9;IMM0x4c
+DIS 140 stp w10;w8;x9,IMM0x48
+DIS 144 ldr x0;x0,IMM0x90
+DIS 148 ldr x1;x1
+DIS 152 ldr x2;x19,IMM0x8
+DIS 156 bl ADDR
+DIS 160 stp xzr;xzr;x19
+DIS 164 str wzr;x19,IMM0x18
+DIS 168 str wzr;x20,IMM0x4
+DIS 172 str wzr;x19,IMM0x10
+DIS 176 ldp x29;x30;sp,IMM0x10
+DIS 180 ldp x20;x19;sp,IMM0x20
+DIS 184 retab
+DIS 188 pacibsp
+DIS 192 sub sp;sp;IMM0x30
+DIS 196 stp x29;x30;sp,IMM0x20
+DIS 200 add x29;sp;IMM0x20
+DIS 204 orr w8;wzr;IMM0xaaaaaaaa
+DIS 208 str w8;sp,IMM0x1c
+DIS 212 mov w8;IMM0x1
+DIS 216 stp w8;w2;sp
+DIS 220 ldr x8;x0,IMM0x108
+DIS 224 ldr w9;x8,IMM0x28
+DIS 228 ldr w10;x8,IMM0x3c
+DIS 232 subs w10;w9;w10
+DIS 236 cneg w10;w10;
+DIS 240 str w10;sp,IMM0x8
+DIS 244 str w9;x8,IMM0x3c
+DIS 248 ldr w9;x8,IMM0x34
+DIS 252 str w9;x8,IMM0x48
+DIS 256 ldur q0;x8,IMM0x58
+DIS 260 stur q0;sp,IMM0xc
+DIS 264 ldr x0;x0,IMM0x90
+DIS 268 mov x3;sp
+DIS 272 mov x2;x1
+DIS 276 bl ADDR
+DIS 280 ldp x29;x30;sp,IMM0x20
+DIS 284 add sp;sp;IMM0x30
+DIS 288 retab
+DIS 292 pacibsp
+DIS 296 stp x20;x19;sp,-0x20
+DIS 300 stp x29;x30;sp,IMM0x10
+DIS 304 add x29;sp;IMM0x10
+DIS 308 ldr x1;x0,IMM0xf0
+DIS 312 ldr w19;x1,IMM0x10
+DIS 316 cbz w19;ADDR
+DIS 320 bl ADDR
+DIS 324 mov x0;x19
+DIS 328 ldp x29;x30;sp,IMM0x10
+DIS 332 ldp x20;x19;sp,IMM0x20
+DIS 336 retab
+DIS 340 pacibsp
+DIS 344 stp x20;x19;sp,-0x20
+DIS 348 stp x29;x30;sp,IMM0x10
+DIS 352 add x29;sp;IMM0x10
+DIS 356 ldr x8;x0,IMM0xf0
+DIS 360 ldr w19;x8,IMM0x10
+DIS 364 cbz w19;ADDR
+DIS 368 mov x20;x0
+DIS 372 ldr x0;x8
+DIS 376 bl ADDR
+DIS 380 ldr x8;x20,IMM0xf0
+DIS 384 stp xzr;xzr;x8
+DIS 388 add x9;x8;IMM0x10
+DIS 392 str wzr;x8,IMM0x18
+DIS 396 str wzr;x8,IMM0x10
+DIS 400 str wzr;x9,IMM0x4
+DIS 404 mov x0;x19
+DIS 408 ldp x29;x30;sp,IMM0x10
+DIS 412 ldp x20;x19;sp,IMM0x20
+DIS 416 retab
+DIS 420 pacibsp
+DIS 424 stp x26;x25;sp,-0x50
+DIS 428 stp x24;x23;sp,IMM0x10
+DIS 432 stp x22;x21;sp,IMM0x20
+DIS 436 stp x20;x19;sp,IMM0x30
+DIS 440 stp x29;x30;sp,IMM0x40
+DIS 444 add x29;sp;IMM0x40
+DIS 448 cbz x1;ADDR
+DIS 452 mov x20;x1
+DIS 456 mov x21;x0
+DIS 460 ldr x1;x0,IMM0x90
+DIS 464 cbz x1;ADDR
+DIS 468 mov x22;x4
+DIS 472 mov x23;x3
+DIS 476 mov x19;x2
+DIS 480 ldr x8;x21,IMM0x108
+DIS 484 ldr w24;x8,IMM0x18
+DIS 488 mov x0;x20
+DIS 492 bl ADDR
+DIS 496 mov x0;x20
+DIS 500 cbz w19;ADDR
+DIS 504 bl ADDR
+DIS 508 mov x26;x0
+DIS 512 mov w25;w19
+DIS 516 mov x0;x20
+DIS 520 mov x1;x25
+DIS 524 bl ADDR
+DIS 528 cbz x26;ADDR
+DIS 532 mov x25;x20
+DIS 536 mov x26;x19
+DIS 540 mov x0;x25
+DIS 544 bl ADDR
+DIS 548 cmp w26;w0
+DIS 552 b.cs ADDR
+DIS 556 mov w1;w26
+REFERENCES-TO-FUNCTION
+  fffffe00099b4268 DATA

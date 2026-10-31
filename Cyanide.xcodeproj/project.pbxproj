@@ -686,6 +686,8 @@
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					-lz,
+					"-framework",
+					IOKit,
 					"$(PROJECT_DIR)/Cyanide/XPF/output/ios/libxpf.dylib",
 				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (
@@ -760,6 +762,8 @@
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					-lz,
+					"-framework",
+					IOKit,
 					"$(PROJECT_DIR)/Cyanide/XPF/output/ios/libxpf.dylib",
 				);
 				"OTHER_LDFLAGS[sdk=iphonesimulator*]" = (

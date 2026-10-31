@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Swarm topology: interaction prototype</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--foreground); font: 14px var(--font-sans, system-ui); }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; opacity: .55; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+    .top, .controls, .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .top { justify-content: space-between; margin-bottom: 8px; }
+    .prototype { color: var(--muted-foreground); font-size: 12px; }
+    .stop { border: 1px solid var(--destructive); color: var(--foreground); background: color-mix(in srgb, var(--destructive) 60%, var(--background)); padding: 9px 15px; border-radius: 6px; font-weight: 700; }
+    .subtitle { color: var(--muted-foreground); font-size: 12px; line-height: 1.5; margin: 0 0 12px; }
+    .controls { margin-bottom: 12px; }
+    .control { color: var(--foreground); background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; font-size: 12px; }
+    .controls label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
+    .status { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px; font-size: 12px; line-height: 1.5; }
+    .status.stopped { border-color: var(--destructive); color: var(--destructive); }
+    .graph-wrap { height: 445px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius, 8px); background: var(--card); }
+    .canvas { position: relative; width: 700px; height: 425px; margin: 8px auto; }
+    .wires { position: absolute; inset: 0; pointer-events: none; }
+    .branch { stroke: color-mix(in srgb, var(--foreground) 35%, var(--card)); stroke-width: 2; fill: none; }
+    .cross { stroke: var(--chart-2); stroke-width: 1.5; stroke-dasharray: 5 5; fill: none; }
+    .goal { position: absolute; left: 235px; top: 5px; width: 230px; text-align: center; font-size: 12px; padding: 9px; border: 1px dashed var(--border); border-radius: 6px; color: var(--muted-foreground); }
+    .node { position: absolute; width: 198px; height: 84px; text-align: left; background: var(--card); color: var(--foreground); border: 1px solid var(--border); border-radius: 8px; padding: 10px; box-shadow: 0 2px 6px color-mix(in srgb, var(--foreground) 5%, transparent); }
+    .node.selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+    .node-title { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 5px; font-size: 13px; font-weight: 600; }
+    .dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: var(--chart-1); }
+    .node[data-state="waiting"] .dot { background: var(--warning); }
+    .node[data-state="verified"] .dot { background: var(--success); }
+    .node[data-state="stopped"] .dot { background: var(--destructive); }
+    .node-sub { font-size: 12px; display: block; margin-bottom: 5px; }
+    .node-meta { font-size: 10px; color: var(--muted-foreground); display: block; }
+    .legend { font-size: 11px; color: var(--muted-foreground); margin: 10px 0 12px; gap: 16px; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .line { height: 0; width: 20px; border-top: 2px solid color-mix(in srgb, var(--foreground) 35%, var(--card)); }
+    .line.dashed { border-top: 2px dashed var(--chart-2); }
+    .inspector { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius, 8px); padding: 16px; }
+    .inspector-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .inspector h2 { margin: 0; font-size: 15px; }
+    .detail { color: var(--muted-foreground); font-size: 12px; line-height: 1.5; margin: 9px 0 12px; }
+    .roster { display: grid; gap: 7px; }
+    .member { display: grid; grid-template-columns: 32px 1fr 110px; align-items: center; gap: 8px; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--border); }
+    .role { display: block; font-size: 11px; color: var(--muted-foreground); margin-top: 2px; }
+    .badge { justify-self: end; color: var(--chart-2); font-size: 10px; border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; }
+    .notes { font-size: 12px; color: var(--muted-foreground); line-height: 1.5; margin-top: 12px; }
+    .event { font: 11px var(--font-mono, monospace); color: var(--muted-foreground); margin-top: 8px; }
+    @media (max-width: 430px) { .member { grid-template-columns: 25px 1fr 85px; gap: 6px; } .badge { font-size: 9px; } .graph-wrap { height: 445px; } }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <span class="prototype">DESIGN PROTOTYPE · illustrative data · no live connections</span>
+    <button class="stop" id="stop" title="Demonstrates the global stop; no real processes are connected">STOP ALL</button>
+  </div>
+  <p class="subtitle">Select a team to inspect its peers. Add a sample branch or collapse descendants. The objective anchors the view; it is not a leader agent.</p>
+  <div class="controls">
+    <button class="control" id="add">Add example branch</button>
+    <button class="control" id="reset">Reset demo</button>
+    <label><input id="edges" type="checkbox">Communicator links</label>
+  </div>
+  <div id="status" class="status" role="status" aria-live="polite">Illustrative running state · no providers or real worker processes are connected.</div>
+  <div class="graph-wrap" aria-label="Expandable team creation tree; scroll horizontally on small screens">
+    <div class="canvas" id="canvas">
+      <svg class="wires" id="wires" width="700" height="425" viewBox="0 0 700 425" aria-hidden="true"></svg>
+      <div class="goal">Shared goal: parser change</div>
+      <div id="nodes"></div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><i class="line"></i>Created team</span>
+    <span><i class="line dashed"></i>Communicator-to-communicator link</span>
+    <span>C = the team's sole communicator</span>
+  </div>
+  <section class="inspector" aria-label="Selected team details">
+    <div class="inspector-head"><h2 id="selected-title">Team A</h2><button class="control" id="collapse">Collapse descendants</button></div>
+    <p class="detail" id="details"></p>
+    <div class="roster" id="roster"></div>
+    <div class="detail" id="evidence"></div>
+  </section>
+  <div class="event" id="event">example snapshot loaded</div>
+  <p class="notes">The production stop uses an independent supervisor. It must report local termination and unconfirmed remote cancellation separately. The button above changes this demonstration only.</p>
+  <script>
+    const baseTeams = [
+      {id:'A',parent:null,x:251,y:85,title:'Initial cell',task:'Parser change',state:'active',comm:'a3',why:'Three peers received the same goal; responsibilities are temporary.',evidence:'Evidence: verification pending. Calibrated reliability: unknown.',members:[['a1','Sol · high','Implementation'],['a2','Opus · medium','Evidence review'],['a3','DeepSeek','Contract exchange']]},
+      {id:'B',parent:'A',x:81,y:215,title:'Compatibility',task:'Independent compatibility check',state:'waiting',comm:'b3',why:'Recruited for an independent compatibility deliverable; waiting for a scoped leaf.',evidence:'Evidence: fixture audit outstanding. Calibrated reliability: unknown.',members:[['b1','DeepSeek','Compatibility inventory'],['b2','GLM','Dependency check'],['b3','DeepSeek','Contract exchange']]},
+      {id:'C',parent:'A',x:421,y:215,title:'Verification',task:'Verify current result',state:'active',comm:'c3',why:'Recruited to verify the current assembled result against acceptance criteria.',evidence:'Evidence: empty-input test receipt missing. Calibrated reliability: unknown.',members:[['c1','Opus · medium','Verification'],['c2','DeepSeek','Test collection'],['c3','DeepSeek','Contract exchange']]},
+      {id:'D',parent:'B',x:81,y:340,title:'Fixture audit',task:'Scoped leaf deliverable',state:'verified',comm:'d1',why:'Team B recruited a smaller leaf using the same protocol. The requesting team verifies its output.',evidence:'Illustrative evidence: accepted audit receipt. This is sample data, not a real test result.',members:[['d1','DeepSeek','Fixture inventory']]}
+    ];
+    const extraTeam = {id:'E',parent:'C',x:421,y:340,title:'Regression check',task:'New example branch',state:'active',comm:'e1',why:'Example recruitment by Team C. No model call or worker is launched.',evidence:'Evidence: pending. Calibrated reliability: unknown.',members:[['e1','GLM','Scoped regression check']]};
+    let teams = baseTeams.slice();
+    let selected = 'A';
+    let stopped = false;
+    const collapsed = new Set();
+    const $ = id => document.getElementById(id);
+    function visible(team) {
+      let p = team.parent;
+      while(p) {
+        if(collapsed.has(p)) return false;
+        p = teams.find(t=>t.id===p)?.parent;
+      }
+      return true;
+    }
+    function render() {
+      const shown = teams.filter(visible);
+      if(!shown.some(t=>t.id===selected)) selected='A';
+      const active = teams.find(t=>t.id===selected);
+      $('nodes').replaceChildren();
+      let wires = '<path class="branch" d="M350 43 V85"/>';
+      shown.forEach(t=>{
+        if(t.parent) {
+          const p=teams.find(a=>a.id===t.parent), sx=p.x+99, sy=p.y+84, tx=t.x+99, ty=t.y;
+          const mid=(sy+ty)/2;
+          wires += '<path class="branch" d="M'+sx+' '+sy+' V'+mid+' H'+tx+' V'+ty+'"/>';
+        }
+        const button=document.createElement('button');
+        button.className='node'+(t.id===selected?' selected':'');
+        button.style.left=t.x+'px'; button.style.top=t.y+'px';
+        button.dataset.state=stopped?'stopped':t.state;
+        button.setAttribute('aria-pressed',String(t.id===selected));
+        button.setAttribute('aria-label','Team '+t.id+': '+t.title);
+        const top=document.createElement('span'); top.className='node-title';
+        const title=document.createElement('span'); title.textContent='Team '+t.id+' · '+t.title;
+        const dot=document.createElement('i'); dot.className='dot';
+        top.append(title,dot);
+        const subtitle=document.createElement('span'); subtitle.className='node-sub'; subtitle.textContent=t.task;
+        const meta=document.createElement('span'); meta.className='node-meta';
+        meta.textContent=t.members.length+' peer'+(t.members.length===1?'':'s')+' · C: '+t.comm+' · '+(stopped?'stopped':t.state)+(collapsed.has(t.id)?' · collapsed':'');
+        button.append(top,subtitle,meta);
+        button.onclick=()=>{selected=t.id;render();};
+        $('nodes').append(button);
+      });
+      if($('edges').checked && shown.some(t=>t.id==='B') && shown.some(t=>t.id==='C')) wires += '<path class="cross" d="M279 257 H421"/>';
+      $('wires').innerHTML=wires;
+      $('selected-title').textContent='Team '+active.id+' · '+active.title;
+      $('details').textContent=active.why;
+      $('evidence').textContent=active.evidence;
+      $('roster').replaceChildren();
+      active.members.forEach(([id,model,role])=>{
+        const row=document.createElement('div'); row.className='member';
+        const identity=document.createElement('span'); identity.textContent=id;
+        const description=document.createElement('span'); description.textContent=model;
+        const responsibility=document.createElement('span'); responsibility.className='role'; responsibility.textContent=role;
+        description.append(responsibility);
+        row.append(identity,description);
+        const badge=document.createElement('span');
+        if(id===active.comm) {badge.className='badge';badge.textContent='Communicator';}
+        row.append(badge); $('roster').append(row);
+      });
+      const children=teams.some(t=>t.parent===selected);
+      $('collapse').disabled=!children;
+      $('collapse').textContent=collapsed.has(selected)?'Expand descendants':'Collapse descendants';
+      $('add').disabled=stopped || teams.some(t=>t.id==='E');
+      $('stop').disabled=stopped;
+    }
+    $('collapse').onclick=()=>{if(collapsed.has(selected)) collapsed.delete(selected);else collapsed.add(selected);render();};
+    $('edges').onchange=render;
+    $('add').onclick=()=>{
+      if(stopped || teams.some(t=>t.id==='E')) return;
+      teams.push(extraTeam);collapsed.delete('A');collapsed.delete('C');selected='E';
+      $('event').textContent='example event: team.created · C → E · no execution launched';render();
+    };
+    $('stop').onclick=()=>{
+      stopped=true;
+      $('status').className='status stopped';
+      $('status').textContent='DEMO STOP LATCHED · simulated admission closed · no real processes or provider requests are connected.';
+      $('event').textContent='example event: stop.latched · all example teams stopped · no automatic restart';render();
+    };
+    $('reset').onclick=()=>{
+      teams=baseTeams.slice();selected='A';stopped=false;collapsed.clear();$('edges').checked=false;
+      $('status').className='status';
+      $('status').textContent='Illustrative running state · no providers or real worker processes are connected.';
+      $('event').textContent='demo reset · no real swarm was re-armed';render();
+    };
+    render();
+  </script>
+</body>
+</html>

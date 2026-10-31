@@ -24,6 +24,34 @@ frame, leaf entry, process identity, byte window, or hash. SpringBoard and
 Spotlight must report one matching runtime VA and slide, and
 `runtime VA - slide` must equal the exact unslid VA above.
 
+## 2026-10-19: the production fix no longer requires Spotlight
+
+The Settings **Queue Transparency Fix** operation now runs both its redirect
+and its same-boot `.34` permission proof in `springboard-only` mode. It does
+not resolve, present, or require a Spotlight PID, and it does not require the
+two processes to agree on a frame.
+
+The mutation never used the second process: the redirect is one write to the
+frame named by a validated leaf, and the target is SpringBoard's mapping. The
+shared pair was corroboration, and `hail-mary-page-wire-probe.md` records a
+run where the pair legitimately resolved two different frames (a SpringBoard
+mlock moved SpringBoard's leaf to `0x101ca260000` while Spotlight stayed on
+`0x10137e40000`), and where a held wire made the shared-pair translator refuse
+outright. A gate that fails for reasons unrelated to the page is worse than
+the corroboration it buys.
+
+The standalone **Hail Mary Probe**, the legacy patch, the manual `.34`
+permission probe, and every `Verify` operation keep `shared-pair` as their
+default; only the transparency fix selects `CNDHailMaryProofModeSpringBoardOnly`.
+That mode still proves, through SpringBoard's own pmap: the pinned unslid VA,
+SpringBoard's shared-cache slide, one non-copy shared backing candidate, the
+guarded text frame and its 188-byte hash, the `.34` frame's 32-byte guard and
+hash, the frame offset, and the physmap KVA — and it records
+`translationMode: springboard-only` plus `singleProcess: true` so no report can
+be mistaken for the two-process evidence.
+
+Status: implemented and compiled; not yet exercised on the device in this mode.
+
 ## Transaction
 
 Apply requires the exact original guard; Restore requires the exact patched
@@ -37,7 +65,10 @@ guard. Both operations:
 4. atomically save and fully sync the prewrite journal file and its parent
    directory;
 5. record that SpringBoard `mlock` is deliberately skipped; the earlier exact
-   PID/proc/task-bound RemoteCall returned `EPERM` and never reached the write;
+   PID/proc/task-bound RemoteCall returned `EPERM` and never reached the write.
+   That attempt asked for a wire of **this text frame**; the same question for
+   the live `.34` read-only-data frame is a separate probe — see
+   `hail-mary-page-wire-probe.md`;
 6. atomically save and fully sync the `armed-legacy-landing-no-readback`
    journal;
 7. reproduce the legacy pre-write conditioning that produced the first known

@@ -1061,7 +1061,11 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
 
     def test_springboard_audit_uses_one_scoped_remote_session(self) -> None:
         start = self.hook.index("CNDIconServicesConsumerHookAuditSpringBoard(")
-        audit = self.hook[start:]
+        end = self.hook.index(
+            "CNDIconServicesConsumerHookRebuildSpecialIconClassesForPID(",
+            start,
+        )
+        audit = self.hook[start:end]
         self.assertEqual(audit.count("RemoteCallSession *session ="), 1)
         self.assertEqual(audit.count("remote_call_with_session(session, ^{"), 1)
         self.assertIn(
@@ -1159,23 +1163,20 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
         self.assertIn('@"springBoardCacheRefreshQueued": @NO', one_shot)
         self.assertIn('@"cacheInvalidationIssued": @YES', one_shot)
 
-    def test_restore_always_runs_the_selected_springboard_repair(self) -> None:
+    def test_restore_never_runs_a_springboard_repair(self) -> None:
         remix = (INSTALLER / "CNDSnowBoardRemix.m").read_text(encoding="utf-8")
         start = remix.index(
-            "CNDRemixRestoreSpringBoardPresentationIfNeeded("
+            "CNDRemixDeferredSpringBoardPresentationRestore("
         )
         end = remix.index(
             "static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(",
             start,
         )
         restore = remix[start:end]
-        self.assertIn("CNDRemixEnableSpringBoardCacheInvalidation", restore)
-        self.assertNotIn("springboard-session-not-required", restore)
-        self.assertIn(
-            "CNDIconServicesConsumerLifecycleRepairAfterThemeMutation(", restore
-        )
-        self.assertIn("CNDIconServicesConsumerLifecycleRepairProcess(", restore)
-        self.assertIn('@"disabled-experiment"', restore)
+        self.assertIn('@"stage": @"deferred-to-respring"', restore)
+        self.assertIn('@"remoteCallUsed": @NO', restore)
+        self.assertNotIn("CNDIconServicesConsumerLifecycleRepair", restore)
+        self.assertNotIn("init_remote_call", restore)
 
     def test_restore_separates_persistent_cleanliness_from_final_result(self) -> None:
         remix = (INSTALLER / "CNDSnowBoardRemix.m").read_text(encoding="utf-8")
@@ -1183,7 +1184,7 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
         self.assertIn('@"persistent-stock-verified"', remix)
         self.assertIn("if (appVerified) persistentClean++;", remix)
         self.assertIn('@"persistentDataClean"', remix)
-        self.assertIn('@"presentationCompleted": @YES', remix)
+        self.assertIn('@"presentationDeferredToRespring": @(!isolatedAirDropOnly)', remix)
         self.assertIn(
             "BOOL persistentRecoveryOK = persistentDataClean && !cancelled && failed == 0;",
             remix,

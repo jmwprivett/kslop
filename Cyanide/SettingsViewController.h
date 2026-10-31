@@ -9,6 +9,8 @@
 extern NSString * const kSettingsAutoRunKexploit;
 extern NSString * const kSettingsRunSandboxEscape;
 extern NSString * const kSettingsRunPatchSandboxExt;
+/// Backward-compatible preference key now presented as SnowBoard Automatic
+/// Repair. Enabling it also owns the background audio lifetime.
 extern NSString * const kSettingsKeepAlive;
 
 extern NSString * const kSettingsSBCEnabled;
@@ -98,6 +100,9 @@ extern NSString * const kSettingsLogUploadEnabled;
 extern NSString * const kSettingsActionsDidCompleteNotification;
 extern NSString * const kSettingsActionsDidCompleteSuccessKey;
 extern NSString * const kSettingsActionsDidCompleteMessageKey;
+/// Background repair results use the same success/message keys without
+/// completing a foreground settings action or its progress sheet.
+extern NSString * const kSettingsSnowBoardAutomaticRepairDidCompleteNotification;
 /// Private completion channel for a specific PackageQueue-owned settings run.
 /// Consumers must require an exact token match; generic settings notifications
 /// are intentionally not valid queue acknowledgements.
@@ -111,6 +116,19 @@ BOOL settings_tweak_is_applied(NSString *key);
 
 void settings_register_defaults(void);
 BOOL settings_device_supported(void);
+/// Reconciles Automatic Repair and audio against the preference, durable
+/// SnowBoard ACTIVE marker, and retained recovery data. Main-thread serialized.
+void settings_reconcile_snowboard_automatic_repair_lifetime(void);
+/// Starts/stops SnowBoard Automatic Repair and its background audio lifetime.
+/// Safe to call repeatedly, including once during application launch.
+void settings_apply_snowboard_automatic_repair_enabled(BOOL enabled);
+/// Shared ownership for automatic repair and queued SnowBoard Apply/Restore.
+/// Automatic repair tries without waiting; queue workers wait off-main.
+BOOL settings_begin_snowboard_mutation(BOOL wait);
+void settings_end_snowboard_mutation(void);
+/// Coalesces a post-operation Automatic Repair request. The request is ignored
+/// when the mode is disabled and never acquires KRW on its own.
+void settings_request_snowboard_automatic_repair(NSString *reason);
 // Opens the Contact email composer (MFMailComposeViewController if Mail is
 // configured, else mailto: fallback) prefilled with the latest diagnostic log
 // inline. Presented from `host`.
@@ -160,6 +178,11 @@ void settings_present_hide_home_bar_respring_prompt(UIViewController *host);
 void settings_present_system_edit_respring_prompt(UIViewController *host,
                                                   NSString *title,
                                                   NSString *message);
+
+// Probe-facing wrapper around the app's guarded acquisition.  Probes must never
+// call kexploit() directly: that bypasses the stale-state/recovery logic here and
+// crashes inside the page exploit's OOB read.
+bool settings_ensure_krw_for_probe(void);
 
 void settings_run_actions(void);
 void settings_run_pending_actions(void);
@@ -212,12 +235,60 @@ void settings_run_hail_mary_data_page_action(void);
 /// guard match in SpringBoard and Spotlight, then performs one no-op write.
 /// It never performs the dispatch-cache redirect or fallback.
 void settings_run_hail_mary_read_only_data_page_action(void);
+/// Runs the read-only SpringBoard `mlock` feasibility probe against the exact
+/// .34 read-only-data frame that carries the dispatch entry. It first proves
+/// the page identity in both processes, then mlocks that frame inside
+/// SpringBoard together with two self-owned control pages. It never calls a
+/// kernel write primitive and never changes a page byte.
+void settings_run_hail_mary_page_wire_action(void);
 /// Applies or restores the packed preoptimized dispatch-cache redirect with
 /// one low-word write after a same-boot .34 permission proof. Exact readback
 /// and stable translations are followed only by manual visual observation;
 /// no process is restarted after the write.
 void settings_run_hail_mary_imp_redirect_apply_action(void);
 void settings_run_hail_mary_imp_redirect_restore_action(void);
+/// Runs the special-icon-class `.34` identical-bytes permission probe. Its
+/// confirmed report is the same-boot ticket for the Clock/Calendar class
+/// selection redirect; it never performs the semantic write.
+void settings_run_hail_mary_special_icon_class_probe_action(void);
+/// Applies or restores the SBHIconModel special-class dispatch redirect with
+/// one low-word write after the special-icon-class permission proof. It leaves
+/// both consumers alive: a controlled respring is required before judging the
+/// static Clock/Calendar result. Verification operations never write.
+void settings_run_hail_mary_special_icon_class_apply_action(void);
+void settings_run_hail_mary_special_icon_class_restore_action(void);
+void settings_run_hail_mary_special_icon_class_verify_redirected_action(void);
+void settings_run_hail_mary_special_icon_class_verify_original_action(void);
+/// Runs the per-boot `.34.dyldreadonly` dispatch route for static Clock and
+/// Calendar icons. The permission action performs two identical low-word
+/// writes; Apply/Restore require its matching same-boot ticket and mutate only
+/// the packed low words. Verification operations are read-only.
+void settings_run_hail_mary_special_icon_class_dispatch_probe_action(void);
+void settings_run_hail_mary_special_icon_class_dispatch_apply_action(void);
+void settings_run_hail_mary_special_icon_class_dispatch_restore_action(void);
+void settings_run_hail_mary_special_icon_class_dispatch_verify_redirected_action(
+    void);
+void settings_run_hail_mary_special_icon_class_dispatch_verify_original_action(
+    void);
+/// Runs the read-only Clock/Calendar consumer audit from a launch argument.
+/// It reports the live model class, the inherited Method entry and IMP for
+/// `iconClassForApplicationWithBundleIdentifier:`, and the canonical/leaf
+/// icon classes. It never writes shared-cache memory.
+void settings_run_icon_class_audit_action(void);
+/// Reapplies the currently selected SnowBoard Remix theme through the same
+/// durable IconServices path used by the explicit Apply action. It does not
+/// rebuild, remove, or reclassify SpringBoard icon objects.
+void settings_run_snowboard_remix_reapply_action(void);
+/// Runs the zero-mutation two-consumer ABI/class/layout preflight for the
+/// static canonical-object migration selected by the dispatch redirect.
+void settings_run_special_icon_object_preflight_action(void);
+/// Rebuilds exactly Clock and Calendar in SpringBoard and Spotlight after the
+/// static dispatch redirect has been verified. SpringBoard positions must be
+/// equal before and after each replacement.
+void settings_run_special_icon_object_rebuild_static_action(void);
+/// Symmetric canonical-object rebuild after restoring Apple's original live
+/// Clock/Calendar class dispatch.
+void settings_run_special_icon_object_rebuild_live_action(void);
 /// Purges and rebuilds only the App Library category-miniature cache graph in
 /// one PID-bound SpringBoard session. It never changes the dispatch redirect
 /// or performs a process-lifecycle action.

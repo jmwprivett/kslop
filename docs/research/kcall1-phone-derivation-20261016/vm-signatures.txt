@@ -1,0 +1,186 @@
+ROLE checkmulti_got_donor fffffe000799f588
+BLOCK none-in-this-program
+FUNCTION none
+GOT-RAW8 none-in-this-program
+REFERENCES-TO-GOT
+GOT-SYMBOL none
+
+ROLE stock_callback fffffe0007d293fc
+BLOCK __text
+FUNCTION FUN_fffffe0007d293fc entry fffffe0007d293fc size 80
+OFFSET_IN_FUNCTION 0
+DIS 0 ldrb w8;x1,IMM0x1
+DIS 4 cbz w8;ADDR
+DIS 8 cmp w8;IMM0x12
+DIS 12 b.ne ADDR
+DIS 16 ldrb w8;x1,IMM0x5
+DIS 20 add x9;x1;IMM0xff
+DIS 24 add x8;x1;x8
+DIS 28 add x8;x8;IMM0x8
+DIS 32 cmp x8;x9
+DIS 36 ccmp x8;x1;IMM0x0;
+DIS 40 b.cs ADDR
+DIS 44 brk IMM0x5519
+DIS 48 add x8;x1;IMM0x2
+DIS 52 ldrb w8;x8
+DIS 56 tst w8;IMM0x1
+DIS 60 mov w8;IMM0x31
+DIS 64 csel w0;w8;wzr;
+DIS 68 ret
+DIS 72 mov w0;IMM0x2f
+DIS 76 ret
+DIS 80 mov w0;IMM0x66
+DIS 84 ret
+DIS 88 pacibsp
+DIS 92 sub sp;sp;IMM0x20
+DIS 96 stp x29;x30;sp,IMM0x10
+DIS 100 add x29;sp;IMM0x10
+DIS 104 adrp x16;-0x1fff82d7000
+DIS 108 add x16;x16;IMM0x540
+DIS 112 mov x17;IMM0x50c7
+DIS 116 pacia x16;x17
+DIS 120 mov x2;x16
+DIS 124 adrp x16;-0x1fff82d6000
+DIS 128 add x16;x16;IMM0x3a4
+DIS 132 mov x17;IMM0xd507
+DIS 136 pacia x16;x17
+DIS 140 mov x3;x16
+DIS 144 mov w0;IMM0x2
+DIS 148 mov w1;IMM0x2
+DIS 152 bl ADDR
+DIS 156 cbnz w0;ADDR
+DIS 160 adrp x16;-0x1fff82d6000
+DIS 164 add x16;x16;IMM0x3a8
+DIS 168 mov x17;IMM0x50c7
+DIS 172 pacia x16;x17
+DIS 176 mov x2;x16
+DIS 180 adrp x16;-0x1fff82d6000
+DIS 184 add x16;x16;IMM0x83c
+DIS 188 mov x17;IMM0xd507
+REFERENCES-TO-FUNCTION
+  fffffe0007d2cfac DATA
+  fffffe0007cf1168 DATA
+  fffffe0007d313e0 DATA
+  fffffe0007d39358 DATA
+
+ROLE init_ifnet_params fffffe0008f87a38
+BLOCK none-in-this-program
+FUNCTION none
+
+ROLE stock_signer fffffe0008f87bf0
+BLOCK none-in-this-program
+FUNCTION none
+
+ROLE enoexec_return_stub fffffe00082f6a38
+BLOCK __text
+FUNCTION FUN_fffffe00082f6a38 entry fffffe00082f6a38 size 12
+OFFSET_IN_FUNCTION 0
+DIS 0 bti
+DIS 4 mov w0;IMM0x8
+DIS 8 ret
+DIS 12 bti
+DIS 16 mov w0;IMM0x1
+DIS 20 ret
+DIS 24 bti
+DIS 28 mov w0;IMM0x2
+DIS 32 ret
+DIS 36 bti
+DIS 40 mov w0;IMM0x4
+DIS 44 ret
+DIS 48 bti
+DIS 52 mov w0;IMM0x8
+DIS 56 ret
+DIS 60 bti
+DIS 64 mov w0;IMM0x4
+DIS 68 ret
+DIS 72 bti
+DIS 76 mov w0;IMM0x8
+DIS 80 ret
+DIS 84 pacibsp
+DIS 88 stp x29;x30;sp,-0x10
+DIS 92 mov x29;sp
+DIS 96 ldr w8;x0
+DIS 100 cmp w8;IMM0x1
+DIS 104 b.ne ADDR
+DIS 108 ldr x8;x0,IMM0x50
+DIS 112 ldr x9;x8,IMM0x10
+DIS 116 adds x9;x9;x1
+DIS 120 b.cs ADDR
+DIS 124 ldr x8;x8,IMM0x18
+DIS 128 cmp x9;x8
+DIS 132 b.hi ADDR
+DIS 136 ldp x29;x30;sp,IMM0x10
+DIS 140 retab
+DIS 144 bl ADDR
+DIS 148 bl ADDR
+DIS 152 bl ADDR
+DIS 156 pacibsp
+DIS 160 stp x29;x30;sp,-0x10
+DIS 164 mov x29;sp
+DIS 168 ldr w8;x0
+DIS 172 cmp w8;IMM0x1
+DIS 176 b.ne ADDR
+DIS 180 ldr x8;x0,IMM0x50
+DIS 184 ldr x9;x8,IMM0x10
+DIS 188 adds x10;x9;IMM0x1
+REFERENCES-TO-FUNCTION
+
+ROLE load_w0_from_x0_stub fffffe00082f6590
+BLOCK __text
+FUNCTION FUN_fffffe00082f6590 entry fffffe00082f6590 size 12
+OFFSET_IN_FUNCTION 0
+DIS 0 bti
+DIS 4 ldr w0;x0
+DIS 8 ret
+DIS 12 bti
+DIS 16 ldr w0;x0,IMM0x4
+DIS 20 ret
+DIS 24 bti
+DIS 28 ldr x0;x0,IMM0x8
+DIS 32 ret
+DIS 36 bti
+DIS 40 str x1;x0,IMM0x8
+DIS 44 ret
+DIS 48 pacibsp
+DIS 52 sub sp;sp;IMM0x30
+DIS 56 stp x29;x30;sp,IMM0x20
+DIS 60 add x29;sp;IMM0x20
+DIS 64 mov w8;IMM0xb3
+DIS 68 adrp x9;-0x1fff8f54000
+DIS 72 add x9;x9;IMM0x271
+DIS 76 stp x9;x8;sp,IMM0x10
+DIS 80 stp x9;x8;sp
+DIS 84 adrp x0;-0x1fff8f54000
+DIS 88 add x0;x0;IMM0x231
+DIS 92 bl ADDR
+DIS 96 pacibsp
+DIS 100 sub sp;sp;IMM0x30
+DIS 104 stp x29;x30;sp,IMM0x20
+DIS 108 add x29;sp;IMM0x20
+DIS 112 mov w8;IMM0xb3
+DIS 116 adrp x9;-0x1fff8f54000
+DIS 120 add x9;x9;IMM0x271
+DIS 124 stp x9;x8;sp,IMM0x10
+DIS 128 stp x9;x8;sp
+DIS 132 adrp x0;-0x1fff8f54000
+DIS 136 add x0;x0;IMM0x231
+DIS 140 bl ADDR
+DIS 144 pacibsp
+DIS 148 sub sp;sp;IMM0x30
+DIS 152 stp x29;x30;sp,IMM0x20
+DIS 156 add x29;sp;IMM0x20
+DIS 160 mov w8;IMM0xb3
+DIS 164 adrp x9;-0x1fff8f54000
+DIS 168 add x9;x9;IMM0x271
+DIS 172 stp x9;x8;sp,IMM0x10
+DIS 176 stp x9;x8;sp
+DIS 180 adrp x0;-0x1fff8f54000
+DIS 184 add x0;x0;IMM0x231
+DIS 188 bl ADDR
+REFERENCES-TO-FUNCTION
+  fffffe00082f503c UNCONDITIONAL_CALL
+  fffffe00082f5388 UNCONDITIONAL_CALL
+
+ROLE ifnet_x0_dispatcher fffffe0008f94a8c
+BLOCK none-in-this-program
+FUNCTION none

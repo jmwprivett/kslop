@@ -138,6 +138,46 @@ class KRWSocketParkingTests(unittest.TestCase):
         self.assertLess(rw_register, control_register)
         self.assertIn("launchd retains the pointee socket", transfer)
 
+    def test_launchd_persistence_uses_exact_identity_single_thread_bootstrap(self) -> None:
+        transfer = self.persistence_function_body(
+            "bool krw_persistence_transfer_to_launchd(void)",
+            "static bool persist_consume_saved_token",
+        )
+        self.assertIn(
+            'init_remote_call_identity_bootstrap_original_thread_only(\n'
+            '            "launchd", kLaunchdIdentityBootstrapTimeoutMS)',
+            transfer,
+        )
+        self.assertNotIn('init_remote_call("launchd"', transfer)
+        self.assertIn("kLaunchdIdentityBootstrapTimeoutMS = 15000", self.persistence)
+
+        for exact_identity_field in (
+            "identityBootstrapRequested",
+            "identityMessageValid",
+            "identityThreadRightExact",
+            "identityTaskRightExact",
+            "identityHandlerRetained",
+            "identityInitialConversionSucceeded",
+            "identityInitialReplySucceeded",
+        ):
+            self.assertIn(f"launchdSnapshot.{exact_identity_field}", transfer)
+        self.assertIn("launchdSnapshot.pid != 1", transfer)
+
+    def test_persistence_is_saved_only_after_clean_launchd_teardown(self) -> None:
+        transfer = self.persistence_function_body(
+            "bool krw_persistence_transfer_to_launchd(void)",
+            "static bool persist_consume_saved_token",
+        )
+        teardown = transfer.index("int teardownResult = destroy_remote_call()")
+        teardown_check = transfer.index("if (teardownResult != 0)", teardown)
+        save = transfer.index("ok = persist_save_primitive", teardown_check)
+        self.assertLess(teardown, teardown_check)
+        self.assertLess(teardown_check, save)
+        self.assertIn("launchdWorkComplete = false", transfer[teardown_check:save])
+        self.assertIn('failureStage = "launchd-remote-call-teardown"', transfer)
+        self.assertIn("if (!remote_call_current_success())", transfer)
+        self.assertNotIn("\n    destroy_remote_call();", transfer)
+
     def test_transfer_failure_verifies_local_socket_park(self) -> None:
         entry = self.function_body("int kexploit_opa334(void)", "return 0;\n}")
         failure = entry[entry.index("if (!krw_persistence_transfer_to_launchd())") :]

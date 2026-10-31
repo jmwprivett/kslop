@@ -40,6 +40,9 @@ static NSString * const kSBCustomizerPackageIdentifier =
 @property (nonatomic, copy) NSArray<NSString *> *coordinatedToggleActionIdentifiers;
 @property (nonatomic) BOOL durableStoreUnavailable;
 - (void)beginPendingSettingsRunForCoordinator:(BOOL)coordinated;
+- (Package *)packageInArray:(NSArray<Package *> *)array
+                   matching:(Package *)package;
+- (Package *)packageForQueuedAction:(CNDQueuedAction *)action;
 - (BOOL)finalizeTransientAppliedStateForTransaction:
     (CNDQueuedTransaction *)transaction;
 - (BOOL)recordOrdinaryCurrentEpochStateForTransaction:
@@ -463,6 +466,119 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
     }
 }
 
+- (void)rebuildPackageCollectionsFromActions:
+    (NSArray<CNDQueuedAction *> *)actions
+{
+    [self.installs removeAllObjects];
+    [self.uninstalls removeAllObjects];
+    for (CNDQueuedAction *action in actions) {
+        if (![action.kind isEqualToString:CNDQueuedActionKindPackage]) continue;
+        Package *package = [self packageForQueuedAction:action];
+        if (!package) continue;
+        NSMutableArray<Package *> *target =
+            [action.operation isEqualToString:CNDQueuedActionOperationInstall]
+                ? self.installs : self.uninstalls;
+        if (![self packageInArray:target matching:package]) {
+            [target addObject:package];
+        }
+    }
+}
+
+/// Turns a stopped durable run back into an editable queue without carrying
+/// its old process boundary into newly added work. After a verified respring,
+/// completed actions belong to the old generation and only unfinished actions
+/// carry forward. Before the boundary, every action is made pending again so a
+/// newly edited plan cannot accidentally skip the respring it still owes.
+- (BOOL)prepareTransactionForQueueEditing:(NSString **)reason
+{
+    if (reason) *reason = nil;
+
+    CNDQueuedTransaction *snapshot = nil;
+    @synchronized (self) {
+        if (self.commitInFlight) {
+            if (reason) *reason = @"The current queue is still applying.";
+            return NO;
+        }
+        if (self.durableStoreUnavailable) {
+            if (reason) {
+                *reason = @"The saved queue could not be read safely. Preserve the queue file for diagnosis before trying another change.";
+            }
+            return NO;
+        }
+        snapshot = self.transaction;
+        if (!snapshot ||
+            snapshot.state == CNDQueuedTransactionStateCollecting) return YES;
+    }
+
+    pid_t currentSpringBoardPID = settings_current_springboard_pid();
+    NSTimeInterval currentBootEpoch = settings_current_boot_epoch();
+    BOOL fullBootChanged = snapshot.bootEpoch > 0.0 &&
+        currentBootEpoch > 0.0 &&
+        !CNDQueuedBootEpochMatches(snapshot.bootEpoch, currentBootEpoch);
+    BOOL hasRecordedBoundary = snapshot.preRespringSpringBoardPID > 1;
+    BOOL boundaryObserved = hasRecordedBoundary &&
+        (currentSpringBoardPID != snapshot.preRespringSpringBoardPID ||
+         fullBootChanged);
+
+    if (boundaryObserved &&
+        ![self finalizeTransientAppliedStateForTransaction:snapshot]) {
+        if (reason) {
+            *reason = @"The completed respring could not be finalized safely, so the saved queue was left unchanged.";
+        }
+        return NO;
+    }
+
+    BOOL completedWithoutBoundary =
+        snapshot.state == CNDQueuedTransactionStateCompleted &&
+        !hasRecordedBoundary;
+    NSMutableArray<CNDQueuedAction *> *editableActions =
+        [NSMutableArray array];
+    if (!completedWithoutBoundary) {
+        for (CNDQueuedAction *action in snapshot.actions) {
+            if (boundaryObserved &&
+                action.state == CNDQueuedActionStateSucceeded) continue;
+            [editableActions addObject:
+                [action actionByUpdatingState:CNDQueuedActionStatePending
+                                     lastError:nil]];
+        }
+    }
+
+    CNDQueuedTransaction *editableTransaction = editableActions.count > 0
+        ? [CNDQueuedTransaction collectingTransactionWithActions:editableActions]
+        : nil;
+    NSArray<Package *> *oldInstalls = nil;
+    NSArray<Package *> *oldUninstalls = nil;
+    BOOL saved = NO;
+    @synchronized (self) {
+        if (self.commitInFlight || self.transaction != snapshot) {
+            if (reason) *reason = @"The queue changed while it was being reopened.";
+            return NO;
+        }
+        oldInstalls = [self.installs copy];
+        oldUninstalls = [self.uninstalls copy];
+        self.transaction = editableTransaction;
+        [self rebuildPackageCollectionsFromActions:editableActions];
+        saved = [self persistDurableTransaction];
+        if (!saved) {
+            self.transaction = snapshot;
+            self.installs = [oldInstalls mutableCopy];
+            self.uninstalls = [oldUninstalls mutableCopy];
+        }
+    }
+    if (!saved) {
+        if (reason) *reason = @"The queue could not be reopened for editing.";
+        return NO;
+    }
+
+    if (hasRecordedBoundary && !boundaryObserved) {
+        CNDTransientAppliedStateCancelPreparedTransition(
+            snapshot.transactionIdentifier);
+    }
+    log_user("[QUEUE] Reopened saved transaction for editing boundary-observed=%d carried=%lu.\n",
+             boundaryObserved, (unsigned long)editableActions.count);
+    return YES;
+}
+
 - (BOOL)transactionNeedsCoordinator
 {
     @synchronized (self) {
@@ -720,29 +836,13 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
 {
     if (reason) *reason = nil;
     if (!package) return NO;
-    if (self.commitInFlight) {
-        if (reason) *reason = @"The current queue is still applying.";
-        return NO;
-    }
-    if ([self transactionExecutionHasStarted]) {
-        if (reason) {
-            *reason = @"Finish or retry the saved respring plan before editing the queue.";
-        }
-        return NO;
-    }
-    if (self.durableStoreUnavailable) {
-        if (reason) {
-            *reason = @"The saved queue could not be read safely. Preserve the queue file for diagnosis before trying another change.";
-        }
-        return NO;
-    }
     if (intent == PackageQueueIntentNone) return YES;
     if (package.kind == PackageInstallKindLockscreenGlyphs) {
         if (reason) *reason = @"Use the Lockscreen Glyphs Apply or Restore control.";
         return NO;
     }
 
-    return YES;
+    return [self prepareTransactionForQueueEditing:reason];
 }
 
 - (void)toggleForPackage:(Package *)package
@@ -793,8 +893,7 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
 
 - (void)removePackage:(Package *)package
 {
-    if (self.commitInFlight || self.durableStoreUnavailable ||
-        [self transactionExecutionHasStarted]) return;
+    if (![self prepareTransactionForQueueEditing:nil]) return;
     BOOL removed = NO;
     NSArray<Package *> *oldInstalls = nil;
     NSArray<Package *> *oldUninstalls = nil;
@@ -848,22 +947,6 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
                        reason:(NSString **)reason
 {
     if (reason) *reason = nil;
-    if (self.commitInFlight) {
-        if (reason) *reason = @"The current queue is still applying.";
-        return NO;
-    }
-    if ([self transactionExecutionHasStarted]) {
-        if (reason) {
-            *reason = @"Finish or retry the saved respring plan before editing the queue.";
-        }
-        return NO;
-    }
-    if (self.durableStoreUnavailable) {
-        if (reason) {
-            *reason = @"The saved queue could not be read safely. Preserve the queue file for diagnosis before trying another change.";
-        }
-        return NO;
-    }
     NSString *shapeError = nil;
     if (!CNDQueuedActionHasSupportedShape(action, &shapeError) ||
         [action.kind isEqualToString:CNDQueuedActionKindPackage]) {
@@ -877,6 +960,7 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         if (reason) *reason = @"A newly queued action must be pending.";
         return NO;
     }
+    if (![self prepareTransactionForQueueEditing:reason]) return NO;
 
     CNDQueuedTransaction *oldTransaction = nil;
     @synchronized (self) {
@@ -924,10 +1008,8 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
 
 - (BOOL)removeStandaloneActionForConflictKey:(NSString *)conflictKey
 {
-    if (conflictKey.length == 0 || self.commitInFlight ||
-        self.durableStoreUnavailable || [self transactionExecutionHasStarted]) {
-        return NO;
-    }
+    if (conflictKey.length == 0 ||
+        ![self prepareTransactionForQueueEditing:nil]) return NO;
 
     BOOL removed = NO;
     CNDQueuedTransaction *oldTransaction = nil;
@@ -1172,30 +1254,38 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
                         reason:(NSString **)reason
 {
     if (reason) *reason = nil;
-    NSDictionary<NSString *, id> *result = nil;
-    if ([action.operation isEqualToString:CNDQueuedActionOperationApplyTheme]) {
-        NSString *queuedTheme =
-            action.parameters[CNDQueuedActionParameterThemeIdentifier];
-        NSString *selectedTheme = [[NSUserDefaults standardUserDefaults]
-            stringForKey:kSettingsSnowBoardRemixSelectedThemeID] ?: @"";
-        if (![queuedTheme isEqualToString:selectedTheme]) {
-            if (reason) {
-                *reason = @"The selected SnowBoard theme changed after this plan was queued. Remove and queue Apply again.";
+    // Coordinator executors run on a worker queue. Wait for an in-flight
+    // automatic pass rather than failing the user's durable Apply/Restore.
+    settings_begin_snowboard_mutation(YES);
+    @try {
+        NSDictionary<NSString *, id> *result = nil;
+        if ([action.operation isEqualToString:CNDQueuedActionOperationApplyTheme]) {
+            NSString *queuedTheme =
+                action.parameters[CNDQueuedActionParameterThemeIdentifier];
+            NSString *selectedTheme = [[NSUserDefaults standardUserDefaults]
+                stringForKey:kSettingsSnowBoardRemixSelectedThemeID] ?: @"";
+            if (![queuedTheme isEqualToString:selectedTheme]) {
+                if (reason) {
+                    *reason = @"The selected SnowBoard theme changed after this plan was queued. Remove and queue Apply again.";
+                }
+                return NO;
             }
-            return NO;
+            result = settings_apply_snowboard_remix();
+        } else if ([action.operation isEqualToString:
+                       CNDQueuedActionOperationRestoreTheme]) {
+            result = settings_restore_all_snowboard_remix();
         }
-        result = settings_apply_snowboard_remix();
-    } else if ([action.operation isEqualToString:
-                   CNDQueuedActionOperationRestoreTheme]) {
-        result = settings_restore_all_snowboard_remix();
+        BOOL ok = [result[@"ok"] boolValue];
+        if (!ok && reason) {
+            *reason = [result[@"message"] isKindOfClass:NSString.class]
+                ? result[@"message"] : @"SnowBoard Remix did not complete.";
+        }
+        if (result) settings_invalidate_snowboard_remix_status_cache();
+        return ok;
+    } @finally {
+        settings_end_snowboard_mutation();
+        settings_reconcile_snowboard_automatic_repair_lifetime();
     }
-    BOOL ok = [result[@"ok"] boolValue];
-    if (!ok && reason) {
-        *reason = [result[@"message"] isKindOfClass:NSString.class]
-            ? result[@"message"] : @"SnowBoard Remix did not complete.";
-    }
-    if (result) settings_invalidate_snowboard_remix_status_cache();
-    return ok;
 }
 
 - (BOOL)executeTransparencyFixAction:(CNDQueuedAction *)action
@@ -1662,7 +1752,7 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
                 CNDQueuedActionOperationInstall]);
         }
     }
-    return CNDTransientAppliedStateFinalizeTransition(
+    BOOL finalized = CNDTransientAppliedStateFinalizeTransition(
         snapshot.transactionIdentifier,
         snapshot.preRespringSpringBoardPID,
         settings_current_springboard_pid(),
@@ -1671,6 +1761,10 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         snowBoardActive,
         fontChangerActive,
         sbCustomizerActive);
+    if (finalized && snowBoardActive != nil) {
+        settings_reconcile_snowboard_automatic_repair_lifetime();
+    }
+    return finalized;
 }
 
 - (BOOL)prepareBoundaryOnlyTransientAppliedStateForTransaction:
@@ -1693,13 +1787,17 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
                 CNDQueuedActionOperationInstall]);
         }
     }
-    return CNDTransientAppliedStatePrepareBoundaryOnlyTransition(
+    BOOL prepared = CNDTransientAppliedStatePrepareBoundaryOnlyTransition(
         snapshot.transactionIdentifier,
         springBoardPID,
         bootEpoch,
         generation,
         snowBoardActive,
         fontChangerActive);
+    if (prepared && snowBoardActive != nil) {
+        settings_reconcile_snowboard_automatic_repair_lifetime();
+    }
+    return prepared;
 }
 
 - (BOOL)recordOrdinaryCurrentEpochStateForTransaction:
@@ -1772,11 +1870,22 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         }
         self.commitInFlight = NO;
     }
+    BOOL completedSnowBoardAction = NO;
+    for (CNDQueuedAction *action in snapshot.actions) {
+        if ([action.kind isEqualToString:CNDQueuedActionKindSnowBoardRemix]) {
+            completedSnowBoardAction = YES;
+            break;
+        }
+    }
     [self notifyChange];
+    if (finalized && completedSnowBoardAction) {
+        settings_request_snowboard_automatic_repair(
+            @"queued SnowBoard transaction completed");
+    }
     [self postCompletionWithSuccess:finalized
         message:finalized
             ? (snapshot.preRespringSpringBoardPID > 1
-                ? @"Saved changes completed across the shared respring."
+                ? @"Saved changes completed after respring."
                 : @"Saved changes completed.")
             : @"All changes ran, but the completed queue checkpoint could not be cleared."];
 }

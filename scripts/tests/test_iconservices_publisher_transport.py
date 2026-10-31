@@ -72,6 +72,11 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertIn("[batch.transport publishBundleIdentifier:bundleIdentifier", self.facade)
         self.assertIn("[batch.transport restoreStockForBundleIdentifier:bundleIdentifier]", self.facade)
         self.assertIn("[batch.transport finishBatch]", self.facade)
+        self.assertIn(
+            "[batch.transport auditBundleIdentifier:bundleIdentifier\n"
+            "                         descriptorSpecifications:descriptorSpecifications]",
+            self.facade,
+        )
         self.assertIn("[transport publishBundleIdentifier:bundleIdentifier", self.facade)
         self.assertIn("[transport restoreStockForBundleIdentifier:bundleIdentifier]", self.facade)
 
@@ -169,7 +174,8 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertIn(
             "CNDIconServicesPublisherAuditMaximumSourceIdentifiers", helper
         )
-        self.assertIn("bucketReferenceAddress", helper)
+        self.assertIn("bucketReferenceOffset", helper)
+        self.assertIn('"pread", (uint64_t)fileDescriptor', helper)
         self.assertIn("uuidWords[0] ^ uuidWords[1]", helper)
         self.assertNotIn('"dataForUUID:", "@24@0:8@16"', helper)
         self.assertIn('"_ISMutableStoreIndex_mappedDataWithURL:"', helper)
@@ -451,13 +457,130 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         audit = remix[start:end]
         self.assertEqual(audit.count("CNDIconServicesPublisherBeginBatch("), 1)
         self.assertEqual(audit.count("CNDIconServicesPublisherFinishBatch()"), 1)
-        self.assertIn("CNDIconServicesPublisherAuditVariantInBatch(", audit)
+        self.assertIn("CNDIconServicesPublisherAuditVariantsInBatch(", audit)
+        self.assertIn("matrixApplicationContextSetupCount", audit)
+        self.assertIn("matrixApplicationContextReuseCount", audit)
         self.assertIn("CNDIconServicesConsumerHookAuditSpringBoard(", audit)
         self.assertNotIn("CNDRemixWriteJournal", audit)
         self.assertNotIn("CNDRemixRemoveJournal", audit)
         self.assertNotIn("CNDIconServicesPublisherPublish", audit)
         self.assertNotIn("CNDIconServicesPublisherRestore", audit)
         self.assertNotIn("CNDRemixReconcileAndRefreshSpringBoardCaches", audit)
+
+    def test_matrix_audit_reuses_only_application_scoped_remote_state(self) -> None:
+        state_start = self.adapter.index(
+            "@interface CNDIconServicesPublisherBatchState"
+        )
+        state_end = self.adapter.index("@end", state_start)
+        state = self.adapter[state_start:state_end]
+        for field in (
+            "auditApplicationBundleIdentifier",
+            "auditApplicationTargetBundle",
+            "auditApplicationLocalIcon",
+            "auditApplicationCanonicalIcon",
+            "auditApplicationCanonicalImageCache",
+            "auditApplicationSourceIdentifierData",
+            "auditApplicationSourceResolution",
+        ):
+            self.assertIn(field, state)
+        for descriptor_scoped_field in (
+            "auditDescriptor",
+            "auditCacheResponse",
+            "auditIndexedUUID",
+            "auditValidationToken",
+            "auditStoreUnit",
+        ):
+            self.assertNotIn(descriptor_scoped_field, state)
+
+        matrix_start = self.adapter.index(
+            "static NSDictionary<NSString *, id> *cnd_publisher_audit_matrix("
+        )
+        matrix_end = self.adapter.index(
+            "\n@implementation CNDIconServicesPublisherRemoteTransport",
+            matrix_start,
+        )
+        matrix = self.adapter[matrix_start:matrix_end]
+        self.assertIn("CNDIconServicesPublisherMaximumAuditMatrixCount", matrix)
+        self.assertIn(
+            "cnd_publisher_audit_variant(\n"
+            "            bundleIdentifier, specification, YES)",
+            matrix,
+        )
+        self.assertIn('@"applicationContextSetupCount"', matrix)
+        self.assertIn('@"applicationContextReuseCount"', matrix)
+        self.assertIn('@"sourceIdentityResolutionCount"', matrix)
+        self.assertIn('@"persistentMutationsIssued": @NO', matrix)
+        self.assertIn('@"generationIssued": @NO', matrix)
+        self.assertIn('@"storeWriteIssued": @NO', matrix)
+
+    def test_matrix_application_context_has_bounded_release_paths(self) -> None:
+        helper_start = self.adapter.index(
+            "static BOOL cnd_publisher_clear_audit_application_context("
+        )
+        helper_end = self.adapter.index(
+            "\n/* Observation-only state classifier", helper_start
+        )
+        helper = self.adapter[helper_start:helper_end]
+        self.assertIn('r_msg2(canonicalIcon, "release"', helper)
+        self.assertIn('r_msg2(localIcon, "release"', helper)
+        self.assertIn('r_msg2(targetBundle, "release"', helper)
+        self.assertIn("batch.auditApplicationCanonicalIcon = 0;", helper)
+        self.assertIn("batch.auditApplicationSourceIdentifierData = nil;", helper)
+
+        finish_start = self.adapter.index(
+            "- (NSDictionary<NSString *, id> *)finishBatch"
+        )
+        finish = self.adapter[finish_start:]
+        self.assertIn("auditApplicationContextCleanupNeeded", finish)
+        self.assertIn(
+            "cnd_publisher_clear_audit_application_context(state)", finish
+        )
+        self.assertIn('auditApplicationContextCleaned', finish)
+
+    def test_stock_publication_reuses_one_application_context_per_bundle(self) -> None:
+        start = self.adapter.index(
+            "cnd_publisher_run_stock_store(NSString *bundleIdentifier,"
+        )
+        end = self.adapter.index(
+            "\nstatic NSDictionary<NSString *, id> *\n"
+            "cnd_publisher_run(NSString *bundleIdentifier,",
+            start,
+        )
+        publication = self.adapter[start:end]
+        self.assertIn("batch.stockApplicationContextABIReady", publication)
+        self.assertIn(
+            "[batch.auditApplicationBundleIdentifier\n"
+            "                        isEqualToString:bundleIdentifier]",
+            publication,
+        )
+        self.assertIn(
+            "cnd_publisher_clear_audit_application_context(batch)",
+            publication,
+        )
+        self.assertIn(
+            "batch.auditApplicationCanonicalIcon =\n"
+            "                            retainedCanonicalIcon;",
+            publication,
+        )
+        self.assertIn("applicationContextReused = YES", publication)
+        self.assertIn("applicationContextCreated = YES", publication)
+        self.assertIn(
+            "applicationContextOwnedByBatch ? 0 : localIcon",
+            publication,
+        )
+        self.assertIn(
+            "applicationContextOwnedByBatch ? 0 : targetBundle",
+            publication,
+        )
+        for metric in (
+            '@"applicationContextReused"',
+            '@"applicationContextCreatedForVariant"',
+            '@"applicationContextOwnedByBatch"',
+            '@"applicationContextSerial"',
+            '@"applicationContextSetupSeconds"',
+            '@"applicationContextScope"',
+        ):
+            self.assertIn(metric, publication)
 
     def test_snowboard_operations_persist_their_diagnostic_log(self) -> None:
         settings = SETTINGS.read_text(encoding="utf-8")
@@ -813,7 +936,9 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertIn(
             "themeLookup, active", remix
         )
-        self.assertIn("SetStaticDynamicIconData(@{});", remix)
+        self.assertNotIn("SetStaticDynamicIconData(@{});", remix)
+        self.assertIn('@"presentationRestorePolicy"] = @"natural-respring"', remix)
+        self.assertIn('@"stage": @"deferred-to-respring"', remix)
         reconcile_start = remix.index(
             "CNDRemixReconcilePresentationLifecycle(void)"
         )
@@ -878,14 +1003,23 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
             "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
         )
         apply_end = remix.index(
-            "\nstatic NSDictionary<NSString *, id> *\nCNDRemixRestoreSpringBoardPresentationIfNeeded(",
+            "\nstatic NSDictionary<NSString *, id> *\nCNDRemixDeferredSpringBoardPresentationRestore(",
             apply_start,
         )
         apply = remix[apply_start:apply_end]
         self.assertIn("needsProfileExpansion", apply)
         self.assertIn("publicationSpecifications = missing;", apply)
         self.assertIn('preparedTarget[@"profileExpansionJournal"] = existing;', apply)
-        self.assertIn("CNDRemixJournalVariants(\n                                profileExpansionJournal)", apply)
+        self.assertIn(
+            "NSDictionary *retainedJournal =\n"
+            "                        profileExpansionJournal.count > 0\n"
+            "                            ? profileExpansionJournal : liveRepairJournal;",
+            apply,
+        )
+        self.assertIn(
+            "CNDRemixJournalVariants(\n                                retainedJournal)",
+            apply,
+        )
         self.assertIn("NSUInteger newVariantOffset = journalVariants.count;", apply)
         self.assertIn("newVariantOffset + variantIndex", apply)
         self.assertIn("} else if (needsProfileExpansion) {", apply)

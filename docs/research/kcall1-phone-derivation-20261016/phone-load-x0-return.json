@@ -1,0 +1,19 @@
+{
+  "schema": "cyanide.ghidra-load-x0-return.v1",
+  "program": "com.apple.kernel",
+  "matches": [
+    {"entry":"0xfffffff00826a458","name":"FUN_fffffff00826a458","hasBTI":true,"load":"ldrb w0,[x0]","assembly":["0xfffffff00826a458: bti c","0xfffffff00826a45c: ldrb w0,[x0]","0xfffffff00826a460: ret"]},
+    {"entry":"0xfffffff00826a464","name":"FUN_fffffff00826a464","hasBTI":true,"load":"ldrh w0,[x0]","assembly":["0xfffffff00826a464: bti c","0xfffffff00826a468: ldrh w0,[x0]","0xfffffff00826a46c: ret"]},
+    {"entry":"0xfffffff00826a470","name":"FUN_fffffff00826a470","hasBTI":true,"load":"ldr w0,[x0]","assembly":["0xfffffff00826a470: bti c","0xfffffff00826a474: ldr w0,[x0]","0xfffffff00826a478: ret"]},
+    {"entry":"0xfffffff00826a47c","name":"FUN_fffffff00826a47c","hasBTI":true,"load":"ldr x0,[x0]","assembly":["0xfffffff00826a47c: bti c","0xfffffff00826a480: ldr x0,[x0]","0xfffffff00826a484: ret"]},
+    {"entry":"0xfffffff0083dd338","name":"FUN_fffffff0083dd338","hasBTI":true,"load":"ldr x0,[x0]","assembly":["0xfffffff0083dd338: bti c","0xfffffff0083dd33c: ldr x0,[x0]","0xfffffff0083dd340: ret"]},
+    {"entry":"0xfffffff00842cd7c","name":"FUN_fffffff00842cd7c","hasBTI":true,"load":"ldr x0,[x0]","assembly":["0xfffffff00842cd7c: bti c","0xfffffff00842cd80: ldr x0,[x0]","0xfffffff00842cd84: ret"]},
+    {"entry":"0xfffffff00844a8d4","name":"FUN_fffffff00844a8d4","hasBTI":true,"load":"ldrb w0,[x0]","assembly":["0xfffffff00844a8d4: bti c","0xfffffff00844a8d8: ldrb w0,[x0]","0xfffffff00844a8dc: ret"]},
+    {"entry":"0xfffffff0086e87d0","name":"FUN_fffffff0086e87d0","hasBTI":true,"load":"ldrb w0,[x0]","assembly":["0xfffffff0086e87d0: bti c","0xfffffff0086e87d4: ldrb w0,[x0]","0xfffffff0086e87d8: ret"]},
+    {"entry":"0xfffffff0087596dc","name":"FUN_fffffff0087596dc","hasBTI":true,"load":"ldr x0,[x0]","assembly":["0xfffffff0087596dc: bti c","0xfffffff0087596e0: ldr x0,[x0]","0xfffffff0087596e4: ret"]},
+    {"entry":"0xfffffff008767f84","name":"FUN_fffffff008767f84","hasBTI":true,"load":"ldr x0,[x0]","assembly":["0xfffffff008767f84: bti c","0xfffffff008767f88: ldr x0,[x0]","0xfffffff008767f8c: ret"]},
+    {"entry":"0xfffffff008a49c38","name":"FUN_fffffff008a49c38","hasBTI":true,"load":"ldr x0,[x0]","assembly":["0xfffffff008a49c38: bti c","0xfffffff008a49c3c: ldr x0,[x0]","0xfffffff008a49c40: ret"]},
+    {"entry":"0xfffffff008a4b130","name":"FUN_fffffff008a4b130","hasBTI":true,"load":"ldr w0,[x0]","assembly":["0xfffffff008a4b130: bti c","0xfffffff008a4b134: ldr w0,[x0]","0xfffffff008a4b138: ret"]},
+    {"entry":"0xfffffff008a4b388","name":"FUN_fffffff008a4b388","hasBTI":true,"load":"ldr w0,[x0]","assembly":["0xfffffff008a4b388: bti c","0xfffffff008a4b38c: ldr w0,[x0]","0xfffffff008a4b390: ret"]}
+  ]
+}

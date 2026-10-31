@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 
+#import "CNDHailMaryProbe.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSUInteger, CNDHailMaryImpRedirectOperation) {
@@ -30,6 +32,15 @@ BOOL CNDHailMaryImpRedirectIsRunning(void);
 /// automated checks. No process is killed, restarted, reopened, or otherwise
 /// mutated after the write. Visual behavior is left to operator observation.
 void CNDHailMaryImpRedirectRun(
+    CNDHailMaryImpRedirectOperation operation,
+    CNDHailMaryImpRedirectCompletion completion);
+
+/// Mode-aware redirect. `CNDHailMaryProofModeSharedPair` is the original
+/// SpringBoard+Spotlight proof. `CNDHailMaryProofModeSpringBoardOnly` proves
+/// and resolves the same guard through SpringBoard's own page table and never
+/// resolves, presents, or requires Spotlight; the transparency fix uses it.
+void CNDHailMaryImpRedirectRunWithMode(
+    CNDHailMaryProofMode mode,
     CNDHailMaryImpRedirectOperation operation,
     CNDHailMaryImpRedirectCompletion completion);
 
