@@ -17,4 +17,18 @@ BOOL CNDPhysicalKCall1ProbeIsRunning(void);
 /// `CNDPhysicalKCall1Probe.json` in the app container.
 void CNDPhysicalKCall1ProbeRun(CNDPhysicalKCall1ProbeCompletion completion);
 
+/// Read one live Metal-buffer translation through IOUAT::getPageTableEntry.
+/// The call is mediated entirely by kernel-owned, byte-pinned call adapters;
+/// no physical alias is derived or dereferenced.  Every temporary callback,
+/// ifnet field and global slot is restored and verified before completion.
+void CNDPhysicalKCall1UatPTEProbeRun(
+    CNDPhysicalKCall1ProbeCompletion completion);
+
+/// Inventory already-live ifnet check_multi signatures for the pinned UAT
+/// adapter targets.  This consumes an existing KRW generation for reads only:
+/// it does not acquire or clean up KRW, open a user client, invoke a selector,
+/// issue an ioctl/callback, or write any kernel field/global slot.
+void CNDPhysicalKCall1UatSignerInventoryRun(
+    CNDPhysicalKCall1ProbeCompletion completion);
+
 NS_ASSUME_NONNULL_END

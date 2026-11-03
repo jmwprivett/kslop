@@ -584,7 +584,9 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
 
     def test_snowboard_operations_persist_their_diagnostic_log(self) -> None:
         settings = SETTINGS.read_text(encoding="utf-8")
-        start = settings.index("static void settings_run_snowboard_remix_operation(")
+        start = settings.index(
+            "static void settings_run_snowboard_remix_operation_with_completion("
+        )
         end = settings.index("\n@interface SettingsViewController", start)
         operation = settings[start:end]
         self.assertIn("log_session_begin();", operation)
@@ -1207,6 +1209,72 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertIn("if (remote_call_uses_lab_backend())", self.adapter)
         self.assertIn('publisher-payload-lab-mmap', self.adapter)
         self.assertNotIn('publisher-payload-mmap', self.adapter)
+
+    def test_method_abi_cache_is_pid_scoped_and_reported_per_operation(self) -> None:
+        cache_start = self.adapter.index(
+            "typedef struct {\n    int pid;\n    uint64_t cls;\n    BOOL classMethod;"
+        )
+        cache_end = self.adapter.index(
+            "static BOOL cnd_publisher_remote_method_has_types(", cache_start
+        )
+        cache = self.adapter[cache_start:cache_end]
+        self.assertIn("strcmp(entry->selector, selectorName) == 0", cache)
+        self.assertIn("if (ok && pid > 1 && types[0])", cache)
+        self.assertNotIn("if (!ok", cache)
+
+        wrapper_start = self.adapter.index(
+            "static NSDictionary<NSString *, id> *cnd_remote_transport_call("
+        )
+        wrapper_end = self.adapter.index(
+            "static BOOL cnd_remote_transport_health(", wrapper_start
+        )
+        wrapper = self.adapter[wrapper_start:wrapper_end]
+        for field in (
+            'timed[@"transportSeconds"]',
+            'timed[@"remoteStableCalls"]',
+            'timed[@"methodTypesCacheHits"]',
+            'timed[@"methodTypesCacheMisses"]',
+        ):
+            self.assertIn(field, wrapper)
+
+    def test_persistent_index_settle_waits_locally(self) -> None:
+        start = self.adapter.index(
+            "static BOOL cnd_publisher_wait_for_persistent_index_identity("
+        )
+        end = self.adapter.index(
+            "static BOOL cnd_publisher_rewrite_persistent_index_token(", start
+        )
+        settle = self.adapter[start:end]
+        self.assertIn(
+            "usleep(CNDIconServicesPublisherPersistentIndexSettleIntervalUS);",
+            settle,
+        )
+        self.assertNotIn('r_dlsym_call(R_TIMEOUT, "usleep"', settle)
+
+    def test_restore_coalesces_checkpoints_and_emits_timing_deltas(self) -> None:
+        remix = REMIX.read_text(encoding="utf-8")
+        start = remix.index(
+            "static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals("
+        )
+        end = remix.index("\n@implementation CNDSnowBoardRemix", start)
+        restore = remix[start:end]
+        self.assertIn("BOOL currentDispatchCheckpointed = NO;", restore)
+        self.assertIn("BOOL nextWillDispatch = batchHealthy && !isAirDrop", restore)
+        self.assertIn("[checkpointIndexes addObject:@(nextIndex)];", restore)
+        self.assertIn(
+            "currentDispatchCheckpointed =\n"
+            "                            resultSaved && nextWillDispatch;",
+            restore,
+        )
+        for field in (
+            '@"wallSeconds"',
+            '@"transportSeconds"',
+            '@"remoteStableCalls"',
+            '@"journalSeconds"',
+            '@"journalWrites"',
+        ):
+            self.assertIn(field, remix)
+        self.assertIn('CNDRemixLogRunTiming("RESTORE", "total"', restore)
 
 
 if __name__ == "__main__":

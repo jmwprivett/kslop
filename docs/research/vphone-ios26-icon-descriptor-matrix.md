@@ -288,7 +288,25 @@ path. This closes the remaining provider-versus-cell ambiguity: after the
 bounded service retirement, no additional Share-sheet cell invalidation is
 required.
 
-Production therefore performs one bounded, identity-checked RemoteCall only
+Cyanide now exposes the same three-boundary comparison as an explicit physical-
+device diagnostic. After the isolated two-record journal is active, **Capture
+Live AirDrop Path** presents a real Share sheet and derives the expected RGBA
+hashes from the journal's validated processed-image cache. In the exact current
+`SharingUIService` identity it temporarily interposes only
+`ISBundleIdentifierIcon`'s `imageForDescriptor:`,
+`prepareImageForDescriptor:`, and `generateImageWithDescriptor:` methods, with
+an exact `com.apple.Sharing.AirDrop` object filter. It invokes a real
+`UIAirDropActivity -_activityImage`, records the 64-point descriptor and return
+pixels, snapshots the activity-provider result, then finds the visible AirDrop
+label and closest 72×72 image view inside `UIShareGroupActivityCell`. The
+temporary IMPs are restored in reverse order and read back before either the
+bounded view inspection or payload unmapping. A failed restoration retires
+that disposable service identity rather than leaving an IMP targeting unmapped
+diagnostic storage. This implementation is build-verified; its result remains
+**physical-device pending** until the new button is run on the affected phone.
+
+Ordinary AirDrop Apply/Restore therefore performs one bounded,
+identity-checked RemoteCall only
 after the AirDrop persistent record verifies: if `SharingUIService` is absent,
 the next launch is already fresh; if present, its exact PID/proc/task receives
 a terminal self-SIGKILL and Cyanide independently proves that incarnation
@@ -324,8 +342,42 @@ only for themed AirDrop publication, so stock recovery cannot deadlock on the
 same optional association. Ordinary applications remain on IconServices'
 native registration path. The applied-state audit also resolves AirDrop through
 the resource provider instead of incorrectly requiring an
-`LSApplicationRecord`. A physical Apply/Restore run remains required to confirm
-that the repaired source association is consumed on-device.
+`LSApplicationRecord`.
+
+Static 23A341 disassembly also closes a false-negative in the first readback
+validator. `_ISMutableStoreIndex_mappedDataWithCapacity:additionalSize:`
+allocates a page-aligned map from `0x14 + capacity * 0x28 + additionalSize`,
+while header `nodeBytes` at `+0x10` records only the packed nodes currently in
+use. Consequently `0x14 + capacity * 8 + nodeBytes` is a logical lower bound,
+not physical EOF; requiring EOF there rejects a healthy map's reserved growth
+area. Production now takes physical length and bytes from the already validated
+mapped `NSData`, requires the logical extent to fit inside it, and independently
+matches the descriptor header and actual mapped EOF. Because the native table
+may extend by replacing the file and its `_data` object, post-write flush uses
+the current `_data`, then verification closes the pre-write descriptor and
+reopens the current file before byte-level readback. A physical Apply/Restore
+run remains required to confirm that the repaired source association is
+consumed on-device.
+
+The next physical run measured the live source map at `0x56b0000` bytes
+(`86.6875 MiB`), exactly aligned to the device's 16 KiB pages. That disproved
+the remaining assumption that this append/growth table could share the fixed
+store index's 64 MiB safety ceiling. Production now retains the store-index
+limit only for the store index and gives the source registry a separate 512 MiB
+hard ceiling. It copies and validates the fixed header before applying that
+ceiling, then still requires the logical extent to fit, the descriptor header
+to match, and the mapped physical EOF to be exact. Thus a legitimate grown map
+is accepted without treating an arbitrary large `length` scalar as trusted.
+
+If a packed node's self-reference disagrees with the bucket or predecessor
+link, production now performs a bounded diagnostic reread before failing
+closed. It rereads the exact link slot and node header, revalidates file
+identity and nanosecond timestamps, and repeats the validated map-header/EOF
+proof. The report classifies the result as `live-map-churn` when any of those
+observations changed, `stable-reference-invariant-mismatch` when every reread
+was stable, or `diagnostic-read-incomplete` when the distinction could not be
+proved. Expected, observed, link-reread, and node-reread packed references plus
+their bucket/depth are recorded; source identifier payload bytes are not.
 
 All ordinary application requests in the earlier SpringBoard/Spotlight capture
 used variant options 0 and factory options 0. SharingUI's bordered 28-point

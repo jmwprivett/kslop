@@ -224,9 +224,11 @@ static void lab_begin_background_window(void)
     });
 }
 
-BOOL cyanide_lab_bridge_start(
+static BOOL lab_start(
     CyanideLabBridgeRequestHandler handler,
     dispatch_block_t stopHandler,
+    NSString *requestedToken,
+    BOOL requireIdle,
     NSError **errorOut)
 {
     if (!handler) {
@@ -235,7 +237,13 @@ BOOL cyanide_lab_bridge_start(
         return NO;
     }
     @synchronized (lab_state_lock()) {
-        if (gLabListenFD >= 0) return YES;
+        if (gLabListenFD >= 0) {
+            if (!requireIdle) return YES;
+            if (errorOut) *errorOut = [NSError errorWithDomain:@"CyanideLabBridge"
+                code:2 userInfo:@{NSLocalizedDescriptionKey:
+                    @"Another bridge already owns the listener."}];
+            return NO;
+        }
 
         int fd = socket(AF_INET6,SOCK_STREAM,0);
         if (fd < 0) {
@@ -265,7 +273,8 @@ BOOL cyanide_lab_bridge_start(
         }
 
         gLabListenFD = fd;
-        gLabToken = lab_new_token();
+        gLabToken = requestedToken.length
+            ? [requestedToken copy] : lab_new_token();
         gLabHandler = [handler copy];
         gLabStopHandler = [stopHandler copy];
         gLabAcceptQueue = dispatch_queue_create("com.cyanide.lab-bridge.accept",DISPATCH_QUEUE_SERIAL);
@@ -299,6 +308,29 @@ BOOL cyanide_lab_bridge_start(
     printf("[LAB_BRIDGE] started port=%u transport=tcp foregroundOnly=0 backgroundGraceSeconds=%.0f authenticated=1 publicUploader=0\n",
            kCyanideLabBridgePort,kCyanideLabBridgeBackgroundGraceSeconds);
     return YES;
+}
+
+BOOL cyanide_lab_bridge_start(
+    CyanideLabBridgeRequestHandler handler,
+    dispatch_block_t stopHandler,
+    NSError **errorOut)
+{
+    return lab_start(handler,stopHandler,nil,NO,errorOut);
+}
+
+BOOL cyanide_lab_bridge_start_with_token(
+    CyanideLabBridgeRequestHandler handler,
+    dispatch_block_t stopHandler,
+    NSString *token,
+    NSError **errorOut)
+{
+    if (token.length < 32 || token.length > 256) {
+        if (errorOut) *errorOut = [NSError errorWithDomain:@"CyanideLabBridge"
+            code:3 userInfo:@{NSLocalizedDescriptionKey:
+                @"The caller-provided token length was invalid."}];
+        return NO;
+    }
+    return lab_start(handler,stopHandler,token,YES,errorOut);
 }
 
 void cyanide_lab_bridge_stop(void)

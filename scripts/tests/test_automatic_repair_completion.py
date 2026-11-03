@@ -95,6 +95,12 @@ static NSUInteger cacheInvalidations;
 static NSUInteger logUploads;
 static void settings_invalidate_snowboard_remix_status_cache(void) { cacheInvalidations++; }
 static void cyanide_upload_log_if_enabled(void) { logUploads++; }
+static void settings_schedule_substantial_update_repair_respring(
+    NSDictionary<NSString *, id> *result, NSString *source)
+{
+    (void)result;
+    (void)source;
+}
 
 @interface PackageQueue : NSObject
 + (instancetype)sharedQueue;
@@ -127,6 +133,7 @@ static void cyanide_upload_log_if_enabled(void) { logUploads++; }
 static BOOL RunAutomatic(BOOL result) {
     NSString *completionMessage = result ? @"automatic success" : @"automatic failure";
     BOOL updateRepairOK = result;
+    NSDictionary<NSString *, id> *updateRepairResult = @{};
     BOOL hailMaryApplicable = NO;
     BOOL hailMaryOK = NO;
     BOOL attempted = YES;

@@ -10,6 +10,7 @@
 #import "CNDIconThemeImageProcessor.h"
 #import "CNDIconThemeTransaction.h"
 #import "CNDLaunchServicesRegistration.h"
+#import "CNDShareSheetTelemetry.h"
 #import "../TaskRop/CNDKernelTaskBridge.h"
 #import "../TaskRop/RemoteCall.h"
 #import "../CNDHailMaryImpRedirect.h"
@@ -133,6 +134,35 @@ static NSString *CNDRemixSHA256(NSData *data)
         [text appendFormat:@"%02x", digest[index]];
     }
     return text;
+}
+
+static NSString *CNDRemixCanonicalRGBAHashForPNG(NSData *pngData,
+                                                  NSUInteger expectedWidth,
+                                                  NSUInteger expectedHeight)
+{
+    UIImage *image = [pngData isKindOfClass:NSData.class]
+        ? [UIImage imageWithData:pngData] : nil;
+    CGImageRef cgImage = image.CGImage;
+    if (!cgImage || !expectedWidth || !expectedHeight ||
+        CGImageGetWidth(cgImage) != expectedWidth ||
+        CGImageGetHeight(cgImage) != expectedHeight ||
+        expectedWidth > SIZE_MAX / 4U ||
+        expectedHeight > SIZE_MAX / (expectedWidth * 4U)) return @"";
+    size_t bytesPerRow = expectedWidth * 4U;
+    NSMutableData *rgba = [NSMutableData dataWithLength:
+        bytesPerRow * expectedHeight];
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = rgba && colorSpace ? CGBitmapContextCreate(
+        rgba.mutableBytes, expectedWidth, expectedHeight, 8U, bytesPerRow,
+        colorSpace,
+        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big) : NULL;
+    if (colorSpace) CGColorSpaceRelease(colorSpace);
+    if (!context) return @"";
+    CGContextSetBlendMode(context, kCGBlendModeCopy);
+    CGContextDrawImage(context,
+        CGRectMake(0, 0, expectedWidth, expectedHeight), cgImage);
+    CGContextRelease(context);
+    return CNDRemixSHA256(rgba);
 }
 
 static NSArray<NSString *> *CNDRemixSupportedPseudoBundleIdentifiers(void)
@@ -720,8 +750,52 @@ static NSDictionary *CNDRemixReadIconServicesJournal(
         ? CNDRemixJournalByReplayingCheckpoints(journal) : nil;
 }
 
+/*
+ * Journal I/O accounting. Apply and Restore run on one queue worker; the
+ * accumulators are sampled as deltas around each run so wall-clock spent in
+ * atomic journal/checkpoint writes can be reported next to transport time.
+ * The depth guard keeps a checkpoint that rotates into a full journal write
+ * from being counted twice.
+ */
+static double g_cndRemixJournalIOSeconds;
+static NSUInteger g_cndRemixJournalIOWrites;
+static NSUInteger g_cndRemixJournalIODepth;
+
+static CFAbsoluteTime CNDRemixJournalIOBegin(void)
+{
+    g_cndRemixJournalIODepth++;
+    return CFAbsoluteTimeGetCurrent();
+}
+
+static void CNDRemixJournalIOEnd(CFAbsoluteTime *startedAt)
+{
+    if (g_cndRemixJournalIODepth > 0) g_cndRemixJournalIODepth--;
+    if (g_cndRemixJournalIODepth == 0) {
+        g_cndRemixJournalIOSeconds += CFAbsoluteTimeGetCurrent() - *startedAt;
+        g_cndRemixJournalIOWrites++;
+    }
+}
+
+#define CND_REMIX_TIME_JOURNAL_IO() \
+    CFAbsoluteTime __attribute__((cleanup(CNDRemixJournalIOEnd), unused)) \
+        cndRemixJournalIOStartedAt = CNDRemixJournalIOBegin()
+
+/* Exact readback proof without re-parsing the property list: the bytes that
+ * reached the file must equal the bytes serialized from the in-memory record.
+ * Byte equality implies the dictionary equality the previous parse-and-compare
+ * established, at a fraction of the CPU per checkpoint. */
+static BOOL CNDRemixFileBytesMatch(NSURL *url, NSData *expected)
+{
+    if (!url || !expected) return NO;
+    NSData *readback = [NSData dataWithContentsOfURL:url
+                                             options:NSDataReadingUncached
+                                               error:nil];
+    return readback && [readback isEqualToData:expected];
+}
+
 static BOOL CNDRemixWriteIconServicesJournal(NSMutableDictionary *journal)
 {
+    CND_REMIX_TIME_JOURNAL_IO();
     NSString *bundleIdentifier = [journal[@"bundleIdentifier"]
         isKindOfClass:NSString.class] ? journal[@"bundleIdentifier"] : nil;
     NSURL *url = CNDRemixIconServicesJournalURL(bundleIdentifier);
@@ -746,8 +820,7 @@ static BOOL CNDRemixWriteIconServicesJournal(NSMutableDictionary *journal)
     if (!data || ![data writeToURL:url options:NSDataWritingAtomic error:&error]) {
         return NO;
     }
-    NSDictionary *readback = [NSDictionary dictionaryWithContentsOfURL:url];
-    if (![readback isEqualToDictionary:persisted]) return NO;
+    if (!CNDRemixFileBytesMatch(url, data)) return NO;
     [journal setDictionary:persisted];
     NSURL *checkpointDirectory =
         CNDRemixIconServicesCheckpointDirectoryURL(bundleIdentifier);
@@ -762,6 +835,7 @@ static BOOL CNDRemixWriteIconServicesJournal(NSMutableDictionary *journal)
 static BOOL CNDRemixAppendIconServicesJournalCheckpoint(
     NSMutableDictionary *journal, NSArray<NSNumber *> *variantIndexes)
 {
+    CND_REMIX_TIME_JOURNAL_IO();
     NSString *bundleIdentifier = [journal[@"bundleIdentifier"]
         isKindOfClass:NSString.class] ? journal[@"bundleIdentifier"] : nil;
     NSString *streamIdentifier = [journal[@"checkpointStreamIdentifier"]
@@ -835,8 +909,7 @@ static BOOL CNDRemixAppendIconServicesJournalCheckpoint(
         format:NSPropertyListBinaryFormat_v1_0 options:0 error:&error];
     if (!data || ![data writeToURL:url options:NSDataWritingAtomic error:&error])
         return NO;
-    NSDictionary *readback = [NSDictionary dictionaryWithContentsOfURL:url];
-    if (![readback isEqualToDictionary:record]) return NO;
+    if (!CNDRemixFileBytesMatch(url, data)) return NO;
     journal[@"checkpointSequence"] = @(sequence);
     return YES;
 }
@@ -2026,11 +2099,34 @@ static void CNDRemixLogIconServicesTransaction(
     NSString *factoryTypes = [descriptorDiagnostics[@"factoryTypes"]
         isKindOfClass:NSString.class]
         ? descriptorDiagnostics[@"factoryTypes"] : @"-";
+    NSDictionary *referenceDiagnostics =
+        [report[@"sourceRegistryReferenceDiagnostics"]
+            isKindOfClass:NSDictionary.class]
+        ? report[@"sourceRegistryReferenceDiagnostics"] : @{};
+    NSString *referenceClassification =
+        [referenceDiagnostics[@"classification"] isKindOfClass:NSString.class]
+        ? referenceDiagnostics[@"classification"] : @"not-observed";
+    NSString *expectedReference =
+        [referenceDiagnostics[@"expectedReference"] isKindOfClass:NSString.class]
+        ? referenceDiagnostics[@"expectedReference"] : @"-";
+    NSString *observedReference =
+        [referenceDiagnostics[@"observedNodeReference"] isKindOfClass:NSString.class]
+        ? referenceDiagnostics[@"observedNodeReference"] : @"-";
+    NSString *rereadLinkReference =
+        [referenceDiagnostics[@"rereadLinkReference"] isKindOfClass:NSString.class]
+        ? referenceDiagnostics[@"rereadLinkReference"] : @"-";
+    NSString *rereadNodeReference =
+        [referenceDiagnostics[@"rereadNodeReference"] isKindOfClass:NSString.class]
+        ? referenceDiagnostics[@"rereadNodeReference"] : @"-";
     log_user("[SBR_%s] app=%s verified=%d stage=%s reason=%s "
              "descriptor=%lux%lu@%lu:a%lu:v%lu:o%lu factory-abi=%s "
              "stock=%d initial-stock=%d remove=%d/%d write=%d/%d "
              "rollback=%d/%d index=%d/%d/%d index-attempts=%lu "
-             "cache=%d store=%d transport=%d lifecycle=%d\n",
+             "source-map=%llu/%llu+%llu source-header=%u/%u/%u/%u "
+             "source-stage=%s source-ref=%s expected=%s observed=%s "
+             "reread=%s/%s stable=%d/%d/%d reads=%d depth=%lu bucket=%llu "
+             "cache=%d store=%d transport=%d lifecycle=%d "
+             "duration=%.3fs transport-time=%.3fs calls=%llu\n",
              action ?: "TRANSACTION",
              bundleIdentifier.UTF8String ?: "?",
              verified,
@@ -2056,10 +2152,127 @@ static void CNDRemixLogIconServicesTransaction(
              [report[@"persistentIndexTokenLookupVerified"] boolValue],
              (unsigned long)[report[@"persistentIndexIdentityAttempts"]
                  unsignedIntegerValue],
+             [report[@"sourceRegistryFileLength"] unsignedLongLongValue],
+             [report[@"sourceRegistryLogicalLength"] unsignedLongLongValue],
+             [report[@"sourceRegistryPaddingLength"] unsignedLongLongValue],
+             [report[@"sourceRegistryFormat"] unsignedIntValue],
+             [report[@"sourceRegistryNodeCount"] unsignedIntValue],
+             [report[@"sourceRegistryBucketCount"] unsignedIntValue],
+             [report[@"sourceRegistryNodeBytes"] unsignedIntValue],
+             [report[@"sourceRegistryExtentStage"] UTF8String] ?: "-",
+             referenceClassification.UTF8String ?: "not-observed",
+             expectedReference.UTF8String ?: "-",
+             observedReference.UTF8String ?: "-",
+             rereadLinkReference.UTF8String ?: "-",
+             rereadNodeReference.UTF8String ?: "-",
+             [referenceDiagnostics[@"linkStable"] boolValue],
+             [referenceDiagnostics[@"nodeStable"] boolValue],
+             [referenceDiagnostics[@"metadataStable"] boolValue],
+             [referenceDiagnostics[@"diagnosticReadsComplete"] boolValue],
+             (unsigned long)[referenceDiagnostics[@"chainDepth"]
+                 unsignedIntegerValue],
+             [referenceDiagnostics[@"bucketIndex"] unsignedLongLongValue],
              [report[@"agentCacheReadbackVerified"] boolValue],
              [report[@"persistentStoreReadbackVerified"] boolValue],
              [report[@"transportHealthy"] boolValue],
-             [report[@"transportLifecycleVerified"] boolValue]);
+             [report[@"transportLifecycleVerified"] boolValue],
+             [report[@"durationSeconds"] doubleValue],
+             [report[@"transportSeconds"] doubleValue],
+             [report[@"remoteStableCalls"] unsignedLongLongValue]);
+}
+
+/* Shared timing accumulator for one Apply/Restore run. All fields are deltas
+ * derived from per-operation transport reports and the journal I/O counters,
+ * never from elapsed wall-clock alone, so the split stays attributable. */
+typedef struct {
+    double publishSeconds;
+    double setupSeconds;
+    double triggerSeconds;
+    double verificationSeconds;
+    double transportSeconds;
+    unsigned long long remoteStableCalls;
+    unsigned long long methodTypesCacheHits;
+    unsigned long long methodTypesCacheMisses;
+    NSUInteger operations;
+} CNDRemixRunTiming;
+
+static void CNDRemixRunTimingAdd(CNDRemixRunTiming *timing,
+                                 NSDictionary *report)
+{
+    if (!timing || ![report isKindOfClass:NSDictionary.class]) return;
+    timing->operations++;
+    timing->publishSeconds += [report[@"durationSeconds"] doubleValue];
+    timing->setupSeconds += [report[@"setupSeconds"] doubleValue];
+    timing->triggerSeconds += [report[@"triggerSeconds"] doubleValue];
+    timing->verificationSeconds +=
+        [report[@"verificationSeconds"] doubleValue];
+    timing->transportSeconds += [report[@"transportSeconds"] doubleValue];
+    timing->remoteStableCalls +=
+        [report[@"remoteStableCalls"] unsignedLongLongValue];
+    timing->methodTypesCacheHits +=
+        [report[@"methodTypesCacheHits"] unsignedLongLongValue];
+    timing->methodTypesCacheMisses +=
+        [report[@"methodTypesCacheMisses"] unsignedLongLongValue];
+}
+
+static CNDRemixRunTiming CNDRemixRunTimingDelta(
+    const CNDRemixRunTiming *now, const CNDRemixRunTiming *then)
+{
+    CNDRemixRunTiming delta = *now;
+    delta.publishSeconds -= then->publishSeconds;
+    delta.setupSeconds -= then->setupSeconds;
+    delta.triggerSeconds -= then->triggerSeconds;
+    delta.verificationSeconds -= then->verificationSeconds;
+    delta.transportSeconds -= then->transportSeconds;
+    delta.remoteStableCalls -= then->remoteStableCalls;
+    delta.methodTypesCacheHits -= then->methodTypesCacheHits;
+    delta.methodTypesCacheMisses -= then->methodTypesCacheMisses;
+    delta.operations -= then->operations;
+    return delta;
+}
+
+static NSDictionary *CNDRemixRunTimingDictionary(
+    const CNDRemixRunTiming *timing, double wallSeconds,
+    double journalSeconds, NSUInteger journalWrites)
+{
+    return @{
+        @"wallSeconds": @(wallSeconds),
+        @"transportOperations": @(timing->operations),
+        @"operationSeconds": @(timing->publishSeconds),
+        @"operationSetupSeconds": @(timing->setupSeconds),
+        @"operationTriggerSeconds": @(timing->triggerSeconds),
+        @"operationVerificationSeconds": @(timing->verificationSeconds),
+        @"transportSeconds": @(timing->transportSeconds),
+        @"remoteStableCalls": @(timing->remoteStableCalls),
+        @"methodTypesCacheHits": @(timing->methodTypesCacheHits),
+        @"methodTypesCacheMisses": @(timing->methodTypesCacheMisses),
+        @"journalSeconds": @(journalSeconds),
+        @"journalWrites": @(journalWrites),
+        @"otherSeconds": @(MAX(0.0,
+            wallSeconds - timing->transportSeconds - journalSeconds)),
+    };
+}
+
+static void CNDRemixLogRunTiming(
+    const char *scope, const char *label, const CNDRemixRunTiming *timing,
+    double wallSeconds, double journalSeconds, NSUInteger journalWrites)
+{
+    log_user("[SBR_TIMING] %s %s wall=%.3fs ops=%lu op-time=%.3fs "
+             "(setup=%.3f trigger=%.3f verify=%.3f) transport=%.3fs "
+             "calls=%llu per-call=%.2fms abi-cache=%llu/%llu "
+             "journal=%.3fs/%lu other=%.3fs\n",
+             scope ?: "RUN", label ?: "-", wallSeconds,
+             (unsigned long)timing->operations, timing->publishSeconds,
+             timing->setupSeconds, timing->triggerSeconds,
+             timing->verificationSeconds, timing->transportSeconds,
+             timing->remoteStableCalls,
+             timing->remoteStableCalls
+                ? timing->transportSeconds * 1000.0 /
+                    (double)timing->remoteStableCalls : 0.0,
+             timing->methodTypesCacheHits, timing->methodTypesCacheMisses,
+             journalSeconds, (unsigned long)journalWrites,
+             MAX(0.0, wallSeconds - timing->transportSeconds -
+                 journalSeconds));
 }
 
 /*
@@ -2271,6 +2484,8 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
             }
         }
     }
+    BOOL airDropTargetRequested = [foldedBundleFilter containsObject:
+        CNDRemixAirDropPseudoBundleIdentifier.lowercaseString];
 
     if (progress) progress(@"cataloging", 0, 0, nil);
     NSDictionary *batchStart =
@@ -2301,6 +2516,11 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
     NSUInteger payloadCacheWriteFailures = 0, payloadCacheInvalidEntries = 0;
     NSUInteger plannedVariants = 0, publishedVariants = 0;
     NSUInteger failedVariants = 0;
+    CFAbsoluteTime runStartedAt = CFAbsoluteTimeGetCurrent();
+    double renderSeconds = 0.0;
+    CNDRemixRunTiming runTiming = {0};
+    double journalSecondsAtStart = g_cndRemixJournalIOSeconds;
+    NSUInteger journalWritesAtStart = g_cndRemixJournalIOWrites;
     NSUInteger rebasedApplications = 0, rebaseFailures = 0;
     NSUInteger adoptedLegacyFingerprints = 0, updatedApplicationRebases = 0;
     NSUInteger livePersistenceAuditedApplications = 0;
@@ -2400,11 +2620,15 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                     [matched addObject:pseudoBundleIdentifier];
                 }
             }
-            log_user("[SBR_SHARE] airdrop asset=%s bytes=%lu admitted=%d filename=com.apple.Sharing.AirDrop.png\n",
-                     airDropThemeAssetPresent ? "present" : "missing",
-                     (unsigned long)airDropThemeSource.length,
-                     [matched containsObject:
-                         CNDRemixAirDropPseudoBundleIdentifier]);
+            if (airDropTargetRequested ||
+                [matched containsObject:
+                    CNDRemixAirDropPseudoBundleIdentifier]) {
+                log_user("[SBR_SHARE] airdrop asset=%s bytes=%lu admitted=%d filename=com.apple.Sharing.AirDrop.png\n",
+                         airDropThemeAssetPresent ? "present" : "missing",
+                         (unsigned long)airDropThemeSource.length,
+                         [matched containsObject:
+                             CNDRemixAirDropPseudoBundleIdentifier]);
+            }
             if (progress) progress(@"matching", matched.count,
                                    matched.count, nil);
 
@@ -2417,6 +2641,7 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
              * catalog and all publications; only the local preparation order
              * changes.
              */
+            CFAbsoluteTime renderStartedAt = CFAbsoluteTimeGetCurrent();
             for (NSUInteger index = 0; index < matched.count; index++) {
                 @autoreleasepool {
                     NSString *bundleIdentifier = matched[index];
@@ -3010,11 +3235,18 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                 }
             }
 
+            renderSeconds = CFAbsoluteTimeGetCurrent() - renderStartedAt;
             for (NSUInteger index = 0;
                  !cancelled && index < preparedTargets.count; index++) {
                 @autoreleasepool {
                     NSDictionary *prepared = preparedTargets[index];
                     NSString *bundleIdentifier = prepared[@"bundleIdentifier"];
+                    CFAbsoluteTime appStartedAt = CFAbsoluteTimeGetCurrent();
+                    CNDRemixRunTiming appTimingAtStart = runTiming;
+                    double appJournalSecondsAtStart =
+                        g_cndRemixJournalIOSeconds;
+                    NSUInteger appJournalWritesAtStart =
+                        g_cndRemixJournalIOWrites;
                     NSString *sourceHash = prepared[@"themeSourceSHA256"];
                     NSArray<NSDictionary *> *preparedVariants =
                         prepared[@"variants"];
@@ -3239,6 +3471,7 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                         NSDictionary *publication =
                             CNDIconServicesPublisherPublishVariantInBatch(
                                 bundleIdentifier, structured, specification);
+                        CNDRemixRunTimingAdd(&runTiming, publication);
                         NSDictionary *compactPublication =
                             CNDRemixCompactPublisherReport(publication);
                         BOOL noThemedMutation =
@@ -3383,6 +3616,20 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
                         applicationResult[@"liveRepairStockVariants"] =
                             repairAudit[@"stockVariantCount"] ?: @0;
                     }
+                    CNDRemixRunTiming appTiming = CNDRemixRunTimingDelta(
+                        &runTiming, &appTimingAtStart);
+                    double appWallSeconds =
+                        CFAbsoluteTimeGetCurrent() - appStartedAt;
+                    double appJournalSeconds = g_cndRemixJournalIOSeconds -
+                        appJournalSecondsAtStart;
+                    NSUInteger appJournalWrites = g_cndRemixJournalIOWrites -
+                        appJournalWritesAtStart;
+                    applicationResult[@"timing"] = CNDRemixRunTimingDictionary(
+                        &appTiming, appWallSeconds, appJournalSeconds,
+                        appJournalWrites);
+                    CNDRemixLogRunTiming("PUBLISH",
+                        bundleIdentifier.UTF8String, &appTiming,
+                        appWallSeconds, appJournalSeconds, appJournalWrites);
                     [results addObject:applicationResult];
                 }
             }
@@ -3493,20 +3740,23 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
         airDropSourceWriteIssued = airDropSourceWriteIssued ||
             [publication[@"sourceRegistryWriteIssued"] boolValue];
     }
-    log_user("[SBR_SHARE] airdrop active=%d verified=%lu/%lu "
-             "source=%lu/%lu registry=%lu->%lu write=%d "
-             "stage=%s session-closed=%d stock-reconciled=%d "
-             "journal-required=%d\n",
-             airDropActive, (unsigned long)airDropVerifiedVariants,
-             (unsigned long)airDropVariantResults.count,
-             (unsigned long)airDropVerifiedSourceVariants,
-             (unsigned long)airDropResolvedSourceVariants,
-             (unsigned long)airDropSourceEntriesBefore,
-             (unsigned long)airDropSourceEntriesAfter,
-             airDropSourceWriteIssued,
-             airDropStage.UTF8String ?: "unknown", sessionClosed,
-             airDropFailedPublicationVerifiedStock,
-             airDropRecoveryJournalRequired);
+    if (airDropTargetRequested || airDropResult || airDropUnthemed ||
+        airDropActive) {
+        log_user("[SBR_SHARE] airdrop active=%d verified=%lu/%lu "
+                 "source=%lu/%lu registry=%lu->%lu write=%d "
+                 "stage=%s session-closed=%d stock-reconciled=%d "
+                 "journal-required=%d\n",
+                 airDropActive, (unsigned long)airDropVerifiedVariants,
+                 (unsigned long)airDropVariantResults.count,
+                 (unsigned long)airDropVerifiedSourceVariants,
+                 (unsigned long)airDropResolvedSourceVariants,
+                 (unsigned long)airDropSourceEntriesBefore,
+                 (unsigned long)airDropSourceEntriesAfter,
+                 airDropSourceWriteIssued,
+                 airDropStage.UTF8String ?: "unknown", sessionClosed,
+                 airDropFailedPublicationVerifiedStock,
+                 airDropRecoveryJournalRequired);
+    }
     NSDictionary *airDropPresentation =
         CNDRemixRefreshAirDropPresentationIfNeeded(
             airDropActive && sessionClosed);
@@ -3548,6 +3798,22 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
     BOOL spotlightReady = !refreshSpringBoardConsumers ||
         [spotlightPresentation[@"installedPID"] intValue] > 1;
 
+    double runWallSeconds = CFAbsoluteTimeGetCurrent() - runStartedAt;
+    double runJournalSeconds =
+        g_cndRemixJournalIOSeconds - journalSecondsAtStart;
+    NSUInteger runJournalWrites =
+        g_cndRemixJournalIOWrites - journalWritesAtStart;
+    NSMutableDictionary *runTimingSummary = [CNDRemixRunTimingDictionary(
+        &runTiming, runWallSeconds, runJournalSeconds,
+        runJournalWrites) mutableCopy];
+    runTimingSummary[@"renderSeconds"] = @(renderSeconds);
+    runTimingSummary[@"otherSeconds"] = @(MAX(0.0,
+        runWallSeconds - runTiming.transportSeconds - runJournalSeconds -
+        renderSeconds));
+    log_user("[SBR_TIMING] APPLY render=%.3fs apps=%lu\n",
+             renderSeconds, (unsigned long)matched.count);
+    CNDRemixLogRunTiming("APPLY", "total", &runTiming, runWallSeconds,
+                         runJournalSeconds, runJournalWrites);
     BOOL persistentApplyOK = sessionClosed && !cancelled && failed == 0;
     NSMutableDictionary *summary = [@{
         @"state": persistentApplyOK ? @"complete" : @"partial",
@@ -3575,6 +3841,7 @@ static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(
         @"plannedVariants": @(plannedVariants),
         @"publishedVariants": @(publishedVariants),
         @"failedVariants": @(failedVariants),
+        @"timing": runTimingSummary,
         @"rebasedApplications": @(rebasedApplications),
         @"updateRebaseFailures": @(rebaseFailures),
         @"adoptedLegacyFingerprints": @(adoptedLegacyFingerprints),
@@ -3858,6 +4125,10 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
     NSUInteger journalCleanupFailures =
         discardFailures + verifiedStockCleanupFailures;
     NSUInteger restoredVariants = 0, failedVariants = 0;
+    CFAbsoluteTime runStartedAt = CFAbsoluteTimeGetCurrent();
+    CNDRemixRunTiming runTiming = {0};
+    double journalSecondsAtStart = g_cndRemixJournalIOSeconds;
+    NSUInteger journalWritesAtStart = g_cndRemixJournalIOWrites;
     NSUInteger alreadyStockVariants = 0;
     NSUInteger skippedUnmutatedVariants = 0;
     NSUInteger skippedVerifiedStockVariants = 0;
@@ -3903,6 +4174,12 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                     NSArray<NSDictionary *> *savedVariants =
                         CNDRemixJournalVariants(saved);
                     plannedVariants += savedVariants.count;
+                    CFAbsoluteTime appStartedAt = CFAbsoluteTimeGetCurrent();
+                    CNDRemixRunTiming appTimingAtStart = runTiming;
+                    double appJournalSecondsAtStart =
+                        g_cndRemixJournalIOSeconds;
+                    NSUInteger appJournalWritesAtStart =
+                        g_cndRemixJournalIOWrites;
                     NSMutableArray<NSDictionary *> *restoringVariants =
                         [NSMutableArray arrayWithCapacity:savedVariants.count];
                     BOOL currentSchema = [saved[@"schemaVersion"]
@@ -3923,6 +4200,10 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                     NSMutableArray<NSDictionary *> *updatedVariants =
                         [restoringVariants mutableCopy];
                     BOOL allVerified = savedVariants.count > 0;
+                    /* Mirrors Apply: the record that saves one descriptor's
+                     * result also arms the next descriptor, so each restored
+                     * descriptor costs one checkpoint write instead of two. */
+                    BOOL currentDispatchCheckpointed = NO;
                     for (NSUInteger variantIndex = 0;
                          variantIndex < savedVariants.count;
                          variantIndex++) {
@@ -3976,6 +4257,7 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                                 bundleIdentifier,
                                 validatedSpec.dictionaryRepresentation)
                             : nil;
+                        CNDRemixRunTimingAdd(&runTiming, stockAudit);
                         BOOL alreadyStock = validatedSpec && isAirDrop &&
                             CNDRemixAuditProvesSavedStock(
                                 stockAudit, savedVariant);
@@ -4021,22 +4303,26 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                         /* Getter audits do not enter recovery dispatch. Only
                          * checkpoint this one descriptor as restoring when a
                          * stock generation/write is actually about to run. */
-                        NSMutableDictionary *dispatchVariant =
-                            [updatedVariants[variantIndex] mutableCopy];
-                        dispatchVariant[@"state"] = @"restoring";
-                        dispatchVariant[@"restorationDispatchPossible"] = @YES;
-                        dispatchVariant[@"updatedAt"] = NSDate.date;
-                        updatedVariants[variantIndex] = dispatchVariant;
-                        journal[@"variants"] = updatedVariants;
-                        journal[@"state"] = @"restoring";
-                        journal[@"updatedAt"] = NSDate.date;
-                        if (!CNDRemixAppendIconServicesJournalCheckpoint(
-                                journal, @[@(variantIndex)])) {
-                            allVerified = NO;
-                            failedVariants +=
-                                savedVariants.count - variantIndex;
-                            break;
+                        if (!currentDispatchCheckpointed) {
+                            NSMutableDictionary *dispatchVariant =
+                                [updatedVariants[variantIndex] mutableCopy];
+                            dispatchVariant[@"state"] = @"restoring";
+                            dispatchVariant[@"restorationDispatchPossible"] =
+                                @YES;
+                            dispatchVariant[@"updatedAt"] = NSDate.date;
+                            updatedVariants[variantIndex] = dispatchVariant;
+                            journal[@"variants"] = updatedVariants;
+                            journal[@"state"] = @"restoring";
+                            journal[@"updatedAt"] = NSDate.date;
+                            if (!CNDRemixAppendIconServicesJournalCheckpoint(
+                                    journal, @[@(variantIndex)])) {
+                                allVerified = NO;
+                                failedVariants +=
+                                    savedVariants.count - variantIndex;
+                                break;
+                            }
                         }
+                        currentDispatchCheckpointed = NO;
                         NSDictionary *restoration = validatedSpec
                             ? CNDIconServicesPublisherRestoreStockVariantInBatch(
                                 bundleIdentifier,
@@ -4046,6 +4332,7 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                                 @"stage": @"descriptor-specification",
                                 @"message": @"The saved descriptor specification is invalid.",
                             };
+                        CNDRemixRunTimingAdd(&runTiming, restoration);
                         BOOL verified = validatedSpec &&
                             (CNDIconServicesPublisherRestorationResultIsVerified(
                                 restoration) ||
@@ -4062,6 +4349,8 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                                 CNDIconServicesPublisherAuditVariantInBatch(
                                     bundleIdentifier,
                                     validatedSpec.dictionaryRepresentation);
+                            CNDRemixRunTimingAdd(&runTiming,
+                                                 postRestoreStockAudit);
                             verified = CNDRemixAuditProvesSavedStock(
                                 postRestoreStockAudit, currentVariant);
                         }
@@ -4101,15 +4390,47 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                             failedVariants++;
                             allVerified = NO;
                         }
+                        /* Arm the next descriptor in this same bounded
+                         * record when it is certain to dispatch. Non-AirDrop
+                         * skips are decided locally from the saved variant;
+                         * AirDrop defers to a remote stock audit, so it keeps
+                         * its own pre-dispatch record. */
+                        NSUInteger nextIndex = variantIndex + 1;
+                        BOOL batchHealthy =
+                            CNDIconServicesPublisherBatchIsHealthy();
+                        BOOL nextWillDispatch = batchHealthy && !isAirDrop &&
+                            nextIndex < savedVariants.count &&
+                            !(currentSchema &&
+                              (CNDRemixVariantHasVerifiedStockCheckpoint(
+                                   savedVariants[nextIndex]) ||
+                               CNDRemixVariantProvesNoIconServicesMutation(
+                                   savedVariants[nextIndex])));
+                        NSMutableArray<NSNumber *> *checkpointIndexes =
+                            [NSMutableArray arrayWithObject:@(variantIndex)];
+                        if (nextWillDispatch) {
+                            NSMutableDictionary *nextDispatch =
+                                [updatedVariants[nextIndex] mutableCopy];
+                            nextDispatch[@"state"] = @"restoring";
+                            nextDispatch[@"restorationDispatchPossible"] =
+                                @YES;
+                            nextDispatch[@"updatedAt"] = NSDate.date;
+                            updatedVariants[nextIndex] = nextDispatch;
+                            journal[@"state"] = @"restoring";
+                            [checkpointIndexes addObject:@(nextIndex)];
+                        }
                         journal[@"variants"] = updatedVariants;
                         journal[@"updatedAt"] = NSDate.date;
-                        if (!CNDRemixAppendIconServicesJournalCheckpoint(
-                                journal, @[@(variantIndex)]) &&
+                        BOOL resultSaved =
+                            CNDRemixAppendIconServicesJournalCheckpoint(
+                                journal, checkpointIndexes);
+                        if (!resultSaved &&
                             variantIndex + 1 < savedVariants.count) {
                             allVerified = NO;
                             break;
                         }
-                        if (!CNDIconServicesPublisherBatchIsHealthy()) {
+                        currentDispatchCheckpointed =
+                            resultSaved && nextWillDispatch;
+                        if (!batchHealthy) {
                             allVerified = NO;
                             failedVariants +=
                                 savedVariants.count - variantIndex - 1;
@@ -4140,9 +4461,23 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
                     } else {
                         failed++;
                     }
+                    CNDRemixRunTiming appTiming = CNDRemixRunTimingDelta(
+                        &runTiming, &appTimingAtStart);
+                    double appWallSeconds =
+                        CFAbsoluteTimeGetCurrent() - appStartedAt;
+                    double appJournalSeconds = g_cndRemixJournalIOSeconds -
+                        appJournalSecondsAtStart;
+                    NSUInteger appJournalWrites = g_cndRemixJournalIOWrites -
+                        appJournalWritesAtStart;
+                    CNDRemixLogRunTiming("RESTORE",
+                        bundleIdentifier.UTF8String, &appTiming,
+                        appWallSeconds, appJournalSeconds, appJournalWrites);
                     [results addObject:@{
                         @"bundleIdentifier": bundleIdentifier,
                         @"ok": @(appVerified),
+                        @"timing": CNDRemixRunTimingDictionary(
+                            &appTiming, appWallSeconds, appJournalSeconds,
+                            appJournalWrites),
                         @"stage": journalCleared
                             ? @"persistent-restored"
                             : (appVerified
@@ -4180,6 +4515,13 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
     BOOL persistentRecoveryOK = persistentDataClean && !cancelled && failed == 0;
     BOOL cleanupOK = sessionClosed && presentationOK &&
         journalCleanupFailures == 0;
+    double runWallSeconds = CFAbsoluteTimeGetCurrent() - runStartedAt;
+    double runJournalSeconds =
+        g_cndRemixJournalIOSeconds - journalSecondsAtStart;
+    NSUInteger runJournalWrites =
+        g_cndRemixJournalIOWrites - journalWritesAtStart;
+    CNDRemixLogRunTiming("RESTORE", "total", &runTiming, runWallSeconds,
+                         runJournalSeconds, runJournalWrites);
     NSDictionary *summary = @{
         @"engine": @"iconservices-publisher",
         @"journaled": @(selectedJournalCount),
@@ -4195,6 +4537,9 @@ static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(
         @"skippedVerifiedStockVariants":
             @(skippedVerifiedStockVariants),
         @"failedVariants": @(failedVariants),
+        @"timing": CNDRemixRunTimingDictionary(
+            &runTiming, runWallSeconds, runJournalSeconds,
+            runJournalWrites),
         @"failed": @(failed),
         @"cancelled": @(cancelled),
         @"results": results,
@@ -5996,6 +6341,242 @@ static NSDictionary *CNDRemixCompareAppliedAuditRecords(
             }), startedAt, @"AirDrop Test Audit");
 }
 
++ (NSDictionary<NSString *, id> *)captureIsolatedAirDropPresentation
+{
+    NSTimeInterval startedAt = NSProcessInfo.processInfo.systemUptime;
+    NSDictionary *journal = CNDRemixReadIconServicesJournal(
+        CNDRemixAirDropPseudoBundleIdentifier);
+    NSArray<NSDictionary *> *variants = CNDRemixJournalVariants(journal);
+    if (![journal[@"state"] isEqualToString:@"active"] ||
+        variants.count != 2) {
+        return CNDRemixResultByAddingElapsedTime(
+            CNDRemixCoordinatorResult(NO, @"airdrop-live-not-active",
+                @"The live AirDrop capture requires one active two-record isolated test. Run Apply AirDrop Test first.", @{
+                    @"operationMode": @"isolated-airdrop-live-capture",
+                    @"targetBundleIdentifier":
+                        CNDRemixAirDropPseudoBundleIdentifier,
+                    @"journalState": journal[@"state"] ?: @"missing",
+                    @"journalVariantCount": @(variants.count),
+                    @"remoteCallUsed": @NO,
+                    @"mutationsIssued": @NO,
+                }), startedAt, @"AirDrop Live Capture");
+    }
+
+    NSMutableDictionary<NSString *, NSString *> *expectedByIdentity =
+        [NSMutableDictionary dictionaryWithCapacity:variants.count];
+    NSMutableArray<NSDictionary *> *expectedRecords =
+        [NSMutableArray arrayWithCapacity:variants.count];
+    NSString *horizontalIdentity = nil;
+    NSString *horizontalExpectedHash = nil;
+    for (NSDictionary *variant in variants) {
+        NSDictionary *savedSpecification =
+            [variant[@"descriptorSpecification"]
+                isKindOfClass:NSDictionary.class]
+                ? variant[@"descriptorSpecification"] : nil;
+        CNDIconServicesDescriptorSpec *specification =
+            savedSpecification ? [CNDIconServicesDescriptorSpec
+                specWithDictionary:savedSpecification error:nil] : nil;
+        NSString *sourceHash = [variant[@"themeSourceSHA256"]
+            isKindOfClass:NSString.class]
+            ? variant[@"themeSourceSHA256"] : @"";
+        NSString *cacheKey = [variant[@"payloadCacheKey"]
+            isKindOfClass:NSString.class]
+            ? variant[@"payloadCacheKey"] : @"";
+        BOOL invalidCacheEntry = NO;
+        NSDictionary *cacheEntry = specification
+            ? CNDRemixReadPayloadCacheEntry(
+                sourceHash, cacheKey, specification, &invalidCacheEntry)
+            : nil;
+        NSData *processedPNG = [cacheEntry[@"processedPNGData"]
+            isKindOfClass:NSData.class]
+            ? cacheEntry[@"processedPNGData"] : nil;
+        NSString *rgbaHash = specification
+            ? CNDRemixCanonicalRGBAHashForPNG(
+                processedPNG, specification.targetPixelWidth,
+                specification.targetPixelHeight) : @"";
+        if (!specification || !CNDRemixIsSHA256String(rgbaHash)) {
+            log_user("[SBR_AIRDROP_LIVE] expected-image unavailable "
+                     "descriptor=%s cache=%s invalid=%d\n",
+                     specification.canonicalIdentity.UTF8String ?: "?",
+                     cacheKey.UTF8String ?: "", invalidCacheEntry);
+            return CNDRemixResultByAddingElapsedTime(
+                CNDRemixCoordinatorResult(NO,
+                    @"airdrop-live-expected-image",
+                    @"The active AirDrop journal's validated processed-image cache is incomplete. Re-run Apply AirDrop Test before opening live telemetry.", @{
+                        @"operationMode":
+                            @"isolated-airdrop-live-capture",
+                        @"targetBundleIdentifier":
+                            CNDRemixAirDropPseudoBundleIdentifier,
+                        @"descriptorIdentity":
+                            specification.canonicalIdentity ?: @"",
+                        @"payloadCacheKey": cacheKey,
+                        @"invalidPayloadCacheEntry":
+                            @(invalidCacheEntry),
+                        @"remoteCallUsed": @NO,
+                        @"mutationsIssued": @NO,
+                    }), startedAt, @"AirDrop Live Capture");
+        }
+        expectedByIdentity[specification.canonicalIdentity] = rgbaHash;
+        [expectedRecords addObject:@{
+            @"descriptorIdentity": specification.canonicalIdentity,
+            @"pointWidth": @(specification.pointWidth),
+            @"pointHeight": @(specification.pointHeight),
+            @"scale": @(specification.scale),
+            @"pixelWidth": @(specification.targetPixelWidth),
+            @"pixelHeight": @(specification.targetPixelHeight),
+            @"expectedThemeRGBA": rgbaHash,
+            @"payloadCacheKey": cacheKey,
+        }];
+        if (specification.pointWidth == 64 &&
+            specification.pointHeight == 64 && specification.scale == 3) {
+            horizontalIdentity = specification.canonicalIdentity;
+            horizontalExpectedHash = rgbaHash;
+        }
+    }
+    if (horizontalIdentity.length == 0 ||
+        !CNDRemixIsSHA256String(horizontalExpectedHash)) {
+        return CNDRemixResultByAddingElapsedTime(
+            CNDRemixCoordinatorResult(NO,
+                @"airdrop-live-descriptor-profile",
+                @"The active AirDrop journal does not contain the measured 64-point activity-strip descriptor.", @{
+                    @"operationMode": @"isolated-airdrop-live-capture",
+                    @"targetBundleIdentifier":
+                        CNDRemixAirDropPseudoBundleIdentifier,
+                    @"expectedRecords": expectedRecords,
+                    @"remoteCallUsed": @NO,
+                    @"mutationsIssued": @NO,
+                }), startedAt, @"AirDrop Live Capture");
+    }
+
+    NSMutableDictionary<NSString *, id> *result =
+        [CNDShareSheetTelemetryCapture() mutableCopy] ?:
+        [NSMutableDictionary dictionary];
+    NSArray<NSDictionary *> *rawEvents = [result[@"events"]
+        isKindOfClass:NSArray.class] ? result[@"events"] : @[];
+    NSMutableArray<NSDictionary *> *events =
+        [NSMutableArray arrayWithCapacity:rawEvents.count];
+    NSDictionary *finalHorizontalEvent = nil;
+    for (NSDictionary *rawEvent in rawEvents) {
+        NSMutableDictionary *event = [rawEvent mutableCopy];
+        NSString *identity = [event[@"descriptorIdentity"]
+            isKindOfClass:NSString.class]
+            ? event[@"descriptorIdentity"] : @"";
+        NSString *expected = expectedByIdentity[identity];
+        NSString *observed = [event[@"rgbaSHA256"]
+            isKindOfClass:NSString.class] ? event[@"rgbaSHA256"] : @"";
+        NSString *state = expected.length == 0
+            ? @"unexpected-descriptor"
+            : (!CNDRemixIsSHA256String(observed)
+                ? @"unavailable"
+                : ([observed isEqualToString:expected]
+                    ? @"themed" : @"non-themed"));
+        event[@"expectedThemeRGBA"] = expected ?: @"";
+        event[@"themeState"] = state;
+        [events addObject:event];
+        if ([identity isEqualToString:horizontalIdentity] &&
+            ([event[@"kind"] isEqualToString:@"image"] ||
+             !finalHorizontalEvent)) {
+            finalHorizontalEvent = event;
+        }
+        log_user("[SBR_AIRDROP_LIVE] probe kind=%s descriptor=%s "
+                 "pixels=%llux%llu state=%s observed=%s expected=%s\n",
+                 [event[@"kind"] UTF8String] ?: "?",
+                 identity.UTF8String ?: "?",
+                 [event[@"pixelWidth"] unsignedLongLongValue],
+                 [event[@"pixelHeight"] unsignedLongLongValue],
+                 state.UTF8String ?: "?", observed.UTF8String ?: "",
+                 expected.UTF8String ?: "");
+    }
+    result[@"events"] = events;
+    result[@"expectedRecords"] = expectedRecords;
+    result[@"horizontalDescriptorIdentity"] = horizontalIdentity;
+    result[@"horizontalExpectedThemeRGBA"] = horizontalExpectedHash;
+
+    NSDictionary *(^classifiedSnapshot)(NSDictionary *) =
+        ^NSDictionary *(NSDictionary *rawSnapshot) {
+            NSMutableDictionary *snapshot = [rawSnapshot
+                isKindOfClass:NSDictionary.class]
+                ? [rawSnapshot mutableCopy] : [NSMutableDictionary dictionary];
+            NSString *observed = [snapshot[@"rgbaSHA256"]
+                isKindOfClass:NSString.class]
+                ? snapshot[@"rgbaSHA256"] : @"";
+            snapshot[@"expectedThemeRGBA"] = horizontalExpectedHash;
+            snapshot[@"themeState"] = !CNDRemixIsSHA256String(observed)
+                ? @"unavailable"
+                : ([observed isEqualToString:horizontalExpectedHash]
+                    ? @"themed" : @"non-themed");
+            return snapshot;
+        };
+    NSDictionary *activityImage = classifiedSnapshot(
+        result[@"activityImage"]);
+    NSDictionary *displayedImage = classifiedSnapshot(
+        result[@"displayedImage"]);
+    result[@"activityImage"] = activityImage;
+    result[@"displayedImage"] = displayedImage;
+
+    BOOL transportCaptured = [result[@"ok"] boolValue];
+    BOOL requestProbed = finalHorizontalEvent != nil;
+    BOOL requestThemed = [finalHorizontalEvent[@"themeState"]
+        isEqualToString:@"themed"];
+    BOOL activityThemed = [activityImage[@"themeState"]
+        isEqualToString:@"themed"];
+    BOOL displayedThemed = [displayedImage[@"themeState"]
+        isEqualToString:@"themed"];
+    NSString *diagnosis = nil;
+    NSString *message = nil;
+    if (!transportCaptured) {
+        diagnosis = @"capture-incomplete";
+        message = result[@"message"] ?:
+            @"The live AirDrop telemetry transport was incomplete.";
+    } else if (!requestProbed) {
+        diagnosis = @"exact-descriptor-probe-missing";
+        message = @"The data-only capture could not issue the measured 64-point ISBundleIdentifierIcon request.";
+    } else if (!requestThemed) {
+        diagnosis = @"explicit-iconservices-probe-returned-nonthemed-pixels";
+        message = @"The explicit exact 64-point IconServices probe returned pixels that do not match the validated themed payload.";
+    } else if (!activityThemed) {
+        diagnosis = @"activity-provider-returned-nonthemed-pixels";
+        message = @"IconServices returned the themed pixels, but UIAirDropActivity's provider image did not retain them.";
+    } else if (!displayedThemed) {
+        diagnosis = @"materialized-airdrop-cell-retained-nonthemed-pixels";
+        message = @"The AirDrop activity provider returned themed pixels, but the materialized Share-sheet cell is displaying different pixels.";
+    } else {
+        diagnosis = @"themed-end-to-end";
+        message = @"The explicit exact IconServices probe, UIAirDropActivity provider, and materialized AirDrop tile all contain the validated themed pixels.";
+    }
+    BOOL presentationThemed = transportCaptured && requestThemed &&
+        activityThemed && displayedThemed;
+    result[@"diagnosis"] = diagnosis;
+    result[@"presentationThemed"] = @(presentationThemed);
+    /* Keep requestObserved for UI/backward compatibility, but label the
+     * evidence honestly: no natural-call interception occurs in KRW-only
+     * mode. */
+    result[@"requestObserved"] = @(requestProbed);
+    result[@"requestProbed"] = @(requestProbed);
+    result[@"requestObservationMode"] =
+        @"explicit-exact-descriptor-probe";
+    result[@"requestThemed"] = @(requestThemed);
+    result[@"activityImageThemed"] = @(activityThemed);
+    result[@"displayedImageThemed"] = @(displayedThemed);
+    result[@"message"] = message;
+    result[@"operationMode"] = @"isolated-airdrop-live-capture";
+    result[@"targetBundleIdentifier"] =
+        CNDRemixAirDropPseudoBundleIdentifier;
+    result[@"mutationsIssued"] = @NO;
+    log_user("[SBR_AIRDROP_LIVE] complete capture=%d diagnosis=%s "
+             "probe=%s activity=%s displayed=%s hooks-restored=%d "
+             "hooks-quiesced=%d mapping-cleaned=%d\n",
+             transportCaptured, diagnosis.UTF8String ?: "?",
+             [finalHorizontalEvent[@"themeState"] UTF8String] ?: "missing",
+             [activityImage[@"themeState"] UTF8String] ?: "missing",
+             [displayedImage[@"themeState"] UTF8String] ?: "missing",
+             [result[@"temporaryHooksRestored"] boolValue],
+             [result[@"temporaryHooksQuiesced"] boolValue],
+             [result[@"mappingCleaned"] boolValue]);
+    return CNDRemixResultByAddingElapsedTime(
+        result, startedAt, @"AirDrop Live Capture");
+}
+
 + (NSDictionary<NSString *, id> *)restoreIsolatedAirDropTest
 {
     NSTimeInterval startedAt = NSProcessInfo.processInfo.systemUptime;
@@ -6119,6 +6700,30 @@ static NSDictionary *CNDRemixCompareAppliedAuditRecords(
         NO, @"update-repair", @"Update Repair ended without a result.", nil);
     NSMutableDictionary<NSString *, id> *repair = [result mutableCopy];
     repair[@"operationMode"] = @"update-repair";
+    /* One ordinary app update must not turn Automatic Repair into a surprise
+     * process boundary.  Broad IconServices churn is different: after many
+     * records are republished, a fresh SpringBoard gives every icon consumer
+     * one deterministic cache epoch.  Classify by completed publication work,
+     * never elapsed time, so slow hardware and a large read-only audit cannot
+     * manufacture a respring. */
+    static const NSUInteger substantialApplicationThreshold = 8U;
+    static const NSUInteger substantialVariantThreshold = 48U;
+    NSUInteger repairedApplications =
+        [repair[@"applied"] unsignedIntegerValue];
+    NSUInteger repairedVariants =
+        [repair[@"publishedVariants"] unsignedIntegerValue];
+    BOOL substantialRepair = [repair[@"ok"] boolValue] &&
+        (repairedApplications >= substantialApplicationThreshold ||
+         repairedVariants >= substantialVariantThreshold);
+    repair[@"substantialRepairPerformed"] = @(substantialRepair);
+    repair[@"substantialRepairApplicationCount"] =
+        @(repairedApplications);
+    repair[@"substantialRepairVariantCount"] = @(repairedVariants);
+    repair[@"substantialRepairApplicationThreshold"] =
+        @(substantialApplicationThreshold);
+    repair[@"substantialRepairVariantThreshold"] =
+        @(substantialVariantThreshold);
+    repair[@"respringRecommended"] = @(substantialRepair);
     if ([repair[@"ok"] boolValue]) {
         NSUInteger published = [repair[@"applied"] unsignedIntegerValue];
         NSUInteger updated =
@@ -6477,8 +7082,16 @@ static NSDictionary *CNDRemixCompareAppliedAuditRecords(
     NSTimeInterval startedAt = NSProcessInfo.processInfo.systemUptime;
     NSDictionary *result = nil;
     if (CNDRemixReadIconServicesJournal(bundleIdentifier)) {
-        result = CNDRemixRestoreIconServicesJournals(
-            [NSSet setWithObject:bundleIdentifier], YES, nil, nil);
+        /* The thread-local RemoteCall settle defaults to 50 ms per message.
+         * Every other coordinator entry zeroes it; this path paid it on each
+         * of the ~60 messages per descriptor. */
+        uint32_t previousSettleUS = r_settle_us(0);
+        @try {
+            result = CNDRemixRestoreIconServicesJournals(
+                [NSSet setWithObject:bundleIdentifier], YES, nil, nil);
+        } @finally {
+            r_settle_us(previousSettleUS);
+        }
     } else if ([bundleIdentifier isEqualToString:@"com.ebay.iphone"] &&
                CNDIconServicesInterceptProofIsActive()) {
         result = CNDIconServicesInterceptProofRestore();

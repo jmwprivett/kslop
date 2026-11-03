@@ -113,6 +113,11 @@ bool     r_msg2_struct_ret(uint64_t obj, const char *selName,
 uint32_t r_settle_us(uint32_t usec);
 uint64_t r_perform_main(uint64_t obj, uint64_t sel, uint64_t object, bool wait);
 uint64_t r_cfstr(const char *s);
+// Creates a retained CFString/NSString without mapping a target VM object into
+// Cyanide. UTF-8 bytes are materialized in the target through bounded scalar
+// arguments to existing signed libc/CoreFoundation functions. This is for
+// physical processes whose VM-object alias is not a dependable transfer path.
+uint64_t r_cfstr_register_only(const char *s);
 uint64_t r_nsstr_retained(const char *s);
 bool     r_responds(uint64_t obj, const char *selName);
 bool     r_responds_main(uint64_t obj, const char *selName);
@@ -121,6 +126,12 @@ uint64_t r_ivar_value(uint64_t obj, const char *ivarName);
 uint64_t r_dlsym_call(int timeout, const char *fnName,
                       uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
                       uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+// Calls one already-resolved signed target-process implementation address.
+// The wrapper preserves RemoteCall's serialization and terminal-failure gate.
+uint64_t r_call_address(int timeout, uint64_t address,
+                        const char *diagnosticName,
+                        uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
+                        uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 // Scope autoreleased Objective-C objects created on the persistent synthetic
 // call thread.  The token must be popped on that same RemoteCall session.
 uint64_t r_autorelease_pool_push(void);

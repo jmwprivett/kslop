@@ -76,6 +76,11 @@ typedef NS_ENUM(NSInteger, PackageQueueIntent) {
 // removed after the corresponding operation reports success.
 - (void)commit;
 
+/// Starts a durable AwaitingRespring continuation only when it still contains
+/// unfinished after-respring work. Used by the foreground handoff; all normal
+/// checkpointing and boundary verification continue through commit().
+- (BOOL)resumePendingPostRespringActionsIfReady;
+
 @end
 
 NS_ASSUME_NONNULL_END

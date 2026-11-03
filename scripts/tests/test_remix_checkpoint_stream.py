@@ -228,6 +228,23 @@ class RemixCheckpointStreamTests(unittest.TestCase):
             self.source,
         )
 
+    def test_checkpoint_readback_compares_serialized_bytes_and_tracks_io(self) -> None:
+        write_start = self.source.index(
+            "static BOOL CNDRemixWriteIconServicesJournal("
+        )
+        remove_start = self.source.index(
+            "static BOOL CNDRemixRemoveIconServicesJournal(", write_start
+        )
+        writes = self.source[write_start:remove_start]
+        self.assertIn("CND_REMIX_TIME_JOURNAL_IO();", writes)
+        self.assertEqual(writes.count("CND_REMIX_TIME_JOURNAL_IO();"), 2)
+        self.assertEqual(writes.count("CNDRemixFileBytesMatch(url, data)"), 2)
+        self.assertNotIn(
+            "NSDictionary *readback =\n"
+            "        [NSDictionary dictionaryWithContentsOfURL:url]",
+            writes,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

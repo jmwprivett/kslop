@@ -51,6 +51,13 @@ static const NSUInteger
     CNDIconServicesPublisherAirDropMaximumSourceIdentifiers = 8U;
 static const NSUInteger
     CNDIconServicesPublisherMaximumPersistentIndexLength = 64U << 20;
+/* The source registry is an append/growth map, not the fixed store index.
+ * A churned physical 23A341 device produced a valid, page-aligned 0x56b0000
+ * mapping, so sharing the store index's 64 MiB ceiling rejects native state.
+ * Keep a separate hard ceiling while the header, logical extent, descriptor
+ * header, and physical EOF provide the actual acceptance proof. */
+static const uint64_t
+    CNDIconServicesPublisherMaximumSourceRegistryMappedLength = 512ULL << 20;
 static const NSUInteger
     CNDIconServicesPublisherPersistentIndexSettleAttempts = 24U;
 static const useconds_t
@@ -112,6 +119,14 @@ _Static_assert(offsetof(CNDIconServicesStoreIndexValue23A341,
 @property (nonatomic, assign) uint64_t auditSourceRegistry;
 @property (nonatomic, assign) int auditSourceRegistryFileDescriptor;
 @property (nonatomic, assign) uint64_t auditSourceRegistryFileLength;
+@property (nonatomic, assign) uint64_t auditSourceRegistryLogicalLength;
+@property (nonatomic, assign) uint64_t auditSourceRegistryPaddingLength;
+@property (nonatomic, assign) uint32_t auditSourceRegistryFormat;
+@property (nonatomic, assign) uint32_t auditSourceRegistryNodeCount;
+@property (nonatomic, assign) uint32_t auditSourceRegistryBucketCount;
+@property (nonatomic, assign) uint32_t auditSourceRegistryNodeBytes;
+@property (nonatomic, copy) NSString *auditSourceRegistryExtentStage;
+@property (nonatomic, copy) NSDictionary<NSString *, id> *auditSourceRegistryReferenceDiagnostics;
 @property (nonatomic, assign) BOOL auditSourceRegistryFileWritable;
 @property (nonatomic, copy) NSString *auditApplicationBundleIdentifier;
 @property (nonatomic, assign) uint64_t auditApplicationTargetBundle;
@@ -177,6 +192,19 @@ static CNDIconServicesPublisherBatchState *cnd_publisher_batch_state(void)
 static BOOL cnd_publisher_clear_audit_application_context(
     CNDIconServicesPublisherBatchState *batch);
 
+/* Declared before the transport wrapper so every public operation can report
+ * the cache delta produced by its own work. The cache storage itself remains
+ * beside the method-introspection helpers below. */
+static uint64_t g_cnd_publisher_method_types_cache_hits;
+static uint64_t g_cnd_publisher_method_types_cache_misses;
+
+static uint64_t cnd_publisher_stable_call_count(void)
+{
+    RemoteCallDebugSnapshot snapshot;
+    return remote_call_copy_debug_snapshot(&snapshot)
+        ? snapshot.stableCalls : 0;
+}
+
 static NSDictionary<NSString *, id> *cnd_remote_transport_call(
     CNDIconServicesPublisherRemoteTransport *transport,
     NSDictionary<NSString *, id> *(^operation)(void))
@@ -185,10 +213,33 @@ static NSDictionary<NSString *, id> *cnd_remote_transport_call(
         g_cnd_publisher_current_transport;
     g_cnd_publisher_current_transport = transport;
     NSDictionary<NSString *, id> *result = nil;
+    CFAbsoluteTime startedAt = CFAbsoluteTimeGetCurrent();
+    uint64_t callsBefore = cnd_publisher_stable_call_count();
+    uint64_t abiHitsBefore = g_cnd_publisher_method_types_cache_hits;
+    uint64_t abiMissesBefore = g_cnd_publisher_method_types_cache_misses;
     @try {
         result = operation();
     } @finally {
         g_cnd_publisher_current_transport = previous;
+    }
+    /* Every operation report carries its own synthetic-thread call delta and
+     * wall-clock so the coordinator can attribute time to the transport
+     * without re-deriving it from RemoteCall globals. */
+    if ([result isKindOfClass:NSDictionary.class]) {
+        uint64_t callsAfter = cnd_publisher_stable_call_count();
+        NSMutableDictionary *timed = [result mutableCopy];
+        timed[@"transportSeconds"] =
+            @(CFAbsoluteTimeGetCurrent() - startedAt);
+        timed[@"remoteStableCalls"] = @(callsAfter >= callsBefore
+            ? callsAfter - callsBefore : 0);
+        timed[@"methodTypesCacheHits"] =
+            @(g_cnd_publisher_method_types_cache_hits >= abiHitsBefore
+                ? g_cnd_publisher_method_types_cache_hits - abiHitsBefore : 0);
+        timed[@"methodTypesCacheMisses"] =
+            @(g_cnd_publisher_method_types_cache_misses >= abiMissesBefore
+                ? g_cnd_publisher_method_types_cache_misses - abiMissesBefore
+                : 0);
+        result = timed;
     }
     return result;
 }
@@ -691,12 +742,85 @@ static uint64_t cnd_publisher_remote_symbol(const char *name)
     return address;
 }
 
+/*
+ * Remote method type encodings are immutable for the lifetime of one target
+ * process: a class/selector pair cannot change its encoding without the
+ * daemon relaunching, which changes the pid and therefore the key. Every
+ * publication re-verified the same ~16 encodings at two synthetic-thread
+ * round trips plus a remote string read each. Cache the successful reads per
+ * (pid, class, selector, kind) so the ABI proof is established once per
+ * session instead of once per descriptor. Failed reads are never cached.
+ */
+typedef struct {
+    int pid;
+    uint64_t cls;
+    BOOL classMethod;
+    char selector[96];
+    char types[96];
+} CNDPublisherMethodTypesCacheEntry;
+
+enum { CNDPublisherMethodTypesCacheCapacity = 256 };
+static CNDPublisherMethodTypesCacheEntry
+    g_cnd_publisher_method_types_cache[CNDPublisherMethodTypesCacheCapacity];
+static NSUInteger g_cnd_publisher_method_types_cache_count;
+static NSUInteger g_cnd_publisher_method_types_cache_next;
+
+static const char *cnd_publisher_cached_method_types(
+    int pid, uint64_t cls, const char *selectorName, BOOL classMethod)
+{
+    for (NSUInteger index = 0;
+         index < g_cnd_publisher_method_types_cache_count; index++) {
+        CNDPublisherMethodTypesCacheEntry *entry =
+            &g_cnd_publisher_method_types_cache[index];
+        if (entry->pid == pid && entry->cls == cls &&
+            entry->classMethod == classMethod &&
+            strcmp(entry->selector, selectorName) == 0) {
+            return entry->types;
+        }
+    }
+    return NULL;
+}
+
+static void cnd_publisher_store_method_types(
+    int pid, uint64_t cls, const char *selectorName, BOOL classMethod,
+    const char *types)
+{
+    if (strlen(selectorName) >= sizeof(((CNDPublisherMethodTypesCacheEntry *)0)->selector) ||
+        strlen(types) >= sizeof(((CNDPublisherMethodTypesCacheEntry *)0)->types)) return;
+    NSUInteger slot;
+    if (g_cnd_publisher_method_types_cache_count <
+        CNDPublisherMethodTypesCacheCapacity) {
+        slot = g_cnd_publisher_method_types_cache_count++;
+    } else {
+        slot = g_cnd_publisher_method_types_cache_next++ %
+            CNDPublisherMethodTypesCacheCapacity;
+    }
+    CNDPublisherMethodTypesCacheEntry *entry =
+        &g_cnd_publisher_method_types_cache[slot];
+    entry->pid = pid;
+    entry->cls = cls;
+    entry->classMethod = classMethod;
+    snprintf(entry->selector, sizeof(entry->selector), "%s", selectorName);
+    snprintf(entry->types, sizeof(entry->types), "%s", types);
+}
+
 static BOOL cnd_publisher_copy_remote_method_types(
     uint64_t cls, const char *selectorName, BOOL classMethod,
     char *types, size_t typesCapacity)
 {
     if (types && typesCapacity > 0) types[0] = '\0';
     if (!cls || !selectorName || !types || typesCapacity < 2) return NO;
+    int pid = remote_call_current_pid();
+    if (pid > 1 && remote_call_current_success()) {
+        const char *cached = cnd_publisher_cached_method_types(
+            pid, cls, selectorName, classMethod);
+        if (cached) {
+            g_cnd_publisher_method_types_cache_hits++;
+            snprintf(types, typesCapacity, "%s", cached);
+            return YES;
+        }
+    }
+    g_cnd_publisher_method_types_cache_misses++;
     uint64_t selector = r_sel(selectorName);
     uint64_t method = selector ? r_dlsym_call(
         R_TIMEOUT,
@@ -705,9 +829,14 @@ static BOOL cnd_publisher_copy_remote_method_types(
     uint64_t typesAddress = method ? r_dlsym_call(
         R_TIMEOUT, "method_getTypeEncoding", method,
         0, 0, 0, 0, 0, 0, 0) : 0;
-    return typesAddress &&
+    BOOL ok = typesAddress &&
         r_read_cstring(typesAddress, types, typesCapacity) &&
         remote_call_current_success();
+    if (ok && pid > 1 && types[0]) {
+        cnd_publisher_store_method_types(
+            pid, cls, selectorName, classMethod, types);
+    }
+    return ok;
 }
 
 static BOOL cnd_publisher_remote_method_has_types(
@@ -1748,10 +1877,11 @@ static BOOL cnd_publisher_wait_for_persistent_index_identity(
             return YES;
         }
         if (attempt < CNDIconServicesPublisherPersistentIndexSettleAttempts) {
-            (void)r_dlsym_call(
-                R_TIMEOUT, "usleep",
-                CNDIconServicesPublisherPersistentIndexSettleIntervalUS,
-                0, 0, 0, 0, 0, 0, 0);
+            /* The wait only needs wall-clock time to pass for the daemon's
+             * asynchronous index commit. Sleeping locally costs the interval;
+             * issuing usleep() as a synthetic-thread call cost two exception
+             * round trips on top of it. */
+            usleep(CNDIconServicesPublisherPersistentIndexSettleIntervalUS);
             if (!remote_call_current_success()) return NO;
         }
     }
@@ -3037,8 +3167,26 @@ cnd_publisher_run_stock_store(NSString *bundleIdentifier,
         @"validated-file-bounded-pread";
     report[@"sourceRegistryFileLength"] =
         @(batch.auditSourceRegistryFileLength);
+    report[@"sourceRegistryLogicalLength"] =
+        @(batch.auditSourceRegistryLogicalLength);
+    report[@"sourceRegistryPaddingLength"] =
+        @(batch.auditSourceRegistryPaddingLength);
+    report[@"sourceRegistryFormat"] =
+        @(batch.auditSourceRegistryFormat);
+    report[@"sourceRegistryNodeCount"] =
+        @(batch.auditSourceRegistryNodeCount);
+    report[@"sourceRegistryBucketCount"] =
+        @(batch.auditSourceRegistryBucketCount);
+    report[@"sourceRegistryNodeBytes"] =
+        @(batch.auditSourceRegistryNodeBytes);
+    report[@"sourceRegistryExtentStage"] =
+        batch.auditSourceRegistryExtentStage ?: @"not-started";
+    report[@"sourceRegistryReferenceDiagnostics"] =
+        batch.auditSourceRegistryReferenceDiagnostics ?: @{
+            @"classification": @"not-observed",
+        };
     report[@"sourceRegistryReadbackStage"] =
-        [failure hasPrefix:@"stock-api-source-registry-readback"]
+        [failure containsString:@"source-registry"]
         ? failure : (sourceRegistryRepairResult.freshReadbackVerified
             ? @"verified" : @"not-completed");
     report[@"persistentStoreDataLength"] = @(
@@ -4403,6 +4551,163 @@ static BOOL cnd_publisher_close_source_registry_file(
     return closed;
 }
 
+typedef struct {
+    uint64_t mappedBytes;
+    uint64_t mappedLength;
+    uint64_t nodesOffset;
+    uint64_t logicalLength;
+    uint32_t format;
+    uint32_t nodeCount;
+    uint32_t bucketCount;
+    uint32_t nodeBytes;
+} CNDIconServicesSourceRegistryExtent;
+
+static void cnd_publisher_record_source_registry_extent(
+    CNDIconServicesPublisherBatchState *batch,
+    const CNDIconServicesSourceRegistryExtent *extent,
+    NSString *stage)
+{
+    if (!batch) return;
+    batch.auditSourceRegistryFileLength = extent ? extent->mappedLength : 0;
+    batch.auditSourceRegistryLogicalLength = extent ? extent->logicalLength : 0;
+    batch.auditSourceRegistryPaddingLength = extent &&
+        extent->mappedLength >= extent->logicalLength
+        ? extent->mappedLength - extent->logicalLength : 0;
+    batch.auditSourceRegistryFormat = extent ? extent->format : 0;
+    batch.auditSourceRegistryNodeCount = extent ? extent->nodeCount : 0;
+    batch.auditSourceRegistryBucketCount = extent ? extent->bucketCount : 0;
+    batch.auditSourceRegistryNodeBytes = extent ? extent->nodeBytes : 0;
+    batch.auditSourceRegistryExtentStage = stage ?: @"unknown";
+}
+
+/* The 23A341 hash-table file is deliberately larger than its used nodes.
+ * _ISMutableStoreIndex_mappedDataWithCapacity:additionalSize: reserves
+ * page-aligned growth capacity from capacity * 0x28; header nodeBytes at
+ * +0x10 is only the used packed-node extent. Therefore logicalLength is a
+ * lower bound, never an EOF claim. The already validated mapped NSData owns
+ * the authoritative physical length. Capture its length/bytes in the target,
+ * validate the exact header, and independently prove that the descriptor has
+ * the same header and EOF through bounded pread calls. */
+static BOOL cnd_publisher_source_registry_extent(
+    uint64_t mappedData, int fileDescriptor, uint64_t scratch,
+    CNDIconServicesSourceRegistryExtent *extentOut, NSString **stageOut)
+{
+    if (extentOut) memset(extentOut, 0, sizeof(*extentOut));
+    if (stageOut) *stageOut = @"input";
+    if (!mappedData || !scratch || !extentOut) return NO;
+
+    uint64_t mappedDataClass = r_dlsym_call(
+        R_TIMEOUT, "object_getClass", mappedData, 0, 0, 0, 0, 0, 0, 0);
+    BOOL mappedDataABI = mappedDataClass &&
+        cnd_publisher_remote_method_has_types(
+            mappedDataClass, "_ISStoreIndex_isValid", "B16@0:8", NULL) &&
+        cnd_publisher_remote_method_has_types(
+            mappedDataClass, "length", "Q16@0:8", NULL) &&
+        cnd_publisher_remote_method_has_types(
+            mappedDataClass, "bytes", "r^v16@0:8", "^v16@0:8");
+    if (!mappedDataABI || !remote_call_current_success()) {
+        if (stageOut) *stageOut = @"mapped-abi";
+        return NO;
+    }
+    BOOL mappedDataValid =
+        (r_msg2(mappedData, "_ISStoreIndex_isValid", 0, 0, 0, 0) & 1U) != 0;
+    if (!mappedDataValid || !remote_call_current_success()) {
+        if (stageOut) *stageOut = @"mapped-invalid";
+        return NO;
+    }
+
+    uint64_t mappedLength = r_msg2(
+        mappedData, "length", 0, 0, 0, 0);
+    uint64_t mappedBytes = mappedLength >= 0x14
+        ? r_msg2(mappedData, "bytes", 0, 0, 0, 0) : 0;
+    extentOut->mappedLength = mappedLength;
+    extentOut->mappedBytes = mappedBytes;
+    if (mappedLength < 0x14 || !mappedBytes ||
+        !remote_call_current_success()) {
+        if (stageOut) *stageOut = @"mapped-bounds";
+        return NO;
+    }
+
+    uint64_t copiedHeader = r_dlsym_call(
+        R_TIMEOUT, "memcpy", scratch, mappedBytes, 0x14,
+        0, 0, 0, 0, 0);
+    uint8_t mappedHeader[0x14] = {0};
+    if (copiedHeader != scratch || !remote_call_current_success() ||
+        !remote_read(scratch, mappedHeader, sizeof(mappedHeader))) {
+        if (stageOut) *stageOut = @"mapped-header-copy";
+        return NO;
+    }
+
+    uint8_t validMarker = mappedHeader[0x4];
+    memcpy(&extentOut->format, mappedHeader, sizeof(extentOut->format));
+    memcpy(&extentOut->nodeCount, mappedHeader + 0x8,
+           sizeof(extentOut->nodeCount));
+    memcpy(&extentOut->bucketCount, mappedHeader + 0x0c,
+           sizeof(extentOut->bucketCount));
+    memcpy(&extentOut->nodeBytes, mappedHeader + 0x10,
+           sizeof(extentOut->nodeBytes));
+    if (extentOut->format != 11U || validMarker != 1U) {
+        if (stageOut) *stageOut = @"mapped-header";
+        return NO;
+    }
+    if (!extentOut->bucketCount ||
+        extentOut->bucketCount > (1U << 20) ||
+        extentOut->nodeCount > extentOut->bucketCount) {
+        if (stageOut) *stageOut = @"mapped-capacity";
+        return NO;
+    }
+    extentOut->nodesOffset = 0x14 +
+        (uint64_t)extentOut->bucketCount * sizeof(uint64_t);
+    extentOut->logicalLength = extentOut->nodesOffset +
+        (uint64_t)extentOut->nodeBytes;
+    /* Read and validate the fixed header before applying the policy ceiling.
+     * This distinguishes a malformed object from a legitimate grown map and
+     * prevents another opaque pre-header "mapped-bounds" false negative. */
+    if (mappedLength >
+            CNDIconServicesPublisherMaximumSourceRegistryMappedLength) {
+        if (stageOut) *stageOut = @"mapped-physical-limit";
+        return NO;
+    }
+    if (extentOut->logicalLength < extentOut->nodesOffset ||
+        extentOut->logicalLength > mappedLength) {
+        if (stageOut) *stageOut = @"mapped-logical-extent";
+        return NO;
+    }
+
+    if (fileDescriptor >= 0) {
+        int64_t headerRead = (int64_t)r_dlsym_call(
+            R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
+            scratch + 0x80, sizeof(mappedHeader), 0, 0, 0, 0, 0);
+        uint8_t fileHeader[0x14] = {0};
+        BOOL headerMatches = headerRead == sizeof(fileHeader) &&
+            remote_call_current_success() &&
+            remote_read(scratch + 0x80, fileHeader, sizeof(fileHeader)) &&
+            memcmp(fileHeader, mappedHeader, sizeof(fileHeader)) == 0;
+        if (!headerMatches) {
+            if (stageOut) *stageOut = @"file-header-match";
+            return NO;
+        }
+        int64_t finalByteRead = (int64_t)r_dlsym_call(
+            R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
+            scratch + 0x40, 1, mappedLength - 1, 0, 0, 0, 0);
+        if (finalByteRead != 1 || !remote_call_current_success()) {
+            if (stageOut) *stageOut = @"file-tail";
+            return NO;
+        }
+        int64_t eofRead = (int64_t)r_dlsym_call(
+            R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
+            scratch + 0x41, 1, mappedLength, 0, 0, 0, 0);
+        if (eofRead != 0 || !remote_call_current_success()) {
+            if (stageOut) *stageOut = @"file-eof";
+            return NO;
+        }
+    }
+
+    if (stageOut) *stageOut = fileDescriptor >= 0
+        ? @"verified-file" : @"verified-mapping";
+    return YES;
+}
+
 /* Open the daemon's existing persistent UUID -> LaunchServices source table.
  * ISIconManager.iconCache is an ISIconCache; the
  * unitSourceRegistry getter belongs to the daemon-only ISMutableIconCache
@@ -4410,12 +4715,12 @@ static BOOL cnd_publisher_close_source_registry_file(
  * is an ownership error. iOS 26's verified ISMutableIconCache initializer
  * constructs this exact table at <cacheURL>/store-source-registry.map with
  * capacity 4000. This accessor first proves that file exists, then injects its
- * validated mapping into one retained ISStoreMapTable. A separate bounded,
- * read-only descriptor supplies bytes through pread(2) because the concrete
- * mapped NSData's scalar CoreFoundation bridge does not return reliably across
- * the physical arm64e synthetic-call boundary. Short reads fail closed rather
- * than risking a mapping fault if the live file changes. It invokes no
- * mutating map selector itself; the AirDrop publication repair below is the
+ * validated mapping into one retained ISStoreMapTable. A separate bounded
+ * descriptor supplies bytes through pread(2). The mapped NSData's validated
+ * length is the allocation extent; header nodeBytes is only the used extent.
+ * Both are cross-checked against the descriptor before any read. Short reads
+ * fail closed rather than risking a mapping fault if the live file changes.
+ * It invokes no mutating map selector itself; the AirDrop repair below is the
  * sole writer and always flushes and verifies a freshly reopened mapping. */
 static uint64_t cnd_publisher_source_registry_map(
     CNDIconServicesPublisherBatchState *batch,
@@ -4557,11 +4862,16 @@ static uint64_t cnd_publisher_source_registry_map(
     struct stat fileStatus = {0};
     BOOL statusRead = statResult == 0 && remote_call_current_success() &&
         remote_read(scratch, &fileStatus, sizeof(fileStatus));
-    uint64_t fileLength = statusRead && fileStatus.st_size > 0
-        ? (uint64_t)fileStatus.st_size : 0;
+    CNDIconServicesSourceRegistryExtent extent = {0};
+    NSString *extentStage = nil;
+    BOOL extentRead = statusRead && S_ISREG(fileStatus.st_mode) &&
+        cnd_publisher_source_registry_extent(
+            mappedData, (int)fileDescriptor, scratch,
+            &extent, &extentStage);
+    cnd_publisher_record_source_registry_extent(
+        batch, &extent, extentStage);
     if (!statusRead || !S_ISREG(fileStatus.st_mode) ||
-        fileLength < 0x14 ||
-        fileLength > CNDIconServicesPublisherMaximumPersistentIndexLength) {
+        !extentRead) {
         (void)r_dlsym_call(
             R_TIMEOUT, "close", (uint64_t)fileDescriptor,
             0, 0, 0, 0, 0, 0, 0);
@@ -4569,20 +4879,28 @@ static uint64_t cnd_publisher_source_registry_map(
             ? @"audit-source-registry-file-stat"
             : (!S_ISREG(fileStatus.st_mode)
                 ? @"audit-source-registry-file-type"
-                : @"audit-source-registry-file-length");
+                : [@"audit-source-registry-file-"
+                    stringByAppendingString:extentStage ?: @"extent"]);
         return 0;
     }
 
     uint64_t allocation = r_msg2(mapClass, "alloc", 0, 0, 0, 0);
-    uint64_t map = allocation
-        ? r_msg2(allocation, "initWithURL:capacity:",
-                 registryURL, 4000, 0, 0)
-        : 0;
+    if (!allocation || !remote_call_current_success()) {
+        (void)r_dlsym_call(
+            R_TIMEOUT, "close", (uint64_t)fileDescriptor,
+            0, 0, 0, 0, 0, 0, 0);
+        if (failureOut) *failureOut =
+            @"audit-source-registry-map-alloc";
+        return 0;
+    }
+    uint64_t map = r_msg2(allocation, "initWithURL:capacity:",
+                          registryURL, 4000, 0, 0);
     if (!map || !remote_call_current_success()) {
         (void)r_dlsym_call(
             R_TIMEOUT, "close", (uint64_t)fileDescriptor,
             0, 0, 0, 0, 0, 0, 0);
-        if (failureOut) *failureOut = @"audit-source-registry-open";
+        if (failureOut) *failureOut =
+            @"audit-source-registry-map-init";
         return 0;
     }
     uint64_t dataIvar = cnd_publisher_audit_instance_ivar(
@@ -4618,7 +4936,7 @@ static uint64_t cnd_publisher_source_registry_map(
     }
     batch.auditSourceRegistry = map;
     batch.auditSourceRegistryFileDescriptor = (int)fileDescriptor;
-    batch.auditSourceRegistryFileLength = fileLength;
+    batch.auditSourceRegistryFileLength = extent.mappedLength;
     batch.auditSourceRegistryFileWritable = writableFile;
     return batch.auditSourceRegistry;
 }
@@ -4737,18 +5055,147 @@ typedef struct __attribute__((packed)) {
 _Static_assert(sizeof(CNDIconServicesSourceRegistryNodeHeader23A341) == 0x24,
                "23A341 source-registry node header changed");
 
+static NSString *cnd_publisher_source_registry_reference_text(
+    uint64_t reference)
+{
+    return [NSString stringWithFormat:@"0x%016llx", reference];
+}
+
+/* A self-reference mismatch can mean either that our 23A341 node invariant is
+ * wrong for this record shape or that IconServices changed the live map after
+ * the link was read. Re-read the exact link and node bytes, then compare the
+ * file identity/timestamps and validated header extent. This is diagnostics
+ * only: the original read remains failed closed and no mutation is attempted. */
+static NSDictionary<NSString *, id> *
+cnd_publisher_source_registry_reference_diagnostics(
+    uint64_t mapData, int fileDescriptor, uint64_t scratch,
+    uint64_t bucketIndex, NSUInteger chainDepth,
+    uint64_t referenceSourceOffset, uint64_t nodeOffset,
+    uint64_t expectedReference,
+    const CNDIconServicesSourceRegistryNodeHeader23A341 *observedNode,
+    const CNDIconServicesSourceRegistryExtent *extentBefore,
+    const struct stat *statusBefore)
+{
+    uint64_t rereadLinkReference = 0;
+    int64_t linkByteCount = (int64_t)r_dlsym_call(
+        R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
+        scratch + 0x280, sizeof(rereadLinkReference), referenceSourceOffset,
+        0, 0, 0, 0);
+    BOOL linkRereadSucceeded =
+        linkByteCount == sizeof(rereadLinkReference) &&
+        remote_call_current_success() &&
+        remote_read(scratch + 0x280, &rereadLinkReference,
+                    sizeof(rereadLinkReference));
+
+    CNDIconServicesSourceRegistryNodeHeader23A341 rereadNode = {0};
+    int64_t nodeByteCount = (int64_t)r_dlsym_call(
+        R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
+        scratch + 0x300, sizeof(rereadNode), nodeOffset,
+        0, 0, 0, 0);
+    BOOL nodeRereadSucceeded = nodeByteCount == sizeof(rereadNode) &&
+        remote_call_current_success() &&
+        remote_read(scratch + 0x300, &rereadNode, sizeof(rereadNode));
+
+    int statResult = (int)r_dlsym_call(
+        R_TIMEOUT, "fstat", (uint64_t)fileDescriptor, scratch,
+        0, 0, 0, 0, 0, 0);
+    struct stat statusAfter = {0};
+    BOOL metadataRereadSucceeded = statResult == 0 &&
+        remote_call_current_success() &&
+        remote_read(scratch, &statusAfter, sizeof(statusAfter)) &&
+        S_ISREG(statusAfter.st_mode);
+    CNDIconServicesSourceRegistryExtent extentAfter = {0};
+    NSString *extentStage = nil;
+    BOOL extentRereadSucceeded = metadataRereadSucceeded &&
+        cnd_publisher_source_registry_extent(
+            mapData, fileDescriptor, scratch, &extentAfter, &extentStage);
+
+    BOOL linkStable = linkRereadSucceeded &&
+        rereadLinkReference == expectedReference;
+    BOOL nodeStable = nodeRereadSucceeded && observedNode &&
+        memcmp(&rereadNode, observedNode, sizeof(rereadNode)) == 0;
+    BOOL identityStable = metadataRereadSucceeded && statusBefore &&
+        statusAfter.st_dev == statusBefore->st_dev &&
+        statusAfter.st_ino == statusBefore->st_ino;
+    BOOL timestampsStable = metadataRereadSucceeded && statusBefore &&
+        statusAfter.st_mtimespec.tv_sec == statusBefore->st_mtimespec.tv_sec &&
+        statusAfter.st_mtimespec.tv_nsec == statusBefore->st_mtimespec.tv_nsec &&
+        statusAfter.st_ctimespec.tv_sec == statusBefore->st_ctimespec.tv_sec &&
+        statusAfter.st_ctimespec.tv_nsec == statusBefore->st_ctimespec.tv_nsec;
+    BOOL extentStable = extentRereadSucceeded && extentBefore &&
+        extentAfter.mappedLength == extentBefore->mappedLength &&
+        extentAfter.logicalLength == extentBefore->logicalLength &&
+        extentAfter.nodeCount == extentBefore->nodeCount &&
+        extentAfter.bucketCount == extentBefore->bucketCount &&
+        extentAfter.nodeBytes == extentBefore->nodeBytes;
+    BOOL metadataStable = identityStable && timestampsStable && extentStable;
+    BOOL diagnosticReadsComplete = linkRereadSucceeded &&
+        nodeRereadSucceeded && metadataRereadSucceeded &&
+        extentRereadSucceeded;
+    BOOL churnObserved =
+        (linkRereadSucceeded && !linkStable) ||
+        (nodeRereadSucceeded && !nodeStable) ||
+        (metadataRereadSucceeded && (!identityStable || !timestampsStable)) ||
+        (extentRereadSucceeded && !extentStable);
+    NSString *classification = churnObserved
+        ? @"live-map-churn"
+        : (!diagnosticReadsComplete
+            ? @"diagnostic-read-incomplete"
+            : @"stable-reference-invariant-mismatch");
+    uint64_t observedReference = observedNode ? observedNode->reference : 0;
+    uint64_t rereadNodeReference = nodeRereadSucceeded
+        ? rereadNode.reference : 0;
+
+    return @{
+        @"classification": classification,
+        @"bucketIndex": @(bucketIndex),
+        @"chainDepth": @(chainDepth),
+        @"referenceSourceFileOffset": @(referenceSourceOffset),
+        @"nodeFileOffset": @(nodeOffset),
+        @"expectedReference":
+            cnd_publisher_source_registry_reference_text(expectedReference),
+        @"observedNodeReference":
+            cnd_publisher_source_registry_reference_text(observedReference),
+        @"rereadLinkReference": linkRereadSucceeded
+            ? cnd_publisher_source_registry_reference_text(
+                rereadLinkReference) : @"unavailable",
+        @"rereadNodeReference": nodeRereadSucceeded
+            ? cnd_publisher_source_registry_reference_text(
+                rereadNodeReference) : @"unavailable",
+        @"expectedNodeOffset": @((uint32_t)expectedReference),
+        @"expectedNodeSize": @((uint32_t)(expectedReference >> 32)),
+        @"observedNodeOffset": @((uint32_t)observedReference),
+        @"observedNodeSize": @((uint32_t)(observedReference >> 32)),
+        @"linkRereadSucceeded": @(linkRereadSucceeded),
+        @"nodeRereadSucceeded": @(nodeRereadSucceeded),
+        @"metadataRereadSucceeded": @(metadataRereadSucceeded),
+        @"extentRereadSucceeded": @(extentRereadSucceeded),
+        @"diagnosticReadsComplete": @(diagnosticReadsComplete),
+        @"linkStable": @(linkStable),
+        @"nodeStable": @(nodeStable),
+        @"identityStable": @(identityStable),
+        @"timestampsStable": @(timestampsStable),
+        @"extentStable": @(extentStable),
+        @"metadataStable": @(metadataStable),
+        @"extentStage": extentStage ?: @"not-read",
+    };
+}
+
 static NSArray<NSData *> *cnd_publisher_source_registry_entries(
     uint64_t registry, uint64_t unitUUID, uint64_t scratch,
     int fileDescriptor, uint64_t fileLength,
-    NSString **failureOut)
+    NSString **failureOut,
+    NSDictionary<NSString *, id> **referenceDiagnosticsOut)
 {
     if (failureOut) *failureOut = nil;
+    if (referenceDiagnosticsOut) *referenceDiagnosticsOut = nil;
     if (!registry || !unitUUID || !scratch || fileDescriptor < 0) {
         if (failureOut) *failureOut = @"stock-api-source-registry-input";
         return nil;
     }
     if (fileLength < 0x14 ||
-        fileLength > CNDIconServicesPublisherMaximumPersistentIndexLength) {
+        fileLength >
+            CNDIconServicesPublisherMaximumSourceRegistryMappedLength) {
         if (failureOut) *failureOut =
             @"stock-api-source-registry-readback-length";
         return nil;
@@ -4778,48 +5225,24 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
     BOOL statusBeforeRead = statBeforeResult == 0 &&
         remote_call_current_success() &&
         remote_read(scratch, &statusBefore, sizeof(statusBefore));
-    if (!statusBeforeRead || !S_ISREG(statusBefore.st_mode) ||
-        statusBefore.st_size < 0 ||
-        (uint64_t)statusBefore.st_size != fileLength) {
+    if (!statusBeforeRead || !S_ISREG(statusBefore.st_mode)) {
         if (failureOut) *failureOut =
             @"stock-api-source-registry-readback-file";
         return nil;
     }
-    int64_t headerRead = (int64_t)r_dlsym_call(
-        R_TIMEOUT, "pread", (uint64_t)fileDescriptor,
-        scratch, 0x14, 0,
-        0, 0, 0, 0);
-    uint8_t headerBytes[0x14] = {0};
-    if (headerRead != sizeof(headerBytes) ||
-        !remote_call_current_success() ||
-        !remote_read(scratch, headerBytes, sizeof(headerBytes))) {
-        if (failureOut) *failureOut = @"stock-api-source-registry-readback-header-copy";
+    CNDIconServicesSourceRegistryExtent extentBefore = {0};
+    NSString *extentStage = nil;
+    BOOL extentReady = cnd_publisher_source_registry_extent(
+        mapData, fileDescriptor, scratch, &extentBefore, &extentStage);
+    if (!extentReady || extentBefore.mappedLength != fileLength) {
+        if (failureOut) *failureOut = [NSString stringWithFormat:
+            @"stock-api-source-registry-readback-extent:%@",
+            extentStage ?: @"length-mismatch"];
         return nil;
     }
-    uint32_t bucketCount = 0;
-    uint32_t nodeBytes = 0;
-    uint32_t format = 0;
-    uint32_t version = 0;
-    memcpy(&format, headerBytes, sizeof(format));
-    memcpy(&version, headerBytes + 0x4, sizeof(version));
-    memcpy(&bucketCount, headerBytes + 0x0c, sizeof(bucketCount));
-    memcpy(&nodeBytes, headerBytes + 0x10, sizeof(nodeBytes));
-    if (format != 11U || version != 1U) {
-        if (failureOut) *failureOut =
-            @"stock-api-source-registry-readback-header";
-        return nil;
-    }
-    if (!bucketCount || bucketCount > (1U << 20)) {
-        if (failureOut) *failureOut = @"stock-api-source-registry-readback-capacity";
-        return nil;
-    }
-    uint64_t nodesOffset = 0x14 +
-        (uint64_t)bucketCount * sizeof(uint64_t);
-    if (nodesOffset > fileLength ||
-        nodeBytes > fileLength - nodesOffset) {
-        if (failureOut) *failureOut = @"stock-api-source-registry-readback-extent";
-        return nil;
-    }
+    uint32_t bucketCount = extentBefore.bucketCount;
+    uint32_t nodeBytes = extentBefore.nodeBytes;
+    uint64_t nodesOffset = extentBefore.nodesOffset;
 
     uint8_t uuidBytes[16] = {0};
     if (!cnd_publisher_copy_remote_uuid_bytes(
@@ -4844,6 +5267,7 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
         if (failureOut) *failureOut = @"stock-api-source-registry-readback-bucket-copy";
         return nil;
     }
+    uint64_t referenceSourceOffset = bucketReferenceOffset;
 
     NSMutableArray<NSData *> *entries = [NSMutableArray array];
     NSUInteger nodesInspected = 0;
@@ -4873,6 +5297,14 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
             return nil;
         }
         if (node.reference != reference) {
+            if (referenceDiagnosticsOut) {
+                *referenceDiagnosticsOut =
+                    cnd_publisher_source_registry_reference_diagnostics(
+                        mapData, fileDescriptor, scratch,
+                        bucketIndex, nodesInspected,
+                        referenceSourceOffset, nodeOffset,
+                        reference, &node, &extentBefore, &statusBefore);
+            }
             if (failureOut) *failureOut =
                 @"stock-api-source-registry-readback-node-reference";
             return nil;
@@ -4917,6 +5349,8 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
                 @"stock-api-source-registry-readback-chain";
             return nil;
         }
+        referenceSourceOffset = nodeOffset + offsetof(
+            CNDIconServicesSourceRegistryNodeHeader23A341, nextReference);
         reference = nextReference;
     }
     if (reference) {
@@ -4930,17 +5364,31 @@ static NSArray<NSData *> *cnd_publisher_source_registry_entries(
     BOOL statusAfterRead = statAfterResult == 0 &&
         remote_call_current_success() &&
         remote_read(scratch, &statusAfter, sizeof(statusAfter));
+    CNDIconServicesSourceRegistryExtent extentAfter = {0};
+    NSString *extentAfterStage = nil;
+    BOOL extentAfterRead = statusAfterRead &&
+        S_ISREG(statusAfter.st_mode) &&
+        cnd_publisher_source_registry_extent(
+            mapData, fileDescriptor, scratch,
+            &extentAfter, &extentAfterStage);
     BOOL fileUnchanged = statusAfterRead &&
+        extentAfterRead &&
+        S_ISREG(statusAfter.st_mode) &&
+        extentAfter.mappedLength == fileLength &&
+        extentAfter.logicalLength == extentBefore.logicalLength &&
+        extentAfter.nodeCount == extentBefore.nodeCount &&
+        extentAfter.bucketCount == extentBefore.bucketCount &&
+        extentAfter.nodeBytes == extentBefore.nodeBytes &&
         statusAfter.st_dev == statusBefore.st_dev &&
         statusAfter.st_ino == statusBefore.st_ino &&
-        statusAfter.st_size == statusBefore.st_size &&
         statusAfter.st_mtimespec.tv_sec == statusBefore.st_mtimespec.tv_sec &&
         statusAfter.st_mtimespec.tv_nsec == statusBefore.st_mtimespec.tv_nsec &&
         statusAfter.st_ctimespec.tv_sec == statusBefore.st_ctimespec.tv_sec &&
         statusAfter.st_ctimespec.tv_nsec == statusBefore.st_ctimespec.tv_nsec;
     if (!fileUnchanged) {
-        if (failureOut) *failureOut =
-            @"stock-api-source-registry-readback-changed";
+        if (failureOut) *failureOut = [NSString stringWithFormat:
+            @"stock-api-source-registry-readback-changed:%@",
+            extentAfterStage ?: @"metadata"];
         return nil;
     }
     return [entries copy];
@@ -4991,14 +5439,18 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
         if (failureOut) *failureOut = @"stock-api-source-registry-input";
         return NO;
     }
+    batch.auditSourceRegistryReferenceDiagnostics = nil;
 
     NSUInteger identifierCount = 0;
     NSString *failure = nil;
     NSString *readbackFailure = nil;
     NSArray<NSData *> *identifierData = nil;
     NSArray<NSData *> *registered = nil;
-    NSArray<NSData *> *immediate = nil;
     NSArray<NSData *> *freshValues = nil;
+    NSDictionary<NSString *, id> *referenceDiagnostics = nil;
+    NSDictionary<NSString *, id> *freshReferenceDiagnostics = nil;
+    NSString *mapFailure = nil;
+    NSString *freshMapFailure = nil;
     uint64_t identifiers = cnd_publisher_resolve_airdrop_source_identifiers(
         canonicalIcon, scratch, &identifierCount,
         &identifierData, &failure);
@@ -5008,7 +5460,7 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
     if (!result.identifiersResolved) goto finish;
 
     uint64_t registry = cnd_publisher_source_registry_map(
-        batch, managerCache, scratch, YES, NULL);
+        batch, managerCache, scratch, YES, &mapFailure);
     uint64_t registryClass = registry ? r_dlsym_call(
         R_TIMEOUT, "object_getClass", registry,
         0, 0, 0, 0, 0, 0, 0) : 0;
@@ -5017,7 +5469,10 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
             registryClass, "addData:forUUID:",
             "v32@0:8@16@24", NULL);
     if (!registry) {
-        failure = @"stock-api-source-registry-open";
+        failure = mapFailure.length > 0
+            ? [@"stock-api-source-registry-open:"
+                stringByAppendingString:mapFailure]
+            : @"stock-api-source-registry-open";
         goto finish;
     }
     if (!registryABI || !remote_call_current_success()) {
@@ -5029,7 +5484,8 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
         registry, unitUUID, scratch,
         batch.auditSourceRegistryFileDescriptor,
         batch.auditSourceRegistryFileLength,
-        &readbackFailure);
+        &readbackFailure, &referenceDiagnostics);
+    batch.auditSourceRegistryReferenceDiagnostics = referenceDiagnostics;
     if (!registered || readbackFailure) {
         failure = readbackFailure ?:
             @"stock-api-source-registry-readback";
@@ -5063,62 +5519,30 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
             }
         }
 
-        int fileDescriptor = batch.auditSourceRegistryFileDescriptor;
-        int statResult = fileDescriptor >= 0 &&
-            batch.auditSourceRegistryFileWritable
-            ? (int)r_dlsym_call(
-                R_TIMEOUT, "fstat", (uint64_t)fileDescriptor, scratch,
-                0, 0, 0, 0, 0, 0)
-            : -1;
-        struct stat fileStatus = {0};
-        BOOL statusRead = statResult == 0 &&
-            remote_call_current_success() &&
-            remote_read(scratch, &fileStatus, sizeof(fileStatus));
-        uint64_t fileLength = statusRead && fileStatus.st_size > 0
-            ? (uint64_t)fileStatus.st_size : 0;
-        if (!statusRead || !S_ISREG(fileStatus.st_mode) ||
-            fileLength < 0x14 ||
-            fileLength >
-                CNDIconServicesPublisherMaximumPersistentIndexLength) {
-            failure = @"stock-api-source-registry-write";
+        uint64_t writeMapData = cnd_publisher_audit_object_ivar(
+            registry, "_data", 0x10, scratch);
+        CNDIconServicesSourceRegistryExtent writeExtent = {0};
+        NSString *writeExtentStage = nil;
+        BOOL writeExtentReady =
+            batch.auditSourceRegistryFileWritable && writeMapData &&
+            cnd_publisher_source_registry_extent(
+                writeMapData, -1, scratch,
+                &writeExtent, &writeExtentStage);
+        cnd_publisher_record_source_registry_extent(
+            batch, &writeExtent, writeExtentStage);
+        if (!writeExtentReady) {
+            failure = [NSString stringWithFormat:
+                @"stock-api-source-registry-write-extent:%@",
+                writeExtentStage ?: @"unknown"];
             goto finish;
         }
-        batch.auditSourceRegistryFileLength = fileLength;
-        uint64_t writableMap = r_dlsym_call(
-            R_TIMEOUT, "mmap", 0, fileLength,
-            PROT_READ | PROT_WRITE, MAP_SHARED,
-            (uint64_t)fileDescriptor, 0, 0, 0);
-        BOOL writableMapReady = writableMap &&
-            writableMap != UINT64_MAX && remote_call_current_success();
-        int64_t syncResult = writableMapReady
-            ? (int64_t)r_dlsym_call(
-                R_TIMEOUT, "msync", writableMap, fileLength, MS_SYNC,
-                0, 0, 0, 0, 0)
-            : -1;
-        int64_t unmapResult = writableMapReady &&
-            remote_call_current_success()
-            ? (int64_t)r_dlsym_call(
-                R_TIMEOUT, "munmap", writableMap, fileLength,
-                0, 0, 0, 0, 0, 0)
-            : -1;
-        result.writeFlushed = writableMapReady && syncResult == 0 &&
-            unmapResult == 0 &&
+        int64_t syncResult = (int64_t)r_dlsym_call(
+            R_TIMEOUT, "msync", writeExtent.mappedBytes,
+            writeExtent.mappedLength, MS_SYNC, 0, 0, 0, 0, 0);
+        result.writeFlushed = syncResult == 0 &&
             remote_call_current_success();
         if (!result.writeFlushed) {
-            failure = @"stock-api-source-registry-write";
-            goto finish;
-        }
-
-        immediate = cnd_publisher_source_registry_entries(
-            registry, unitUUID, scratch, fileDescriptor, fileLength,
-            &readbackFailure);
-        result.writeVerified = immediate && !readbackFailure &&
-            cnd_publisher_source_array_contains_all(
-                immediate, identifierData,
-                NULL, &readbackFailure);
-        if (!result.writeVerified || readbackFailure) {
-            failure = readbackFailure ?:
-                @"stock-api-source-registry-readback";
+            failure = @"stock-api-source-registry-write-msync";
             goto finish;
         }
     } else {
@@ -5136,23 +5560,47 @@ static BOOL cnd_publisher_repair_airdrop_source_registry(
         goto finish;
     }
     uint64_t freshRegistry = cnd_publisher_source_registry_map(
-        batch, managerCache, scratch, YES, NULL);
+        batch, managerCache, scratch, YES, &freshMapFailure);
+    if (freshRegistry && result.writeIssued) {
+        int syncDescriptor = batch.auditSourceRegistryFileDescriptor;
+        int64_t syncResult = syncDescriptor >= 0
+            ? (int64_t)r_dlsym_call(
+                R_TIMEOUT, "fsync", (uint64_t)syncDescriptor,
+                0, 0, 0, 0, 0, 0, 0)
+            : -1;
+        result.writeFlushed = result.writeFlushed &&
+            syncResult == 0 && remote_call_current_success();
+        if (!result.writeFlushed) {
+            failure = @"stock-api-source-registry-write-fsync";
+            goto finish;
+        }
+    }
     freshValues = freshRegistry
         ? cnd_publisher_source_registry_entries(
             freshRegistry, unitUUID, scratch,
             batch.auditSourceRegistryFileDescriptor,
             batch.auditSourceRegistryFileLength,
-            &readbackFailure)
+            &readbackFailure, &freshReferenceDiagnostics)
         : nil;
+    if (freshRegistry) {
+        batch.auditSourceRegistryReferenceDiagnostics =
+            freshReferenceDiagnostics;
+    }
     result.freshReadbackVerified = freshRegistry && freshValues &&
         !readbackFailure &&
         cnd_publisher_source_array_contains_all(
             freshValues, identifierData,
             &result.entryCountAfter, &readbackFailure);
+    if (result.writeIssued) {
+        result.writeVerified = result.freshReadbackVerified;
+    }
     if (!result.freshReadbackVerified || readbackFailure) {
         failure = readbackFailure ?: (freshRegistry
             ? @"stock-api-source-registry-readback"
-            : @"stock-api-source-registry-open");
+            : (freshMapFailure.length > 0
+                ? [@"stock-api-source-registry-open:"
+                    stringByAppendingString:freshMapFailure]
+                : @"stock-api-source-registry-open"));
     }
 
 finish:
@@ -5226,6 +5674,7 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
             @"message": @"The applied-state audit requires a valid bundle and descriptor specification.",
         };
     }
+    batch.auditSourceRegistryReferenceDiagnostics = nil;
 
     __block BOOL remoteOK = NO;
     __block BOOL abiReady = NO;
@@ -5690,12 +6139,16 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
                             @"audit-source-registry";
                         break;
                     }
+                    NSDictionary<NSString *, id> *referenceDiagnostics = nil;
                     NSArray<NSData *> *sourceIdentifiers =
                         cnd_publisher_source_registry_entries(
                             sourceRegistry, indexedUUID, auditScratch,
                             batch.auditSourceRegistryFileDescriptor,
                             batch.auditSourceRegistryFileLength,
-                            &sourceFailure);
+                            &sourceFailure,
+                            &referenceDiagnostics);
+                    batch.auditSourceRegistryReferenceDiagnostics =
+                        referenceDiagnostics;
                     if (!sourceIdentifiers || sourceFailure) {
                         failure = sourceFailure ?:
                             @"audit-source-registry-readback";
@@ -5804,6 +6257,24 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
             @"validated-file-bounded-pread",
         @"sourceRegistryFileLength":
             @(batch.auditSourceRegistryFileLength),
+        @"sourceRegistryLogicalLength":
+            @(batch.auditSourceRegistryLogicalLength),
+        @"sourceRegistryPaddingLength":
+            @(batch.auditSourceRegistryPaddingLength),
+        @"sourceRegistryFormat":
+            @(batch.auditSourceRegistryFormat),
+        @"sourceRegistryNodeCount":
+            @(batch.auditSourceRegistryNodeCount),
+        @"sourceRegistryBucketCount":
+            @(batch.auditSourceRegistryBucketCount),
+        @"sourceRegistryNodeBytes":
+            @(batch.auditSourceRegistryNodeBytes),
+        @"sourceRegistryExtentStage":
+            batch.auditSourceRegistryExtentStage ?: @"not-started",
+        @"sourceRegistryReferenceDiagnostics":
+            batch.auditSourceRegistryReferenceDiagnostics ?: @{
+                @"classification": @"not-observed",
+            },
         @"sourceRegistryEntryCount": @(sourceRegistryEntryCount),
         @"sourceRegistryDataPresent": @(sourceRegistryDataPresent),
         @"sourceRegistryDataLength": @(sourceRegistryData.length),

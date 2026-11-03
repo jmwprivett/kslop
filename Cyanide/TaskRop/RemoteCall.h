@@ -81,6 +81,23 @@ typedef struct {
     char lastStableFailureReason[96];
 } RemoteCallDebugSnapshot;
 
+/* Result of transferring one existing send right into the exact task bound
+ * to the current identity-bootstrap session.  The transfer uses a temporary
+ * target-owned receive right and a normal complex Mach message so the kernel
+ * chooses the target name; this is required for kernel-object rights such as
+ * fileports, which cannot safely be inserted under a caller-chosen name. */
+typedef struct {
+    bool taskRightAvailable;
+    kern_return_t mailboxAllocateResult;
+    kern_return_t mailboxExtractResult;
+    mach_msg_return_t messageSendResult;
+    mach_msg_return_t messageReceiveResult;
+    bool descriptorValidated;
+    kern_return_t mailboxCleanupResult;
+    mach_port_name_t targetName;
+    char failureStage[64];
+} RemoteCallSendRightTransferReport;
+
 // Result of the terminal, one-way owner self-termination request.  Dispatch
 // possible means the exact bound session accepted the request for dispatch;
 // it never means that the process has exited.  The caller must prove owner
@@ -179,6 +196,16 @@ bool remote_call_copy_original_thread_state(
 // no target state is changed by this accessor.
 size_t remote_call_copy_original_thread_states(
     arm_thread_state64_internal *outStates, size_t capacity);
+// Copies a send right into the currently bound physical target through a
+// bounded Mach-message handoff. The caller retains localRight and owns the
+// returned target name until remote_call_deallocate_target_send_right().
+bool remote_call_transfer_send_right_to_target(
+    mach_port_t localRight,
+    mach_port_name_t *targetNameOut,
+    RemoteCallSendRightTransferReport *reportOut);
+// Drops one send-right user reference in the currently bound target task.
+kern_return_t remote_call_deallocate_target_send_right(
+    mach_port_name_t targetName);
 void remote_call_clear_shmem_cache_public(const char *reason);
 // Dispatches a target self-kill only for the currently active session whose
 // PID/proc/task exactly match the supplied identity.  This uses the existing

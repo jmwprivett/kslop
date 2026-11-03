@@ -1492,6 +1492,12 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
              springBoardPID, bootEpoch, generation.UTF8String ?: "");
     if (boundaryOnly) {
         log_user("[QUEUE] No post-respring actions remain; the completed transaction will not create an empty continuation.\n");
+    } else {
+        // The durable AwaitingRespring checkpoint is the sole continuation
+        // authority. Arm the bounded process-lifetime/foreground bridge only
+        // after that checkpoint exists and only when real phase-two work
+        // remains; its main-queue block is enqueued before the UI notification.
+        settings_arm_queued_post_respring_foreground_handoff();
     }
     [self notifyChange];
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -2054,6 +2060,27 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         [self runCoordinatorBeforeRespring];
     });
+}
+
+- (BOOL)resumePendingPostRespringActionsIfReady
+{
+    NSCAssert(NSThread.isMainThread,
+              @"Queued post-respring resume belongs on main");
+    @synchronized (self) {
+        if (self.durableStoreUnavailable || self.commitInFlight ||
+            !self.transaction ||
+            self.transaction.state !=
+                CNDQueuedTransactionStateAwaitingRespring ||
+            self.transaction.preRespringSpringBoardPID <= 1) return NO;
+        NSArray<CNDQueuedAction *> *remaining =
+            CNDQueuedActionsForExecutionPhase(
+                self.transaction.actions,
+                CNDQueuedActionPhaseAfterRespring,
+                YES);
+        if (remaining.count == 0) return NO;
+    }
+    [self commit];
+    return self.commitInFlight;
 }
 
 - (void)commit

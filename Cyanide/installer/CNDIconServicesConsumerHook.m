@@ -12,6 +12,7 @@
 #import "../tweaks/themer.h"
 
 #import <dlfcn.h>
+#import <errno.h>
 #import <fcntl.h>
 #import <mach-o/fat.h>
 #import <mach-o/loader.h>
@@ -19,6 +20,7 @@
 #import <signal.h>
 #import <stdio.h>
 #import <string.h>
+#import <sys/fileport.h>
 #import <sys/mman.h>
 #import <sys/stat.h>
 #import <unistd.h>
@@ -423,12 +425,62 @@ static bool cnd_consumer_map_physical_payload(
         (uint64_t)-1, 0, 0, 0);
     bool allocationLive = remoteBase && remoteBase != UINT64_MAX &&
         remote_call_current_success();
-    uint64_t remotePath = allocationLive
-        ? r_alloc_str(path.fileSystemRepresentation) : 0;
-    int64_t openResult = remotePath ? (int64_t)r_dlsym_call(
-        R_TIMEOUT, "open", remotePath, O_RDONLY | O_CLOEXEC,
-        0, 0, 0, 0, 0, 0) : -1;
-    int openError = openResult < 0 ? cnd_consumer_remote_errno() : 0;
+    bool usesLabTransport = remote_call_uses_lab_backend();
+    int localFD = -1;
+    int localOpenError = 0;
+    fileport_t localFileport = MACH_PORT_NULL;
+    int makeportResult = -1;
+    int makeportError = 0;
+    mach_port_name_t targetFileport = MACH_PORT_NULL;
+    RemoteCallSendRightTransferReport transfer = {0};
+    bool fileportTransferred = false;
+    int64_t openResult = -1;
+    int openError = 0;
+    kern_return_t targetFileportCleanup = KERN_SUCCESS;
+    if (usesLabTransport) {
+        /* The explicit root-harness backend has no physical identity task
+         * right. Preserve its existing target-path route; physical sessions
+         * never enter this branch. */
+        uint64_t remotePath = allocationLive
+            ? r_alloc_str(path.fileSystemRepresentation) : 0;
+        openResult = remotePath ? (int64_t)r_dlsym_call(
+            R_TIMEOUT, "open", remotePath, O_RDONLY | O_CLOEXEC,
+            0, 0, 0, 0, 0, 0) : -1;
+        openError = openResult < 0 ? cnd_consumer_remote_errno() : 0;
+        if (remotePath && remote_call_current_success()) r_free(remotePath);
+    } else {
+        localFD = allocationLive
+            ? open(path.fileSystemRepresentation, O_RDONLY | O_CLOEXEC) : -1;
+        localOpenError = localFD < 0 ? errno : 0;
+        makeportResult = localFD >= 0
+            ? fileport_makeport(localFD, &localFileport) : -1;
+        makeportError = makeportResult != 0 ? errno : 0;
+        fileportTransferred = makeportResult == 0 &&
+            MACH_PORT_VALID(localFileport) &&
+            remote_call_transfer_send_right_to_target(
+                localFileport, &targetFileport, &transfer);
+        openResult = fileportTransferred ? (int64_t)r_dlsym_call(
+            R_TIMEOUT, "fileport_makefd", targetFileport,
+            0, 0, 0, 0, 0, 0, 0) : -1;
+        openError = openResult < 0 && fileportTransferred
+            ? cnd_consumer_remote_errno() : 0;
+        targetFileportCleanup = MACH_PORT_VALID(targetFileport)
+            ? remote_call_deallocate_target_send_right(targetFileport)
+            : KERN_SUCCESS;
+    }
+    if (MACH_PORT_VALID(localFileport)) {
+        mach_port_deallocate(mach_task_self_, localFileport);
+    }
+    if (localFD >= 0) close(localFD);
+    bool descriptorImported = openResult >= 0 &&
+        targetFileportCleanup == KERN_SUCCESS &&
+        remote_call_current_success();
+    const char *fileportStage = usesLabTransport
+        ? (openResult >= 0 ? "lab-target-open" : "lab-open-failed") :
+        (localFD < 0 ? "local-open" :
+        (makeportResult != 0 ? "makeport" :
+         (transfer.failureStage[0] ? transfer.failureStage :
+          (fileportTransferred ? "ok" : "transfer"))));
     /* Keep both F_CHECK_LV's input structure and its diagnostic output in the
      * anonymous mapping created in this exact target task. A null/zero-length
      * lv_error_message works when validation succeeds (as it did in
@@ -442,7 +494,7 @@ static bool cnd_consumer_map_physical_payload(
         (sizeof(fchecklv_t) + 15U) & ~15U;
     const size_t validationStorageLength =
         validationMessageOffset + validationMessageCapacity;
-    uint64_t checkAddress = openResult >= 0 &&
+    uint64_t checkAddress = descriptorImported &&
         mappingLength - contextOffset >= validationStorageLength
         ? remoteBase + contextOffset : 0;
     uint64_t validationMessageAddress = checkAddress
@@ -514,7 +566,6 @@ static bool cnd_consumer_map_physical_payload(
             R_TIMEOUT, "close", (uint64_t)openResult,
             0, 0, 0, 0, 0, 0, 0);
     }
-    if (remotePath && remote_call_current_success()) r_free(remotePath);
     bool codeMappingLive = allocationLive && mappedCode == remoteBase &&
         remote_call_current_success();
 
@@ -546,24 +597,37 @@ static bool cnd_consumer_map_physical_payload(
     bool exact = codeMappingLive && contextWritten &&
         contextRead && remote_call_current_success() &&
         memcmp(observed.bytes, context, contextLength) == 0;
+    bool failedMappingCleaned = !allocationLive;
     if (!exact && allocationLive && remote_call_current_success()) {
-        (void)r_dlsym_call(
+        failedMappingCleaned = (int64_t)r_dlsym_call(
             R_TIMEOUT, "munmap", remoteBase, mappingLength,
-            0, 0, 0, 0, 0, 0);
+            0, 0, 0, 0, 0, 0) == 0 &&
+            remote_call_current_success();
     }
     if (!exact) {
+        /* Zero outputs mean this helper owns no live mapping. If cleanup
+         * could not be proved, return the exact allocation so the caller can
+         * retry cleanup or retire only that disposable target process. */
+        if (allocationLive && !failedMappingCleaned) {
+            *remoteBaseOut = remoteBase;
+            *mappingLengthOut = mappingLength;
+        }
         if (diagnostic && diagnosticLength) {
             snprintf(diagnostic, diagnosticLength,
-                     "consumer-vnode-map:open=%lld/%d:lv-arg=%#llx:lv-output=%#llx:lv-written=%d:lv=%lld/%d:lv-message=%s:lv-policy-fallback=%d:map=%#llx/%d:context=%d",
+                     "consumer-vnode-map:fp=%s:lo=%d/%d:mp=%d/%d:ma=%x:mx=%x:send=%x:recv=%x:fd=%lld/%d:pc=%x:lv=%lld/%d:map=%#llx/%d:ctx=%d:clean=%d:lv-message=%s",
+                     fileportStage,
+                     localFD >= 0, localOpenError,
+                     makeportResult, makeportError,
+                     transfer.mailboxAllocateResult,
+                     transfer.mailboxExtractResult,
+                     transfer.messageSendResult,
+                     transfer.messageReceiveResult,
                      (long long)openResult, openError,
-                     (unsigned long long)checkAddress,
-                     (unsigned long long)validationMessageAddress,
-                     checkWritten,
+                     targetFileportCleanup,
                      (long long)validationResult, validationError,
-                     validationMessage[0] ? validationMessage : "-",
-                     policyFallbackUsed,
                      (unsigned long long)mappedCode, mapError,
-                     contextRead);
+                     contextRead, failedMappingCleaned,
+                     validationMessage[0] ? validationMessage : "-");
         }
         return false;
     }

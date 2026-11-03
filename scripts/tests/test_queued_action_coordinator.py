@@ -135,6 +135,35 @@ class QueuedActionCoordinatorTests(unittest.TestCase):
         self.assertIn("settings_current_springboard_pid", body)
         self.assertIn("settings_current_boot_epoch", body)
 
+    def test_real_post_respring_work_arms_foreground_handoff(self) -> None:
+        body = self.queue_method(
+            "- (void)runCoordinatorBeforeRespring",
+            "- (BOOL)executeSpringBoardFixesAction:",
+        )
+        persisted = body.index("persistDurableTransaction", body.index(
+            "CNDQueuedTransactionStateAwaitingRespring"
+        ))
+        arm = body.index(
+            "settings_arm_queued_post_respring_foreground_handoff", persisted
+        )
+        notify = body.index("PackageQueueReadyForRespringNotification", arm)
+        self.assertLess(persisted, arm)
+        self.assertLess(arm, notify)
+        self.assertIn("if (boundaryOnly)", body[:arm])
+        self.assertIn("} else {", body[:arm])
+
+        resume = self.queue_method(
+            "- (BOOL)resumePendingPostRespringActionsIfReady",
+            "- (void)commit",
+        )
+        self.assertIn("CNDQueuedTransactionStateAwaitingRespring", resume)
+        self.assertIn("CNDQueuedActionPhaseAfterRespring", resume)
+        self.assertIn("remaining.count == 0", resume)
+        self.assertIn("[self commit]", resume)
+        self.assertIn(
+            "resumePendingPostRespringActionsIfReady", self.queue_h
+        )
+
     def test_ui_runs_exact_three_second_countdown_then_shared_respring(self) -> None:
         self.assertIn("PackageQueueReadyForRespringNotification", self.queue_h)
         body = self.progress[self.progress.index(

@@ -327,8 +327,10 @@ class LabKernelProviderTests(unittest.TestCase):
                       self.pac_integration_probe)
 
     def test_kernel_primitives_require_kernel_capability(self) -> None:
+        # read, write, and the termination quiesce path all route through the
+        # lab kernel provider when it is active.
         self.assertEqual(
-            self.exploit.count("if (cnd_lab_kernel_rw_active())"), 2
+            self.exploit.count("if (cnd_lab_kernel_rw_active())"), 3
         )
         self.assertNotIn("if (cnd_lab_krw_active()) {", self.exploit)
 

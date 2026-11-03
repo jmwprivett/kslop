@@ -840,6 +840,10 @@ static BOOL settings_cleanup_entry_should_stop(NSUserDefaults *d,
 }
 
 static volatile int g_app_in_background = 0;
+// Scene lifecycle callbacks run on main. A cold launch starts with one open
+// pending; subsequent opens are marked by sceneWillEnterForeground and consumed
+// only once UIKit has actually made the app active.
+static BOOL g_sbl_automatic_repair_open_pending = YES;
 static volatile int g_screen_awake = 1;
 static volatile int g_screen_locked = 0;
 static volatile int g_screen_lock_state_logged = 0;
@@ -853,23 +857,52 @@ static int g_springboard_lockstate_notify_token = NOTIFY_TOKEN_INVALID;
 static int g_springboard_finished_startup_notify_token = NOTIFY_TOKEN_INVALID;
 static int g_springboard_app_state_notify_token = NOTIFY_TOKEN_INVALID;
 static int g_springboard_frontmost_notify_token = NOTIFY_TOKEN_INVALID;
-static int g_sbl_app_installed_notify_token = NOTIFY_TOKEN_INVALID;
-static int g_sbl_app_updated_notify_token = NOTIFY_TOKEN_INVALID;
-static int g_sbl_ls_registered_notify_token = NOTIFY_TOKEN_INVALID;
-static int g_sbl_ls_apps_changed_notify_token = NOTIFY_TOKEN_INVALID;
-static int g_sbl_mobile_installation_notify_token = NOTIFY_TOKEN_INVALID;
 static dispatch_source_t g_sbl_automatic_repair_timer;
+static id g_sbl_automatic_repair_power_observer;
+static UIDeviceBatteryState g_sbl_automatic_repair_last_power_state = UIDeviceBatteryStateUnknown;
+static BOOL g_sbl_automatic_repair_power_monitoring_was_enabled = NO;
 // Scheduler state belongs to the main queue; repair work stays off-main.
 static dispatch_source_t g_sbl_automatic_repair_wakeup;
 static NSString *g_sbl_automatic_repair_pending_reason;
 static NSUInteger g_sbl_automatic_repair_pending_attempt = 0;
 static NSTimeInterval g_sbl_automatic_repair_pending_deadline = 0;
+static BOOL g_sbl_automatic_repair_pending_immediate = NO;
 static NSTimeInterval g_sbl_automatic_repair_not_before = 0;
 static BOOL g_sbl_automatic_repair_running = NO;
 static const NSTimeInterval kSBLAutomaticRepairCooldown = 2.0 * 60.0;
 static volatile int g_sbl_automatic_hail_mary_confirmed = 0;
+static NSString * const kSBLSubstantialRepairRespringMarker =
+    @"SnowBoardSubstantialRepairRespringMarker.v1";
+static const NSTimeInterval kSBLSubstantialRepairRespringMaximumAge = 180.0;
+static const NSTimeInterval kQueuedPostRespringForegroundMaximumAge = 180.0;
+static volatile int g_sbl_substantial_repair_respring_armed = 0;
+static volatile int g_sbl_substantial_repair_respring_started = 0;
+static NSUInteger g_sbl_substantial_repair_respring_start_attempt = 0;
+static volatile int g_sbl_pre_respring_activation_running = 0;
+static NSUInteger g_sbl_pre_respring_activation_attempt = 0;
+static volatile int g_post_respring_activation_running = 0;
+static NSUInteger g_post_respring_activation_attempt = 0;
+static volatile int g_queue_post_respring_foreground_armed = 0;
 static void settings_schedule_snowboard_automatic_repair(
     NSString *reason, NSTimeInterval delay);
+static void settings_schedule_snowboard_automatic_repair_immediately(
+    NSString *reason);
+static void settings_enqueue_snowboard_automatic_repair(
+    NSString *reason, NSTimeInterval delay, NSUInteger attempt, BOOL immediate);
+static void settings_schedule_substantial_update_repair_respring(
+    NSDictionary<NSString *, id> *result, NSString *source);
+static void settings_attempt_substantial_repair_respring_if_ready(void);
+static void settings_schedule_post_respring_cyanide_activation(void);
+static NSDictionary<NSString *, id> *
+settings_substantial_repair_respring_marker(void);
+static void settings_clear_substantial_repair_respring_marker(
+    NSString *reason);
+static CNDQueuedTransaction *
+settings_queued_post_respring_handoff_transaction(void);
+static BOOL settings_queued_post_respring_handoff_is_armed(void);
+static void settings_clear_queued_post_respring_foreground_handoff(
+    NSString *reason);
+static void settings_resume_queued_post_respring_actions_if_ready(void);
 static const NSInteger kSBCDefaultDockIcons = 4;
 static const NSInteger kSBCDefaultCols = 4;
 static const NSInteger kSBCDefaultRows = 6;
@@ -1944,10 +1977,15 @@ static void settings_handle_springboard_restart(void)
         }
         printf("[SETTINGS] SpringBoard restart observed; dropped RemoteCall state (hadSession=%d)\n",
                (int)hadSession);
+        /* Every respring removes the process-local transparency redirect.
+         * Automatic Repair must prove it again after the replacement
+         * SpringBoard is ready, even when the prior pass had confirmed it. */
+        __sync_lock_test_and_set(&g_sbl_automatic_hail_mary_confirmed, 0);
         if (hadSession) {
             log_user("[APP] SpringBoard restarted; tweak sessions cleared. Hit Run to rebuild.\n");
         }
         settings_notify_remote_call_state_changed();
+        settings_schedule_post_respring_cyanide_activation();
     });
 }
 
@@ -2047,74 +2085,8 @@ static void settings_install_screen_awake_observers(void)
             g_springboard_frontmost_notify_token = NOTIFY_TOKEN_INVALID;
         }
 
-        // Automatic Repair consumes several overlapping notifications because
-        // no single Darwin channel covers App Store updates, direct installs,
-        // and LaunchServices re-registration on every supported build. The
-        // shared scheduler coalesces a burst into one journal-aware repair.
-        status = notify_register_dispatch("com.apple.mobile.application_installed",
-                                          &g_sbl_app_installed_notify_token,
-                                          dispatch_get_main_queue(), ^(int token) {
-            (void)token;
-            settings_schedule_snowboard_automatic_repair(
-                @"mobile application installed", 20.0);
-        });
-        if (status != NOTIFY_STATUS_OK) {
-            g_sbl_app_installed_notify_token = NOTIFY_TOKEN_INVALID;
-            printf("[SBR] app notify registration failed name=com.apple.mobile.application_installed status=%d\n",
-                   status);
-        }
-
-        status = notify_register_dispatch("com.apple.mobile.application_updated",
-                                          &g_sbl_app_updated_notify_token,
-                                          dispatch_get_main_queue(), ^(int token) {
-            (void)token;
-            settings_schedule_snowboard_automatic_repair(
-                @"mobile application updated", 20.0);
-        });
-        if (status != NOTIFY_STATUS_OK) {
-            g_sbl_app_updated_notify_token = NOTIFY_TOKEN_INVALID;
-            printf("[SBR] app notify registration failed name=com.apple.mobile.application_updated status=%d\n",
-                   status);
-        }
-
-        status = notify_register_dispatch("com.apple.LaunchServices.applicationRegistered",
-                                          &g_sbl_ls_registered_notify_token,
-                                          dispatch_get_main_queue(), ^(int token) {
-            (void)token;
-            settings_schedule_snowboard_automatic_repair(
-                @"launchservices application registered", 20.0);
-        });
-        if (status != NOTIFY_STATUS_OK) {
-            g_sbl_ls_registered_notify_token = NOTIFY_TOKEN_INVALID;
-            printf("[SBR] app notify registration failed name=com.apple.LaunchServices.applicationRegistered status=%d\n",
-                   status);
-        }
-
-        status = notify_register_dispatch("com.apple.LaunchServices.ApplicationsChanged",
-                                          &g_sbl_ls_apps_changed_notify_token,
-                                          dispatch_get_main_queue(), ^(int token) {
-            (void)token;
-            settings_schedule_snowboard_automatic_repair(
-                @"launchservices applications changed", 20.0);
-        });
-        if (status != NOTIFY_STATUS_OK) {
-            g_sbl_ls_apps_changed_notify_token = NOTIFY_TOKEN_INVALID;
-            printf("[SBR] app notify registration failed name=com.apple.LaunchServices.ApplicationsChanged status=%d\n",
-                   status);
-        }
-
-        status = notify_register_dispatch("com.apple.mobile.installation_proxy.installed",
-                                          &g_sbl_mobile_installation_notify_token,
-                                          dispatch_get_main_queue(), ^(int token) {
-            (void)token;
-            settings_schedule_snowboard_automatic_repair(
-                @"mobile installation proxy installed", 20.0);
-        });
-        if (status != NOTIFY_STATUS_OK) {
-            g_sbl_mobile_installation_notify_token = NOTIFY_TOKEN_INVALID;
-            printf("[SBR] app notify registration failed name=com.apple.mobile.installation_proxy.installed status=%d\n",
-                   status);
-        }
+        // Update Repair checks app/LaunchServices changes on open, power
+        // transitions, and the external-power audit cadence.
         // If the live loop tripped its 3-failure exit during a background
         // window, the screen-wake darwin notifications won't fire (the screen
         // never blanked) and the loop stays dead. Re-arm on app foreground.
@@ -2124,10 +2096,10 @@ static void settings_install_screen_awake_observers(void)
                                                       usingBlock:^(NSNotification *note) {
             (void)note;
             (void)settings_refresh_screen_awake_state("app became active");
+            settings_attempt_substantial_repair_respring_if_ready();
+            settings_resume_queued_post_respring_actions_if_ready();
             settings_apply_statbar_once_async("app became active");
             settings_schedule_themer_quiet_repair_burst("app became active");
-            settings_schedule_snowboard_automatic_repair(
-                @"app became active", 20.0);
         }];
 
         (void)settings_refresh_screen_awake_state("startup");
@@ -2517,6 +2489,8 @@ static void settings_log_run_context(void)
 }
 
 static BOOL settings_ensure_kexploit(void);
+static BOOL settings_ensure_kexploit_recovery_only(void);
+static const NSUInteger kSettingsKRWAcquisitionRetryCount = 3;
 
 bool settings_ensure_krw_for_probe(void)
 {
@@ -2548,6 +2522,20 @@ static BOOL settings_ensure_kexploit(void)
         settings_notify_remote_call_state_changed();
     }
 
+    CNDKRWPersistenceRecoveryResult recoveryResult =
+        krw_persistence_recover_with_status();
+    if (recoveryResult == CNDKRWPersistenceRecoveryRecovered &&
+        kexploit_krw_ready()) {
+        g_kexploit_done = YES;
+        settings_notify_remote_call_state_changed();
+        log_user("[KRW] Recovered the parked same-boot KRW generation; fresh acquisition was skipped.\n");
+        return YES;
+    }
+    if (recoveryResult == CNDKRWPersistenceRecoveryRetryableFailure) {
+        log_user("[KRW] Parked same-boot recovery is temporarily unavailable. Cyanide preserved it and refused to run a fresh exploit over the retained generation.\n");
+        return NO;
+    }
+
     // Reaching the acquisition path means there is no verified continuity
     // with the KRW generation that recorded the persisted ACTIVE markers.
     // A fresh primitive can operate on the current boot, but it must never be
@@ -2558,8 +2546,35 @@ static BOOL settings_ensure_kexploit(void)
         settings_notify_package_queue_changed_async();
     }
 
-    int res = kexploit_opa334();
-    CNDKExploitOutcome exploitOutcome = kexploit_last_outcome();
+    int res = -1;
+    CNDKExploitOutcome exploitOutcome = CNDKExploitOutcomeNone;
+    NSUInteger retryIndex = 0;
+    do {
+        res = kexploit_opa334();
+        exploitOutcome = kexploit_last_outcome();
+        if (res == 0) break;
+
+        BOOL safelyRetryable =
+            exploitOutcome == CNDKExploitOutcomeCleanFailure ||
+            exploitOutcome == CNDKExploitOutcomeVerifiedRollback;
+        if (!safelyRetryable ||
+            retryIndex >= kSettingsKRWAcquisitionRetryCount) {
+            break;
+        }
+
+        retryIndex++;
+        /* Back off briefly between acquisition attempts so a retry does not
+         * hammer the allocator while the previous pass is still settling. */
+        usleep(500000);
+        printf("[SETTINGS] retrying KRW after safe failure retry=%lu/%lu outcome=%d\n",
+               (unsigned long)retryIndex,
+               (unsigned long)kSettingsKRWAcquisitionRetryCount,
+               exploitOutcome);
+        log_user("[KRW] Acquisition failed safely; retrying automatically (%lu/%lu).\n",
+                 (unsigned long)retryIndex,
+                 (unsigned long)kSettingsKRWAcquisitionRetryCount);
+    } while (YES);
+
     if (res != 0) {
         const char *classification =
             exploitOutcome == CNDKExploitOutcomeCleanFailure ? "clean-failure" :
@@ -5158,23 +5173,20 @@ static BOOL settings_ensure_kexploit_recovery_only(void)
         return NO;
     }
 
-    if (g_kexploit_done) {
-        if (kexploit_krw_ready() && krw_persistence_launchd_holds_krw()) {
-            log_user("[KRW] Reusing parked/recovered KRW for NanoRegistry load.\n");
-            return YES;
-        }
-        log_user("[KRW] NanoRegistry load requires parked KRW recovery; live state is not eligible.\n");
-        return NO;
+    if (kexploit_krw_ready()) {
+        g_kexploit_done = YES;
+        log_user("[KRW] Reusing the live or recovered KRW generation; no acquisition was run.\n");
+        return YES;
     }
 
     if (!krw_persistence_has_saved_recovery()) {
-        log_user("[KRW] NanoRegistry load disabled: no parked KRW recovery state is saved.\n");
+        log_user("[KRW] Recovery-only request refused: no parked KRW recovery state is saved.\n");
         return NO;
     }
 
-    log_user("[KRW] NanoRegistry load: attempting parked recovery only; fresh spray is disabled for this button.\n");
+    log_user("[KRW] Attempting parked recovery only; fresh acquisition is disabled for this operation.\n");
     if (!krw_persistence_recover()) {
-        log_user("[KRW] NanoRegistry load failed: parked KRW recovery was not available.\n");
+        log_user("[KRW] Recovery-only request failed: parked KRW could not be recovered.\n");
         return NO;
     }
 
@@ -5186,14 +5198,23 @@ static BOOL settings_ensure_kexploit_recovery_only(void)
 void settings_reconcile_persisted_applied_state_on_launch(void)
 {
     BOOL continuity = NO;
+    BOOL recoveryUncertain = NO;
     if (settings_device_supported()) {
         if (kexploit_krw_ready()) {
             continuity = YES;
-        } else if (krw_persistence_has_saved_recovery() &&
-                   krw_persistence_recover() &&
-                   kexploit_krw_ready()) {
-            continuity = YES;
+        } else {
+            CNDKRWPersistenceRecoveryResult recoveryResult =
+                krw_persistence_recover_with_status();
+            continuity = recoveryResult == CNDKRWPersistenceRecoveryRecovered &&
+                kexploit_krw_ready();
+            recoveryUncertain =
+                recoveryResult == CNDKRWPersistenceRecoveryRetryableFailure;
         }
+    }
+
+    if (recoveryUncertain) {
+        log_user("[ACTIVE_STATE] Parked KRW recovery is temporarily unavailable; retained applied-state markers were preserved and no fresh exploit was run.\n");
+        return;
     }
 
     BOOL changed = NO;
@@ -5563,6 +5584,219 @@ static void settings_destroy_springboard_remote_call_locked(const char *reason)
     settings_destroy_springboard_remote_call_locked_internal(reason, YES);
 }
 
+static BOOL settings_request_cyanide_foreground_through_springboard(
+    const char *reason, BOOL forceClose)
+{
+    BOOL activated = NO;
+    @synchronized (settings_rc_lock()) {
+        if (!settings_ensure_springboard_remote_call_locked()) return NO;
+        NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier ?:
+            @"com.zeroxjf.ios-cyanide1";
+        uint64_t remoteIdentifier =
+            r_nsstr_retained(bundleIdentifier.UTF8String);
+        if (r_is_objc_ptr(remoteIdentifier)) {
+            (void)r_dlsym_call(
+                R_TIMEOUT, "SBSLaunchApplicationWithIdentifier",
+                remoteIdentifier, 0, 0, 0, 0, 0, 0, 0);
+            activated = remote_call_current_success();
+            if (remote_call_current_success()) {
+                (void)r_msg2_main(remoteIdentifier, "release", 0, 0, 0, 0);
+            }
+        }
+        /* Before the respring, an existing persistent tweak may own this
+         * session; cleanup will close it moments later.  After the respring,
+         * the activation session is always one-shot. */
+        if (forceClose || !activated ||
+            !settings_has_persistent_springboard_remote_call_user()) {
+            settings_destroy_springboard_remote_call_locked_internal_ex(
+                reason, YES, YES);
+        }
+    }
+    return activated;
+}
+
+static BOOL settings_has_armed_post_respring_foreground_handoff(void)
+{
+    BOOL substantial = __sync_fetch_and_add(
+        &g_sbl_substantial_repair_respring_armed, 0) &&
+        settings_substantial_repair_respring_marker() != nil;
+    return substantial || settings_queued_post_respring_handoff_is_armed();
+}
+
+static BOOL settings_attempt_post_respring_cyanide_activation(
+    BOOL *retryOut)
+{
+    if (retryOut) *retryOut = NO;
+    BOOL substantialArmed = __sync_fetch_and_add(
+        &g_sbl_substantial_repair_respring_armed, 0) != 0;
+    NSDictionary *marker = substantialArmed
+        ? settings_substantial_repair_respring_marker() : nil;
+    if (substantialArmed && !marker) {
+        settings_clear_substantial_repair_respring_marker(
+            @"the post-respring handoff expired");
+        substantialArmed = NO;
+    }
+    BOOL queueArmed = __sync_fetch_and_add(
+        &g_queue_post_respring_foreground_armed, 0) != 0;
+    CNDQueuedTransaction *queueTransaction = queueArmed
+        ? settings_queued_post_respring_handoff_transaction() : nil;
+    if (queueArmed && !queueTransaction) {
+        settings_clear_queued_post_respring_foreground_handoff(
+            @"the durable queue no longer needs after-respring work");
+        queueArmed = NO;
+    }
+    if (!substantialArmed && !queueArmed) return YES;
+    if (!settings_try_claim_actions_lock(
+            "post-respring Cyanide activation",
+            "[HANDOFF] Post-respring Cyanide activation is waiting for another action.")) {
+        if (retryOut) *retryOut = YES;
+        return NO;
+    }
+
+    BOOL activated = NO;
+    BOOL retry = NO;
+    @try {
+        /* The controlled cleanup parked this exact KRW generation in launchd.
+         * Auto-return is continuity-only: it never runs a fresh exploit merely
+         * to foreground the app. */
+        if (!kexploit_krw_ready()) {
+            if (!krw_persistence_has_saved_recovery() ||
+                !krw_persistence_recover() || !kexploit_krw_ready()) {
+                log_user("[HANDOFF] Replacement SpringBoard is ready, but parked KRW continuity could not be recovered; Cyanide was not auto-foregrounded.\n");
+                retry = YES;
+                return NO;
+            }
+        }
+        g_kexploit_done = YES;
+        if (CNDTransientAppliedStateReconcileCurrentEpoch()) {
+            settings_notify_package_queue_changed_async();
+        }
+        pid_t currentPID = settings_current_springboard_pid();
+        pid_t substantialPreviousPID = marker
+            ? [marker[@"springBoardPID"] intValue] : 0;
+        pid_t queuePreviousPID = queueTransaction
+            ? queueTransaction.preRespringSpringBoardPID : 0;
+        if (currentPID <= 1 ||
+            (substantialPreviousPID > 1 &&
+             currentPID == substantialPreviousPID) ||
+            (queuePreviousPID > 1 && currentPID == queuePreviousPID)) {
+            retry = YES;
+            return NO;
+        }
+
+        activated = settings_request_cyanide_foreground_through_springboard(
+            "post-respring Cyanide activation", YES);
+        if (!activated) retry = YES;
+        if (activated) {
+            log_user("[HANDOFF] Replacement SpringBoard pid=%d accepted Cyanide foreground activation.\n",
+                     currentPID);
+            if (substantialArmed) {
+                settings_clear_substantial_repair_respring_marker(
+                    @"replacement SpringBoard accepted Cyanide activation");
+                settings_schedule_snowboard_automatic_repair(
+                    @"post-respring presentation repair", 2.0);
+            }
+            if (queueArmed) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (UIApplication.sharedApplication.applicationState ==
+                            UIApplicationStateActive) {
+                        settings_resume_queued_post_respring_actions_if_ready();
+                    }
+                });
+            }
+        }
+    } @finally {
+        settings_release_actions_lock();
+        if (retryOut) *retryOut = retry;
+    }
+    return activated;
+}
+
+static void settings_schedule_post_respring_cyanide_activation(void)
+{
+    if (!settings_has_armed_post_respring_foreground_handoff()) return;
+    if (!__sync_bool_compare_and_swap(
+            &g_post_respring_activation_running, 0, 1)) return;
+    NSUInteger attempt = ++g_post_respring_activation_attempt;
+    static const int64_t delays[] = {
+        500LL * NSEC_PER_MSEC,
+        1LL * NSEC_PER_SEC,
+        2LL * NSEC_PER_SEC,
+        5LL * NSEC_PER_SEC,
+        10LL * NSEC_PER_SEC,
+    };
+    NSUInteger delayIndex = MIN(attempt - 1,
+        (sizeof(delays) / sizeof(delays[0])) - 1);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delays[delayIndex]),
+                   dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        BOOL retry = NO;
+        (void)settings_attempt_post_respring_cyanide_activation(&retry);
+        __sync_lock_release(&g_post_respring_activation_running);
+        if (retry && attempt < (sizeof(delays) / sizeof(delays[0])) &&
+            settings_has_armed_post_respring_foreground_handoff()) {
+            settings_schedule_post_respring_cyanide_activation();
+        } else if (retry &&
+                   settings_has_armed_post_respring_foreground_handoff()) {
+            log_user("[HANDOFF] Cyanide foreground activation did not complete within the bounded post-respring retry window.\n");
+            if (__sync_fetch_and_add(
+                    &g_sbl_substantial_repair_respring_armed, 0)) {
+                settings_clear_substantial_repair_respring_marker(
+                    @"bounded post-respring activation attempts were exhausted");
+            }
+            if (__sync_fetch_and_add(
+                    &g_queue_post_respring_foreground_armed, 0)) {
+                settings_clear_queued_post_respring_foreground_handoff(
+                    @"bounded activation attempts were exhausted; the queue remains manually resumable");
+            }
+        }
+    });
+}
+
+static void settings_schedule_pre_respring_cyanide_activation(void)
+{
+    if (!__sync_fetch_and_add(
+            &g_sbl_substantial_repair_respring_armed, 0) ||
+        !settings_substantial_repair_respring_marker() ||
+        UIApplication.sharedApplication.applicationState ==
+            UIApplicationStateActive) return;
+    if (!__sync_bool_compare_and_swap(
+            &g_sbl_pre_respring_activation_running, 0, 1)) return;
+    NSUInteger attempt = ++g_sbl_pre_respring_activation_attempt;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        BOOL requested = NO;
+        if (kexploit_krw_ready() && settings_try_claim_actions_lock(
+                "pre-respring Cyanide activation",
+                "[SBR_AUTO] Cyanide foreground handoff is waiting for another action.")) {
+            @try {
+                requested =
+                    settings_request_cyanide_foreground_through_springboard(
+                        "pre-respring Cyanide activation", NO);
+            } @finally {
+                settings_release_actions_lock();
+            }
+        }
+        __sync_lock_release(&g_sbl_pre_respring_activation_running);
+        if (!requested) {
+            log_user("[SBR_AUTO] SpringBoard did not accept the pre-respring Cyanide foreground request (attempt %lu/3).\n",
+                     (unsigned long)attempt);
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     2LL * NSEC_PER_SEC),
+                       dispatch_get_main_queue(), ^{
+            if (!__sync_fetch_and_add(
+                    &g_sbl_substantial_repair_respring_armed, 0)) return;
+            if (UIApplication.sharedApplication.applicationState ==
+                    UIApplicationStateActive) {
+                settings_attempt_substantial_repair_respring_if_ready();
+            } else if (attempt < 3U) {
+                settings_schedule_pre_respring_cyanide_activation();
+            } else {
+                log_user("[SBR_AUTO] Cyanide could not be foregrounded automatically before the respring; the saved handoff will run if the app is opened within its bounded window.\n");
+            }
+        });
+    });
+}
+
 // SBCustomizer is a one-shot model mutation. Once the guarded apply returns,
 // its result no longer depends on keeping the synthetic call channel open.
 // Teardown can still take a bounded exception wait, so keep it serialized with
@@ -5784,7 +6018,15 @@ void settings_best_effort_termination_cleanup(const char *reason)
 
     BOOL locked = settings_acquire_actions_lock_wait("termination cleanup", 1500000);
     if (!locked) {
-        log_user("[CLEANUP] Last-chance cleanup skipped because another operation is still active.\n");
+        /* Do not abandon the launchd-held socket generation merely because a
+         * high-level operation still owns the broad action lock. Close KRW
+         * admission at the primitive, wait for its short transaction lock,
+         * and authoritatively park it before AppDelegate exits the process. */
+        BOOL parked = !g_kexploit_done ||
+            kexploit_quiesce_for_process_termination();
+        log_user(parked
+            ? "[CLEANUP] Active operation bypassed; the KRW primitive was quiesced and parked for same-boot recovery.\n"
+            : "[CLEANUP] Active operation bypassed, but the KRW primitive could not be verified parked before termination.\n");
         return;
     }
 
@@ -6224,6 +6466,310 @@ void settings_begin_system_edit_respring_with_completion(
                     started ? @"Respring started."
                             : @"No active window was available. Tap Retry to continue the saved respring.");
             }
+        });
+    });
+}
+
+static NSDictionary<NSString *, id> *
+settings_substantial_repair_respring_marker(void)
+{
+    id value = [NSUserDefaults.standardUserDefaults
+        dictionaryForKey:kSBLSubstantialRepairRespringMarker];
+    if (![value isKindOfClass:NSDictionary.class]) return nil;
+    NSDictionary<NSString *, id> *marker = value;
+    NSTimeInterval requestedAt = [marker[@"requestedAt"] doubleValue];
+    NSTimeInterval requestedBoot = [marker[@"bootEpoch"] doubleValue];
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    NSTimeInterval currentBoot = settings_current_boot_epoch_seconds();
+    pid_t previousPID = [marker[@"springBoardPID"] intValue];
+    BOOL fresh = previousPID > 1 && requestedAt > 0.0 && now >= requestedAt &&
+        now - requestedAt <= kSBLSubstantialRepairRespringMaximumAge &&
+        requestedBoot > 0.0 && currentBoot > 0.0 &&
+        fabs(requestedBoot - currentBoot) <= 120.0;
+    return fresh ? marker : nil;
+}
+
+static CNDQueuedTransaction *
+settings_queued_post_respring_handoff_transaction(void)
+{
+    CNDQueuedTransaction *transaction =
+        [PackageQueue sharedQueue].durableTransaction;
+    if (!transaction ||
+        transaction.state != CNDQueuedTransactionStateAwaitingRespring ||
+        transaction.preRespringSpringBoardPID <= 1) return nil;
+    NSArray<CNDQueuedAction *> *remaining =
+        CNDQueuedActionsForExecutionPhase(
+            transaction.actions, CNDQueuedActionPhaseAfterRespring, YES);
+    return remaining.count > 0 ? transaction : nil;
+}
+
+static BOOL settings_queued_post_respring_handoff_is_armed(void)
+{
+    if (!__sync_fetch_and_add(
+            &g_queue_post_respring_foreground_armed, 0)) return NO;
+    CNDQueuedTransaction *transaction =
+        settings_queued_post_respring_handoff_transaction();
+    if (!transaction) return NO;
+    NSTimeInterval age = NSDate.date.timeIntervalSince1970 -
+        transaction.updatedAt.timeIntervalSince1970;
+    return age >= 0.0 &&
+        age <= kQueuedPostRespringForegroundMaximumAge + 1.0;
+}
+
+static void settings_clear_queued_post_respring_foreground_handoff(
+    NSString *reason)
+{
+    BOOL wasArmed = __sync_lock_test_and_set(
+        &g_queue_post_respring_foreground_armed, 0) != 0;
+    if (!__sync_fetch_and_add(
+            &g_sbl_substantial_repair_respring_armed, 0)) {
+        g_post_respring_activation_attempt = 0;
+    }
+    settings_reconcile_snowboard_automatic_repair_lifetime();
+    if (wasArmed && reason.length > 0) {
+        log_user("[QUEUE] Cleared post-respring foreground handoff: %s.\n",
+                 reason.UTF8String);
+    }
+}
+
+void settings_arm_queued_post_respring_foreground_handoff(void)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        CNDQueuedTransaction *transaction =
+            settings_queued_post_respring_handoff_transaction();
+        if (!transaction) {
+            log_user("[QUEUE] Post-respring foreground handoff was not armed because no durable continuation is awaiting a boundary.\n");
+            return;
+        }
+        __sync_lock_test_and_set(
+            &g_queue_post_respring_foreground_armed, 1);
+        g_post_respring_activation_attempt = 0;
+        settings_reconcile_snowboard_automatic_repair_lifetime();
+        NSString *transactionIdentifier =
+            [transaction.transactionIdentifier copy];
+        log_user("[QUEUE] Armed bounded Cyanide foreground return for transaction %s.\n",
+                 transactionIdentifier.UTF8String ?: "unknown");
+        dispatch_after(dispatch_time(
+                           DISPATCH_TIME_NOW,
+                           (int64_t)((kQueuedPostRespringForegroundMaximumAge +
+                                      1.0) * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            CNDQueuedTransaction *current =
+                settings_queued_post_respring_handoff_transaction();
+            if (__sync_fetch_and_add(
+                    &g_queue_post_respring_foreground_armed, 0) &&
+                [current.transactionIdentifier
+                    isEqualToString:transactionIdentifier]) {
+                settings_clear_queued_post_respring_foreground_handoff(
+                    @"the bounded handoff window expired; the queue remains manually resumable");
+            }
+        });
+    });
+}
+
+static void settings_resume_queued_post_respring_actions_if_ready(void)
+{
+    NSCAssert(NSThread.isMainThread,
+              @"Queued post-respring resume belongs on main");
+    if (UIApplication.sharedApplication.applicationState !=
+            UIApplicationStateActive) return;
+    CNDQueuedTransaction *transaction =
+        settings_queued_post_respring_handoff_transaction();
+    if (!transaction) {
+        if (__sync_fetch_and_add(
+                &g_queue_post_respring_foreground_armed, 0)) {
+            settings_clear_queued_post_respring_foreground_handoff(
+                @"the durable continuation was completed or removed");
+        }
+        return;
+    }
+
+    NSString *krwFailure = nil;
+    if (!settings_prepare_queued_system_actions(&krwFailure)) {
+        log_user("[QUEUE] Foreground return is waiting for KRW before resuming after-respring work: %s\n",
+                 krwFailure.UTF8String ?: "unavailable");
+        return;
+    }
+    pid_t currentPID = settings_current_springboard_pid();
+    NSTimeInterval currentBoot = settings_current_boot_epoch();
+    BOOL bootChanged = transaction.bootEpoch > 0.0 && currentBoot > 0.0 &&
+        fabs(transaction.bootEpoch - currentBoot) > 5.0;
+    if (currentPID <= 1 ||
+        (currentPID == transaction.preRespringSpringBoardPID &&
+         !bootChanged)) {
+        log_user("[QUEUE] Foreground return arrived before the saved SpringBoard boundary; post-respring work remains queued.\n");
+        return;
+    }
+
+    if ([[PackageQueue sharedQueue]
+            resumePendingPostRespringActionsIfReady]) {
+        NSString *identifier = transaction.transactionIdentifier;
+        settings_clear_queued_post_respring_foreground_handoff(
+            @"Cyanide is foreground and the durable continuation started");
+        log_user("[QUEUE] Automatically resumed post-respring transaction %s.\n",
+                 identifier.UTF8String ?: "unknown");
+    }
+}
+
+static void settings_clear_substantial_repair_respring_marker(
+    NSString *reason)
+{
+    [NSUserDefaults.standardUserDefaults
+        removeObjectForKey:kSBLSubstantialRepairRespringMarker];
+    [NSUserDefaults.standardUserDefaults synchronize];
+    __sync_lock_test_and_set(&g_sbl_substantial_repair_respring_armed, 0);
+    __sync_lock_test_and_set(&g_sbl_substantial_repair_respring_started, 0);
+    __sync_lock_test_and_set(&g_sbl_pre_respring_activation_running, 0);
+    g_sbl_substantial_repair_respring_start_attempt = 0;
+    g_sbl_pre_respring_activation_attempt = 0;
+    if (!__sync_fetch_and_add(
+            &g_queue_post_respring_foreground_armed, 0)) {
+        g_post_respring_activation_attempt = 0;
+    }
+    settings_reconcile_snowboard_automatic_repair_lifetime();
+    if (reason.length > 0) {
+        log_user("[SBR_AUTO] Cleared substantial-repair respring handoff: %s.\n",
+                 reason.UTF8String);
+    }
+}
+
+static BOOL settings_record_substantial_repair_respring_marker(
+    NSDictionary<NSString *, id> *result, NSString *source)
+{
+    pid_t springBoardPID = settings_current_springboard_pid();
+    NSTimeInterval bootEpoch = settings_current_boot_epoch_seconds();
+    if (springBoardPID <= 1 || bootEpoch <= 0.0) return NO;
+    NSString *handoffIdentifier = NSUUID.UUID.UUIDString;
+    NSDictionary *marker = @{
+        @"schemaVersion": @1,
+        @"handoffIdentifier": handoffIdentifier,
+        @"springBoardPID": @(springBoardPID),
+        @"bootEpoch": @(bootEpoch),
+        @"requestedAt": @(NSDate.date.timeIntervalSince1970),
+        @"source": source ?: @"update-repair",
+        @"repairedApplications": result[
+            @"substantialRepairApplicationCount"] ?: @0,
+        @"repairedVariants": result[
+            @"substantialRepairVariantCount"] ?: @0,
+    };
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    [defaults setObject:marker forKey:kSBLSubstantialRepairRespringMarker];
+    [defaults synchronize];
+    BOOL saved = [[defaults dictionaryForKey:
+        kSBLSubstantialRepairRespringMarker] isEqual:marker];
+    if (!saved) return NO;
+    __sync_lock_test_and_set(&g_sbl_substantial_repair_respring_armed, 1);
+    __sync_lock_test_and_set(&g_sbl_substantial_repair_respring_started, 0);
+    g_sbl_substantial_repair_respring_start_attempt = 0;
+    g_sbl_pre_respring_activation_attempt = 0;
+    g_post_respring_activation_attempt = 0;
+    /* Keep this app process runnable only for the bounded respring handoff.
+     * Clearing the marker reconciles audio back to the user's Automatic
+     * Repair preference and active SnowBoard state. */
+    settings_reconcile_snowboard_automatic_repair_lifetime();
+    dispatch_after(dispatch_time(
+                       DISPATCH_TIME_NOW,
+                       (int64_t)((kSBLSubstantialRepairRespringMaximumAge +
+                                  1.0) * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        NSDictionary *current = [NSUserDefaults.standardUserDefaults
+            dictionaryForKey:kSBLSubstantialRepairRespringMarker];
+        if ([current[@"handoffIdentifier"]
+                isEqualToString:handoffIdentifier]) {
+            settings_clear_substantial_repair_respring_marker(
+                @"the bounded handoff window expired");
+        }
+    });
+    return YES;
+}
+
+static void settings_attempt_substantial_repair_respring_if_ready(void)
+{
+    NSCAssert(NSThread.isMainThread,
+              @"Substantial-repair respring admission belongs on main");
+    NSDictionary *marker = settings_substantial_repair_respring_marker();
+    if (!marker) {
+        if ([NSUserDefaults.standardUserDefaults objectForKey:
+                kSBLSubstantialRepairRespringMarker]) {
+            settings_clear_substantial_repair_respring_marker(
+                @"the saved handoff expired or crossed a reboot");
+        }
+        return;
+    }
+    if (!__sync_fetch_and_add(
+            &g_sbl_substantial_repair_respring_armed, 0)) {
+        /* A different Cyanide process is already foreground. The requested
+         * outcome has been reached manually; never respring again from a
+         * stale durable marker. */
+        settings_clear_substantial_repair_respring_marker(
+            @"Cyanide was reopened in a new process");
+        return;
+    }
+    if (__sync_fetch_and_add(
+            &g_sbl_substantial_repair_respring_started, 0)) return;
+    if (UIApplication.sharedApplication.applicationState !=
+            UIApplicationStateActive) {
+        log_user("[SBR_AUTO] Substantial repair is complete; requesting Cyanide foreground so the controlled respring can start.\n");
+        settings_schedule_pre_respring_cyanide_activation();
+        return;
+    }
+    if (g_settings_actions_running != 0) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     1LL * NSEC_PER_SEC),
+                       dispatch_get_main_queue(), ^{
+            settings_attempt_substantial_repair_respring_if_ready();
+        });
+        return;
+    }
+    if (g_sbl_substantial_repair_respring_start_attempt >= 3U) {
+        log_user("[SBR_AUTO] Substantial repair still needs a respring, but the in-app respring flow could not start after three attempts.\n");
+        settings_clear_substantial_repair_respring_marker(
+            @"the controlled respring could not be started");
+        return;
+    }
+    g_sbl_substantial_repair_respring_start_attempt++;
+    __sync_lock_test_and_set(&g_sbl_substantial_repair_respring_started, 1);
+    log_user("[SBR_AUTO] Substantial repair republished %lu app(s) / %lu variant(s); starting the controlled respring and Cyanide return handoff.\n",
+        (unsigned long)[marker[@"repairedApplications"] unsignedIntegerValue],
+        (unsigned long)[marker[@"repairedVariants"] unsignedIntegerValue]);
+    UIViewController *host = settings_active_presenter(nil);
+    settings_begin_system_edit_respring_with_completion(
+        host, ^(BOOL started, NSString *message) {
+            if (started) return;
+            __sync_lock_test_and_set(
+                &g_sbl_substantial_repair_respring_started, 0);
+            log_user("[SBR_AUTO] Controlled respring did not start: %s\n",
+                     message.UTF8String ?: "unknown failure");
+            if (g_sbl_substantial_repair_respring_start_attempt < 3U) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                             2LL * NSEC_PER_SEC),
+                               dispatch_get_main_queue(), ^{
+                    settings_attempt_substantial_repair_respring_if_ready();
+                });
+            }
+        });
+}
+
+static void settings_schedule_substantial_update_repair_respring(
+    NSDictionary<NSString *, id> *result, NSString *source)
+{
+    if (![result[@"ok"] boolValue] ||
+        ![result[@"respringRecommended"] boolValue]) return;
+    NSDictionary<NSString *, id> *resultCopy = [result copy];
+    NSString *sourceCopy = [source copy] ?: @"update-repair";
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (settings_substantial_repair_respring_marker()) return;
+        if (!settings_record_substantial_repair_respring_marker(
+                resultCopy, sourceCopy)) {
+            log_user("[SBR_AUTO] Substantial repair completed, but its exact SpringBoard handoff could not be saved; no automatic respring was started.\n");
+            return;
+        }
+        /* Give the completion UI one beat to publish the successful result,
+         * then force the existing cleanup/respring flow. */
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     1LL * NSEC_PER_SEC),
+                       dispatch_get_main_queue(), ^{
+            settings_attempt_substantial_repair_respring_if_ready();
         });
     });
 }
@@ -15096,6 +15642,7 @@ static void settings_apply_axonlite_once_async(const char *reason)
 
 void settings_application_did_enter_background(void)
 {
+    g_sbl_automatic_repair_open_pending = NO;
     if (__sync_lock_test_and_set(&g_app_in_background, 1)) return;
     if (settings_cleanup_in_progress()) return;
 
@@ -15155,6 +15702,9 @@ void settings_application_did_enter_background(void)
 
 void settings_application_will_enter_foreground(void)
 {
+    // UIApplication may still report Background during this scene callback.
+    // Retain the edge for didBecomeActive instead of dropping the open repair.
+    g_sbl_automatic_repair_open_pending = YES;
     if (!settings_app_state_is_foreground()) return;
     g_app_in_background = 0;
     settings_end_statbar_background_task_async("foreground");
@@ -15182,6 +15732,14 @@ void settings_application_did_become_active(void)
     if (!settings_app_state_is_foreground()) return;
     g_app_in_background = 0;
     if (settings_cleanup_in_progress()) return;
+    if (g_sbl_automatic_repair_open_pending) {
+        g_sbl_automatic_repair_open_pending = NO;
+        settings_reconcile_snowboard_automatic_repair_lifetime();
+        // Let scene activation settle, while keeping open repairs exempt from
+        // the ordinary notification debounce and completion cooldown.
+        settings_enqueue_snowboard_automatic_repair(
+            @"Cyanide opened", 3.0, 0, YES);
+    }
     settings_apply_statbar_once_async("became active");
     settings_apply_nsbar_once_async("became active");
     settings_apply_nicebarlite_once_async("became active");
@@ -17184,7 +17742,8 @@ typedef NS_ENUM(NSInteger, RootSection) {
     RootSectionCount,
 };
 
-static NSDictionary<NSString *, id> *settings_snowboard_remix_krw_prerequisite(void)
+static NSDictionary<NSString *, id> *settings_snowboard_remix_krw_prerequisite(
+    BOOL recoveryOnly)
 {
     // The vPhone lab uses its explicit root task provider. Physical devices
     // use Cyanide's local KRW primitives. Never fall through from a vPhone
@@ -17203,14 +17762,21 @@ static NSDictionary<NSString *, id> *settings_snowboard_remix_krw_prerequisite(v
         log_user("[SBR] vPhone root process resolver and injected RemoteCall route verified; the physical-device exploit chain remains disabled.\n");
         return nil;
     }
-    log_user("[SBR] Establishing and validating kernel read/write before IconServices publication and presentation installation.\n");
-    if (!settings_ensure_kexploit()) {
-        NSString *message =
-            @"SnowBoard Remix could not establish kernel read/write; no IconServices operation was started.";
+    log_user(recoveryOnly
+        ? "[SBR] Recovering the parked KRW generation; fresh acquisition is disabled for this probe.\n"
+        : "[SBR] Establishing and validating kernel read/write before IconServices publication and presentation installation.\n");
+    BOOL krwReady = recoveryOnly
+        ? settings_ensure_kexploit_recovery_only()
+        : settings_ensure_kexploit();
+    if (!krwReady) {
+        NSString *message = recoveryOnly
+            ? @"SnowBoard Remix could not recover the parked KRW generation; no acquisition or IconServices operation was started."
+            : @"SnowBoard Remix could not establish kernel read/write; no IconServices operation was started.";
         log_user("[SBR] %s\n", message.UTF8String);
         return @{
             @"ok": @NO,
-            @"stage": @"krw-prerequisite",
+            @"stage": recoveryOnly
+                ? @"parked-krw-recovery" : @"krw-prerequisite",
             @"message": message,
         };
     }
@@ -17232,7 +17798,7 @@ BOOL settings_prepare_queued_system_actions(NSString **failureReason)
 {
     if (failureReason) *failureReason = nil;
     NSDictionary<NSString *, id> *failure =
-        settings_snowboard_remix_krw_prerequisite();
+        settings_snowboard_remix_krw_prerequisite(NO);
     if (!failure) return YES;
     NSString *message = [failure[@"message"] isKindOfClass:NSString.class]
         ? failure[@"message"] : @"Kernel read/write is unavailable.";
@@ -17253,10 +17819,12 @@ pid_t settings_current_springboard_pid(void)
     return pid;
 }
 
-static void settings_run_snowboard_remix_operation(
+static void settings_run_snowboard_remix_operation_with_completion(
     NSString *operationName,
     BOOL requiresKRW,
-    NSDictionary<NSString *, id> * (^operation)(void))
+    BOOL recoveryOnly,
+    NSDictionary<NSString *, id> * (^operation)(void),
+    void (^completion)(NSDictionary<NSString *, id> *result))
 {
     if (!operation) return;
     NSString *name = [operationName copy] ?: @"SnowBoard Remix";
@@ -17270,16 +17838,21 @@ static void settings_run_snowboard_remix_operation(
             "[SBR] Another system action is running; this operation was not started.");
         if (!actionLockAcquired) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSDictionary<NSString *, id> *blocked = @{
+                    @"ok": @NO,
+                    @"stage": @"action-lock",
+                    @"message": [NSString stringWithFormat:
+                        @"%@ was blocked by another running action.", name],
+                };
                 [[NSNotificationCenter defaultCenter]
                     postNotificationName:kSettingsActionsDidCompleteNotification
                                   object:nil
                                 userInfo:@{
                                     kSettingsActionsDidCompleteSuccessKey: @NO,
                                     kSettingsActionsDidCompleteMessageKey:
-                                        [NSString stringWithFormat:
-                                            @"%@ was blocked by another running action.",
-                                            name],
+                                        blocked[@"message"],
                                 }];
+                if (completion) completion(blocked);
             });
             return;
         }
@@ -17287,7 +17860,7 @@ static void settings_run_snowboard_remix_operation(
         NSDictionary<NSString *, id> *result = nil;
         @try {
             result = requiresKRW
-                ? settings_snowboard_remix_krw_prerequisite() : nil;
+                ? settings_snowboard_remix_krw_prerequisite(recoveryOnly) : nil;
             if (!result) result = operation();
         } @catch (NSException *exception) {
             result = @{
@@ -17308,6 +17881,7 @@ static void settings_run_snowboard_remix_operation(
                  name.UTF8String ?: "SnowBoard Remix",
                  message.UTF8String ?: "");
         log_session_end();
+        settings_schedule_substantial_update_repair_respring(result, name);
         dispatch_async(dispatch_get_main_queue(), ^{
             // Apply/restore changes the durable journal set.  Drop only the
             // advisory UI snapshot; mutation decisions never consume it.
@@ -17325,8 +17899,18 @@ static void settings_run_snowboard_remix_operation(
                                      name, message]
                             }];
             cyanide_upload_log_if_enabled();
+            if (completion) completion(result ?: @{});
         });
     });
+}
+
+static void settings_run_snowboard_remix_operation(
+    NSString *operationName,
+    BOOL requiresKRW,
+    NSDictionary<NSString *, id> * (^operation)(void))
+{
+    settings_run_snowboard_remix_operation_with_completion(
+        operationName, requiresKRW, NO, operation, nil);
 }
 
 static dispatch_queue_t settings_snowboard_automatic_repair_queue(void)
@@ -17371,6 +17955,13 @@ static BOOL settings_snowboard_automatic_repair_is_active(void)
         [CNDSnowBoardRemix hasAutomaticRepairData];
 }
 
+static BOOL settings_snowboard_automatic_repair_uses_external_power(
+    UIDeviceBatteryState state)
+{
+    return state == UIDeviceBatteryStateCharging ||
+        state == UIDeviceBatteryStateFull;
+}
+
 static void settings_schedule_snowboard_automatic_repair_internal(
     NSString *reason,
     NSTimeInterval delay,
@@ -17383,11 +17974,20 @@ static BOOL settings_run_snowboard_automatic_repair(
 {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     if (![defaults boolForKey:kSettingsKeepAlive]) return NO;
+    // Recheck after dispatching off-main: a charger may have been removed
+    // after the periodic timer fired but before its worker acquired ownership.
+    if ([reason isEqualToString:@"periodic integrity audit"] &&
+        !settings_snowboard_automatic_repair_uses_external_power(
+            UIDevice.currentDevice.batteryState)) return NO;
 
     if (!settings_snowboard_automatic_repair_is_active()) {
         settings_reconcile_snowboard_automatic_repair_lifetime();
         printf("[SBR_AUTO] no active SnowBoard journals; trigger=%s\n",
                reason.UTF8String ?: "unknown");
+        return NO;
+    }
+    if (settings_substantial_repair_respring_marker()) {
+        log_user("[SBR_AUTO] Automatic Repair is paused for the saved substantial-repair respring handoff.\n");
         return NO;
     }
 
@@ -17441,6 +18041,7 @@ static BOOL settings_run_snowboard_automatic_repair(
     __block BOOL hailMaryOK =
         __sync_fetch_and_add(&g_sbl_automatic_hail_mary_confirmed, 0) != 0;
     __block BOOL updateRepairOK = NO;
+    __block NSDictionary<NSString *, id> *updateRepairResult = nil;
     __block NSString *completionMessage = nil;
     BOOL attempted = NO;
     @try {
@@ -17471,12 +18072,12 @@ static BOOL settings_run_snowboard_automatic_repair(
 
         if ([defaults boolForKey:kSettingsKeepAlive]) {
             attempted = YES;
-            NSDictionary<NSString *, id> *updateRepair =
-                settings_update_repair_snowboard_remix();
-            updateRepairOK = [updateRepair[@"ok"] boolValue];
+            updateRepairResult = settings_update_repair_snowboard_remix();
+            updateRepairOK = [updateRepairResult[@"ok"] boolValue];
             if (!updateRepairOK) {
                 log_user("[SBR_AUTO] Update Repair did not complete: %s\n",
-                    [updateRepair[@"message"] UTF8String] ?: "unknown failure");
+                    [updateRepairResult[@"message"] UTF8String] ?:
+                        "unknown failure");
             }
         }
 
@@ -17512,6 +18113,10 @@ static BOOL settings_run_snowboard_automatic_repair(
 
     NSString *message = completionMessage ?: @"Automatic Repair finished.";
     BOOL success = updateRepairOK && (!hailMaryApplicable || hailMaryOK);
+    if (success) {
+        settings_schedule_substantial_update_repair_respring(
+            updateRepairResult, @"automatic-update-repair");
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
         settings_invalidate_snowboard_remix_status_cache();
         [[NSNotificationCenter defaultCenter]
@@ -17539,6 +18144,7 @@ static void settings_cancel_pending_snowboard_automatic_repair(void)
     g_sbl_automatic_repair_pending_reason = nil;
     g_sbl_automatic_repair_pending_attempt = 0;
     g_sbl_automatic_repair_pending_deadline = 0;
+    g_sbl_automatic_repair_pending_immediate = NO;
     // Keep the running flag and cooldown across disable/restore/re-enable.
 }
 
@@ -17571,6 +18177,7 @@ static void settings_arm_snowboard_automatic_repair(void)
             g_sbl_automatic_repair_pending_reason = nil;
             g_sbl_automatic_repair_pending_attempt = 0;
             g_sbl_automatic_repair_pending_deadline = 0;
+            g_sbl_automatic_repair_pending_immediate = NO;
             g_sbl_automatic_repair_running = YES;
             dispatch_async(settings_snowboard_automatic_repair_queue(), ^{
                 BOOL attempted = NO;
@@ -17592,18 +18199,23 @@ static void settings_arm_snowboard_automatic_repair(void)
         dispatch_resume(wakeup);
     }
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-    NSTimeInterval deadline = MAX(g_sbl_automatic_repair_pending_deadline,
-                                 g_sbl_automatic_repair_not_before);
+    // Open and power edges bypass debounce/cooldown, while the running flag
+    // still serializes them with an existing pass and its mutation gates.
+    NSTimeInterval deadline = g_sbl_automatic_repair_pending_immediate
+        ? g_sbl_automatic_repair_pending_deadline
+        : MAX(g_sbl_automatic_repair_pending_deadline,
+              g_sbl_automatic_repair_not_before);
     int64_t delayNS = (int64_t)(MAX(0.0, deadline - now) * NSEC_PER_SEC);
     dispatch_source_set_timer(g_sbl_automatic_repair_wakeup,
         dispatch_time(DISPATCH_TIME_NOW, delayNS), DISPATCH_TIME_FOREVER,
-        1ULL * NSEC_PER_SEC);
+        g_sbl_automatic_repair_pending_immediate ? 0 : 1ULL * NSEC_PER_SEC);
 }
 
-static void settings_schedule_snowboard_automatic_repair_internal(
+static void settings_enqueue_snowboard_automatic_repair(
     NSString *reason,
     NSTimeInterval delay,
-    NSUInteger attempt)
+    NSUInteger attempt,
+    BOOL immediate)
 {
     NSString *reasonCopy = [reason copy] ?: @"scheduled audit";
     // Capture arrival time before hopping queues so a long repair cannot
@@ -17616,18 +18228,35 @@ static void settings_schedule_snowboard_automatic_repair_internal(
         }
         BOOL hadPending = g_sbl_automatic_repair_pending_reason != nil;
         if (!hadPending ||
+            (immediate && !g_sbl_automatic_repair_pending_immediate) ||
             deadline < g_sbl_automatic_repair_pending_deadline) {
             g_sbl_automatic_repair_pending_reason = reasonCopy;
-            g_sbl_automatic_repair_pending_deadline = deadline;
         }
+        g_sbl_automatic_repair_pending_deadline = hadPending
+            ? MIN(g_sbl_automatic_repair_pending_deadline, deadline) : deadline;
         // Fresh events can start a new bounded retry sequence, while an
         // internal retry must not replace a pending fresh event's budget.
         g_sbl_automatic_repair_pending_attempt =
             hadPending ? MIN(g_sbl_automatic_repair_pending_attempt, attempt) : attempt;
+        g_sbl_automatic_repair_pending_immediate |= immediate;
         settings_arm_snowboard_automatic_repair();
     };
     if (NSThread.isMainThread) schedule();
     else dispatch_async(dispatch_get_main_queue(), schedule);
+}
+
+static void settings_schedule_snowboard_automatic_repair_internal(
+    NSString *reason,
+    NSTimeInterval delay,
+    NSUInteger attempt)
+{
+    settings_enqueue_snowboard_automatic_repair(reason, delay, attempt, NO);
+}
+
+static void settings_schedule_snowboard_automatic_repair_immediately(
+    NSString *reason)
+{
+    settings_enqueue_snowboard_automatic_repair(reason, 0.0, 0, YES);
 }
 
 static void settings_schedule_snowboard_automatic_repair(
@@ -17654,10 +18283,30 @@ void settings_reconcile_snowboard_automatic_repair_lifetime(void)
     // earlier enable decision that a concurrent Restore/toggle can supersede.
     dispatch_block_t reconcile = ^{
         BOOL active = settings_snowboard_automatic_repair_is_active();
-        ds_keepalive_apply_enabled(active);
+        BOOL substantialHandoff = __sync_fetch_and_add(
+            &g_sbl_substantial_repair_respring_armed, 0) &&
+            settings_substantial_repair_respring_marker() != nil;
+        // Do not re-enter PackageQueue here: this reconciliation is also used
+        // while its durable singleton is hydrating. The flag is armed only
+        // after an AwaitingRespring checkpoint and is bounded independently.
+        BOOL queueHandoff = __sync_fetch_and_add(
+            &g_queue_post_respring_foreground_armed, 0) != 0;
+        // Automatic Repair still requires applied SnowBoard state. The only
+        // exceptions are bounded, explicitly authorized respring handoffs
+        // that need this process alive long enough to foreground itself.
+        ds_keepalive_apply_enabled(
+            active || substantialHandoff || queueHandoff);
         if (!active) {
             settings_cancel_pending_snowboard_automatic_repair();
             __sync_lock_test_and_set(&g_sbl_automatic_hail_mary_confirmed, 0);
+            if (g_sbl_automatic_repair_power_observer) {
+                [NSNotificationCenter.defaultCenter
+                    removeObserver:g_sbl_automatic_repair_power_observer];
+                g_sbl_automatic_repair_power_observer = nil;
+                UIDevice.currentDevice.batteryMonitoringEnabled =
+                    g_sbl_automatic_repair_power_monitoring_was_enabled;
+                g_sbl_automatic_repair_last_power_state = UIDeviceBatteryStateUnknown;
+            }
             if (g_sbl_automatic_repair_timer) {
                 dispatch_source_cancel(g_sbl_automatic_repair_timer);
                 g_sbl_automatic_repair_timer = nil;
@@ -17665,6 +18314,42 @@ void settings_reconcile_snowboard_automatic_repair_lifetime(void)
             return;
         }
 
+        if (!g_sbl_automatic_repair_power_observer) {
+            g_sbl_automatic_repair_power_monitoring_was_enabled =
+                UIDevice.currentDevice.batteryMonitoringEnabled;
+            UIDevice.currentDevice.batteryMonitoringEnabled = YES;
+            g_sbl_automatic_repair_last_power_state = UIDevice.currentDevice.batteryState;
+            g_sbl_automatic_repair_power_observer =
+                [NSNotificationCenter.defaultCenter
+                    addObserverForName:UIDeviceBatteryStateDidChangeNotification
+                    object:nil queue:NSOperationQueue.mainQueue
+                    usingBlock:^(NSNotification *note) {
+                        (void)note;
+                        UIDeviceBatteryState state = UIDevice.currentDevice.batteryState;
+                        UIDeviceBatteryState previous = g_sbl_automatic_repair_last_power_state;
+                        if (state != UIDeviceBatteryStateUnknown) {
+                            g_sbl_automatic_repair_last_power_state = state;
+                        }
+                        settings_reconcile_snowboard_automatic_repair_lifetime();
+                        // Unknown is an unavailable reading, not a power edge.
+                        if (state != UIDeviceBatteryStateUnknown &&
+                            previous != UIDeviceBatteryStateUnknown &&
+                            settings_snowboard_automatic_repair_uses_external_power(state) !=
+                                settings_snowboard_automatic_repair_uses_external_power(previous)) {
+                            settings_schedule_snowboard_automatic_repair_immediately(
+                                settings_snowboard_automatic_repair_uses_external_power(state)
+                                    ? @"external power connected" : @"external power disconnected");
+                        }
+                    }];
+        }
+        if (!settings_snowboard_automatic_repair_uses_external_power(
+                UIDevice.currentDevice.batteryState)) {
+            if (g_sbl_automatic_repair_timer) {
+                dispatch_source_cancel(g_sbl_automatic_repair_timer);
+                g_sbl_automatic_repair_timer = nil;
+            }
+            return;
+        }
         if (!g_sbl_automatic_repair_timer) {
             g_sbl_automatic_repair_timer = dispatch_source_create(
                 DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
@@ -17672,15 +18357,17 @@ void settings_reconcile_snowboard_automatic_repair_lifetime(void)
             dispatch_source_set_timer(
                 g_sbl_automatic_repair_timer,
                 dispatch_time(DISPATCH_TIME_NOW,
-                              2LL * 60LL * NSEC_PER_SEC),
+                              30LL * 60LL * NSEC_PER_SEC),
                 30ULL * 60ULL * NSEC_PER_SEC,
                 30ULL * NSEC_PER_SEC);
-            dispatch_source_set_event_handler(
-                g_sbl_automatic_repair_timer, ^{
-                    settings_reconcile_snowboard_automatic_repair_lifetime();
-                    settings_schedule_snowboard_automatic_repair(
-                        @"periodic integrity audit", 0.0);
-                });
+            dispatch_source_t timer = g_sbl_automatic_repair_timer;
+            dispatch_source_set_event_handler(timer, ^{
+                if (timer != g_sbl_automatic_repair_timer) return;
+                settings_reconcile_snowboard_automatic_repair_lifetime();
+                if (timer != g_sbl_automatic_repair_timer) return;
+                settings_schedule_snowboard_automatic_repair(
+                    @"periodic integrity audit", 0.0);
+            });
             dispatch_resume(g_sbl_automatic_repair_timer);
         }
     };
@@ -17692,8 +18379,8 @@ void settings_apply_snowboard_automatic_repair_enabled(BOOL enabled)
 {
     settings_reconcile_snowboard_automatic_repair_lifetime();
     if (enabled) {
-        settings_schedule_snowboard_automatic_repair(
-            @"Automatic Repair enabled", 5.0);
+        settings_schedule_snowboard_automatic_repair_immediately(
+            @"Automatic Repair enabled");
     }
 }
 
@@ -18841,7 +19528,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
         @{ @"kind": @"toggle",
            @"key": kSettingsKeepAlive,
            @"title": @"Automatic Repair",
-           @"subtitle": @"Keeps Cyanide alive in the background, watches app and LaunchServices updates, runs journal-aware Update Repair, and keeps the per-boot Transparency Fix active." },
+           @"subtitle": @"While SnowBoard is applied, keeps Cyanide alive for Update Repair and the Transparency Fix. Checks immediately when Cyanide opens or external power connects/disconnects, and every 30 minutes on external power." },
         @{ @"kind": @"toggle",
            @"key": kSettingsSnowBoardRemixDebugThreeAppLimit,
            @"title": @"Debug: Apply 4 Named Apps",
@@ -18914,7 +19601,7 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
            @"destructive": @YES },
         @{ @"kind": @"info",
            @"title": @"Isolated AirDrop Share-Menu Test",
-           @"subtitle": @"A three-step physical-device diagnostic, separate from full Apply. It targets only com.apple.Sharing.AirDrop's 64 pt activity tile and bordered 28 pt Apps-list record. Apply, open a Share sheet to inspect the tile, run Audit, then Restore. The selected theme must contain IconBundles/com.apple.Sharing.AirDrop.png." },
+           @"subtitle": @"A four-step physical-device diagnostic, separate from full Apply. It targets only com.apple.Sharing.AirDrop's 64 pt activity tile and bordered 28 pt Apps-list record. Apply, audit persistence, capture the live Share-sheet request/provider/cell pixels, then Restore. The selected theme must contain IconBundles/com.apple.Sharing.AirDrop.png." },
         @{ @"kind": @"button",
            @"title": @"1. Apply AirDrop Test",
            @"subtitle": @"Recover any prior AirDrop-only journal, force one fresh stock-to-theme cycle for its two records, verify both source associations, and refresh only SharingUIService.",
@@ -18926,7 +19613,12 @@ static _CyanideMailDelegate *_cyanide_mail_delegate(void) {
            @"subtitle": @"Read back only the two AirDrop indexed store units, themed hashes, validation tokens, and native source associations. Makes no icon or presentation change.",
            @"action": @"sbl-airdrop-test-audit" },
         @{ @"kind": @"button",
-           @"title": @"3. Restore AirDrop Test",
+           @"title": @"3. Capture Live AirDrop Path",
+           @"subtitle": @"Open a diagnostic Share sheet, issue the exact 64 pt IconServices probe through resident signed code, and compare it with UIAirDropActivity and the materialized AirDrop cell. No hook or executable payload is installed.",
+           @"action": @"sbl-airdrop-test-live",
+           @"tintColor": UIColor.systemOrangeColor },
+        @{ @"kind": @"button",
+           @"title": @"4. Restore AirDrop Test",
            @"subtitle": @"Regenerate and verify stock for only the AirDrop records, then refresh only SharingUIService. Other themed applications and SpringBoard presentation state are untouched.",
            @"action": @"sbl-airdrop-test-restore",
            @"destructive": @YES },
@@ -23218,6 +23910,56 @@ void cyanide_present_contact(UIViewController *host)
     [self presentViewController:nav animated:YES completion:completion];
 }
 
+- (void)runAirDropLiveTelemetry
+{
+    UIViewController *presenter = settings_active_presenter(nil);
+    if (!presenter) {
+        log_user("[SBR_AIRDROP_LIVE] unable to find a foreground presenter\n");
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:kSettingsActionsDidCompleteNotification
+                          object:nil
+                        userInfo:@{
+                            kSettingsActionsDidCompleteSuccessKey: @NO,
+                            kSettingsActionsDidCompleteMessageKey:
+                                @"The diagnostic Share sheet could not be presented.",
+                        }];
+        return;
+    }
+
+    UIActivityViewController *activity = [[UIActivityViewController alloc]
+        initWithActivityItems:@[@"Cyanide AirDrop presentation telemetry"]
+        applicationActivities:nil];
+    UIPopoverPresentationController *popover =
+        activity.popoverPresentationController;
+    if (popover) {
+        popover.sourceView = presenter.view;
+        popover.sourceRect = CGRectMake(
+            CGRectGetMidX(presenter.view.bounds),
+            CGRectGetMidY(presenter.view.bounds), 1.0, 1.0);
+        popover.permittedArrowDirections = 0;
+    }
+    [presenter presentViewController:activity animated:YES completion:^{
+        log_user("[SBR_AIRDROP_LIVE] diagnostic Share sheet presented; "
+                 "settling materialized AirDrop cell before capture\n");
+        dispatch_after(dispatch_time(
+            DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)),
+            dispatch_get_main_queue(), ^{
+                settings_run_snowboard_remix_operation_with_completion(
+                    @"Isolated AirDrop Live Capture", YES, YES, ^{
+                        return [CNDSnowBoardRemix
+                            captureIsolatedAirDropPresentation];
+                    }, ^(NSDictionary<NSString *, id> *result) {
+                        log_user("[SBR_AIRDROP_LIVE] diagnostic UI complete "
+                                 "ok=%d diagnosis=%s\n",
+                                 [result[@"ok"] boolValue],
+                                 [result[@"diagnosis"] UTF8String] ?: "missing");
+                        [activity dismissViewControllerAnimated:YES
+                                                     completion:nil];
+                    });
+            });
+    }];
+}
+
 - (void)toggleChanged:(UISwitch *)sender
 {
     if (!settings_device_supported()) {
@@ -25294,6 +26036,10 @@ void cyanide_present_contact(UIViewController *host)
                     @"Isolated AirDrop Test Audit", YES, ^{
                     return [CNDSnowBoardRemix auditIsolatedAirDropTest];
                 });
+            }];
+        } else if ([action isEqualToString:@"sbl-airdrop-test-live"]) {
+            [self presentActivityLogWithCompletion:^{
+                [self runAirDropLiveTelemetry];
             }];
         } else if ([action isEqualToString:@"sbl-airdrop-test-restore"]) {
             [self presentActivityLogWithCompletion:^{

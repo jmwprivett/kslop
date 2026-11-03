@@ -174,6 +174,10 @@ void settings_begin_system_edit_respring(UIViewController *host);
 void settings_begin_system_edit_respring_with_completion(
     UIViewController *host,
     void (^ _Nullable completion)(BOOL started, NSString *message));
+/// Keeps Cyanide alive across a queue-owned respring, then reuses the parked
+/// KRW generation to foreground the app. The durable queue transaction remains
+/// the sole authority for whether after-respring work may resume.
+void settings_arm_queued_post_respring_foreground_handoff(void);
 void settings_present_hide_home_bar_respring_prompt(UIViewController *host);
 void settings_present_system_edit_respring_prompt(UIViewController *host,
                                                   NSString *title,
@@ -322,5 +326,4 @@ void settings_application_did_become_active(void);
 // Returns empty array when the section has no configurable rows.
 + (NSArray<NSDictionary<NSString *, NSString *> *> *)settingsSummaryForSection:(NSInteger)section;
 + (BOOL)liveWPHasSelectedVideo;
-
 @end

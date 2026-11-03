@@ -17,6 +17,10 @@ PUBLISHER_TRANSPORT = (
 )
 REMIX_HEADER = ROOT / "Cyanide/installer/CNDSnowBoardRemix.h"
 SETTINGS = ROOT / "Cyanide/SettingsViewController.m"
+TELEMETRY = ROOT / "Cyanide/installer/CNDShareSheetTelemetry.m"
+REMOTE_CALL = ROOT / "Cyanide/TaskRop/RemoteCall.m"
+REMOTE_CALL_HEADER = ROOT / "Cyanide/TaskRop/RemoteCall.h"
+REMOTE_OBJC = ROOT / "Cyanide/tweaks/remote_objc.m"
 
 
 class ShareSheetIconServicesTargetTests(unittest.TestCase):
@@ -34,6 +38,10 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         )
         cls.remix_header = REMIX_HEADER.read_text(encoding="utf-8")
         cls.settings = SETTINGS.read_text(encoding="utf-8")
+        cls.telemetry = TELEMETRY.read_text(encoding="utf-8")
+        cls.remote_call = REMOTE_CALL.read_text(encoding="utf-8")
+        cls.remote_call_header = REMOTE_CALL_HEADER.read_text(encoding="utf-8")
+        cls.remote_objc = REMOTE_OBJC.read_text(encoding="utf-8")
 
     def test_bordered_more_list_descriptor_is_in_every_app_profile(self) -> None:
         profile_start = self.descriptors.index(
@@ -387,9 +395,13 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         )
         self.assertNotIn('"dataForUUID:"', repair)
         self.assertIn("cnd_publisher_source_registry_entries(", repair)
-        self.assertIn('"msync", writableMap, fileLength, MS_SYNC', repair)
+        self.assertIn('"msync", writeExtent.mappedBytes', repair)
+        self.assertIn("writeExtent.mappedLength, MS_SYNC", repair)
+        self.assertIn("writeMapData, -1, scratch", repair)
+        self.assertNotIn('"mmap"', repair)
         self.assertIn('r_msg2(registry, "release"', repair)
         self.assertIn("batch.auditSourceRegistry = 0;", repair)
+        self.assertIn('"fsync", (uint64_t)syncDescriptor', repair)
         self.assertGreaterEqual(
             repair.count("cnd_publisher_source_registry_map("), 2
         )
@@ -458,10 +470,11 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         self.assertIn('@"audit-current-source-provider"', audit)
         self.assertIn('@"currentSourceIdentifierResolution"', audit)
 
-    def test_isolated_airdrop_test_has_separate_apply_audit_restore_api(self) -> None:
+    def test_isolated_airdrop_test_has_separate_four_step_api(self) -> None:
         for selector in (
             "applyIsolatedAirDropTest",
             "auditIsolatedAirDropTest",
+            "captureIsolatedAirDropPresentation",
             "restoreIsolatedAirDropTest",
         ):
             self.assertIn(selector, self.remix_header)
@@ -469,6 +482,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
 
         self.assertIn('sbl-airdrop-test-apply', self.settings)
         self.assertIn('sbl-airdrop-test-audit', self.settings)
+        self.assertIn('sbl-airdrop-test-live', self.settings)
         self.assertIn('sbl-airdrop-test-restore', self.settings)
         self.assertIn(
             'IconBundles/com.apple.Sharing.AirDrop.png', self.settings
@@ -532,7 +546,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
             "+ (NSDictionary<NSString *, id> *)auditIsolatedAirDropTest"
         )
         audit_end = self.remix.index(
-            "+ (NSDictionary<NSString *, id> *)restoreIsolatedAirDropTest",
+            "+ (NSDictionary<NSString *, id> *)captureIsolatedAirDropPresentation",
             audit_start,
         )
         audit = self.remix[audit_start:audit_end]
@@ -546,6 +560,218 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         self.assertIn('@"mutationsIssued": @NO', audit)
         self.assertNotIn("CNDRemixRefreshAirDropPresentationIfNeeded", audit)
         self.assertNotIn("CNDRemixRunInitialCacheRefresh", audit)
+
+    def test_live_capture_uses_exact_data_only_airdrop_descriptor_probes(self) -> None:
+        capture_start = self.telemetry.index(
+            "NSDictionary<NSString *, id> *CNDShareSheetTelemetryCapture(void)"
+        )
+        capture = self.telemetry[capture_start:]
+        self.assertIn(
+            'r_cfstr_register_only(\n                        "com.apple.Sharing.AirDrop")',
+            capture,
+        )
+        self.assertNotIn(
+            'r_nsstr_retained("com.apple.Sharing.AirDrop")', capture
+        )
+        self.assertIn("CNDShareTelemetryProbeDescriptor", capture)
+        self.assertIn("{64U, 64U, 3U, 0U, 0U, 0U}", capture)
+        self.assertIn("{28U, 28U, 3U, 0U, 4U, 0U}", capture)
+        self.assertIn('"imageForDescriptor:"', capture)
+        construction_start = capture.index("targetIdentifier =")
+        construction_end = capture.index(
+            "static const CNDShareTelemetryDescriptorSpec specs[]",
+            construction_start,
+        )
+        construction = capture[construction_start:construction_end]
+        self.assertIn('R_TIMEOUT, "objc_alloc", iconClass', construction)
+        self.assertNotIn('r_msg2(iconClass, "alloc"', construction)
+        self.assertIn('R_TIMEOUT, "method_getImplementation"', construction)
+        self.assertIn('"ISBundleIdentifierIcon.initWithBundleIdentifier:"', construction)
+        self.assertIn("r_call_address(", construction)
+        self.assertNotIn('r_msg2(\n                        allocation, "initWithBundleIdentifier:"', construction)
+        self.assertIn('r_msg2(\n                        manager, "findOrRegisterIcon:"', construction)
+        self.assertNotIn("r_msg2_main", construction)
+        self.assertIn('capture[@"iconConstruction"]', construction)
+        self.assertIn('@"allocationTransport": @"objc_alloc"', construction)
+        self.assertIn(
+            '@"initializerTransport": @"direct-verified-imp"', construction
+        )
+        self.assertIn('capture[@"captureMode"] = @"data-only-existing-signed-code"', capture)
+        self.assertIn('capture[@"temporaryMethodInterpositionUsed"] = @NO', capture)
+        self.assertIn('capture[@"payloadMapped"] = @NO', capture)
+        self.assertNotIn("CNDSignedRemotePayloadMapCurrentSession", capture)
+        self.assertNotIn("method_setImplementation", capture)
+        self.assertNotIn('"mmap"', capture)
+        self.assertNotIn('"munmap"', capture)
+
+    def test_airdrop_identifier_transfer_uses_register_arguments_only(self) -> None:
+        helper_start = self.remote_objc.index(
+            "uint64_t r_cfstr_register_only(const char *s)"
+        )
+        helper_end = self.remote_objc.index(
+            "uint64_t r_nsstr_retained(const char *s)", helper_start
+        )
+        helper = self.remote_objc[helper_start:helper_end]
+        self.assertIn('R_TIMEOUT, "calloc"', helper)
+        self.assertIn('R_TIMEOUT, "memset"', helper)
+        self.assertIn('R_TIMEOUT, "CFStringCreateWithBytes"', helper)
+        self.assertIn("kMaximumUTF8Length = 512", helper)
+        self.assertNotIn("remote_write(", helper)
+        self.assertNotIn("remote_writeStr", helper)
+        self.assertNotIn("vm_map_remote_page", helper)
+
+    def test_live_capture_hashes_remote_images_without_executable_payload(self) -> None:
+        snapshot_start = self.telemetry.index(
+            "CNDShareTelemetrySnapshotRemoteImage("
+        )
+        snapshot_end = self.telemetry.index(
+            "static BOOL CNDShareTelemetryDescriptorABI", snapshot_start
+        )
+        snapshot = self.telemetry[snapshot_start:snapshot_end]
+        self.assertIn('"UIImagePNGRepresentation"', snapshot)
+        self.assertIn("remote_read(", snapshot)
+        self.assertIn("CGBitmapContextCreate(", snapshot)
+        self.assertIn("CC_SHA256(", snapshot)
+        self.assertNotIn("do_remote_call_stable_addr", snapshot)
+
+    def test_signed_payload_uses_fileport_handoff_not_target_path_open(self) -> None:
+        mapper_start = self.consumer_hook.index(
+            "static bool cnd_consumer_map_physical_payload("
+        )
+        mapper_end = self.consumer_hook.index(
+            "BOOL CNDSignedRemotePayloadMapCurrentSession(", mapper_start
+        )
+        mapper = self.consumer_hook[mapper_start:mapper_end]
+        self.assertIn("fileport_makeport(localFD, &localFileport)", mapper)
+        self.assertIn("remote_call_transfer_send_right_to_target", mapper)
+        self.assertIn('"fileport_makefd"', mapper)
+        self.assertIn("remote_call_deallocate_target_send_right", mapper)
+        lab_branch = mapper.index("if (usesLabTransport)")
+        lab_open = mapper.index('R_TIMEOUT, "open"', lab_branch)
+        physical_branch = mapper.index("} else {", lab_open)
+        transfer = mapper.index(
+            "remote_call_transfer_send_right_to_target", physical_branch
+        )
+        self.assertLess(lab_branch, lab_open)
+        self.assertLess(lab_open, physical_branch)
+        self.assertLess(physical_branch, transfer)
+
+    def test_fileport_handoff_uses_kernel_named_descriptor_delivery(self) -> None:
+        transfer_start = self.remote_call.index(
+            "bool remote_call_transfer_send_right_to_target("
+        )
+        transfer_end = self.remote_call.index(
+            "kern_return_t remote_call_deallocate_target_send_right(",
+            transfer_start,
+        )
+        transfer = self.remote_call[transfer_start:transfer_end]
+        self.assertIn("mach_port_allocate(", transfer)
+        self.assertIn("MACH_PORT_RIGHT_RECEIVE", transfer)
+        self.assertIn("mach_port_extract_right(", transfer)
+        self.assertIn("MACH_MSGH_BITS_COMPLEX", transfer)
+        self.assertIn("mach_msg_port_descriptor_t", self.remote_call)
+        self.assertIn('"mach_msg"', transfer)
+        self.assertNotIn("mach_port_insert_right", transfer)
+        self.assertIn("mailboxCleanupResult == KERN_SUCCESS", transfer)
+
+    def test_live_capture_uses_identity_bootstrap_for_data_only_calls(self) -> None:
+        capture_start = self.telemetry.index(
+            "NSDictionary<NSString *, id> *CNDShareSheetTelemetryCapture(void)"
+        )
+        capture = self.telemetry[capture_start:]
+        self.assertIn(
+            'initWithIdentityBootstrapProcess:@"SharingUIService"', capture
+        )
+        self.assertNotIn(
+            'initWithProcess:@"SharingUIService"', capture
+        )
+
+    def test_identity_task_right_is_session_scoped(self) -> None:
+        self.assertIn("mach_port_t identityTaskPort;", self.remote_call)
+        self.assertIn(
+            "g_RC_identityTaskPort = identityRequest.task.name;",
+            self.remote_call,
+        )
+        release_start = self.remote_call.index(
+            "static void remote_call_release_identity_rights(void)"
+        )
+        release_end = self.remote_call.index(
+            "static void remote_call_release_identity_request_rights(",
+            release_start,
+        )
+        release = self.remote_call[release_start:release_end]
+        self.assertIn("g_RC_identityThreadPort", release)
+        self.assertIn("g_RC_identityTaskPort", release)
+        self.assertGreaterEqual(
+            self.remote_call.count("remote_call_release_identity_rights();"),
+            4,
+        )
+        self.assertIn(
+            "RemoteCallSendRightTransferReport", self.remote_call_header
+        )
+
+    def test_data_only_capture_never_retires_the_service_for_cleanup(self) -> None:
+        capture_start = self.telemetry.index(
+            "NSDictionary<NSString *, id> *CNDShareSheetTelemetryCapture(void)"
+        )
+        capture = self.telemetry[capture_start:]
+        self.assertNotIn(
+            "CNDIconServicesConsumerHookRetireSharingUIService", capture
+        )
+        self.assertIn('capture[@"failedRestoreCleanup"] = @{}', capture)
+        self.assertIn('capture[@"mappingCleanupRequired"] = @NO', capture)
+
+    def test_live_capture_bounds_provider_and_visible_cell_evidence(self) -> None:
+        self.assertIn("UIAirDropActivity", self.telemetry)
+        self.assertIn("_bundleIdentifierForActivityImageCreation", self.telemetry)
+        self.assertIn("_activityImage", self.telemetry)
+        self.assertIn("UIActivityContentViewController", self.telemetry)
+        self.assertIn("UIShareGroupActivityCell", self.telemetry)
+        self.assertIn("VIEW_CAPACITY = 2048", self.telemetry)
+        self.assertIn("CONTROLLER_CAPACITY = 128", self.telemetry)
+        self.assertIn("windows.count < 16", self.telemetry)
+        self.assertIn("fabs(frame.size.width - 72.0)", self.telemetry)
+
+    def test_live_capture_compares_all_three_pixel_boundaries(self) -> None:
+        capture_start = self.remix.index(
+            "+ (NSDictionary<NSString *, id> *)captureIsolatedAirDropPresentation"
+        )
+        capture_end = self.remix.index(
+            "+ (NSDictionary<NSString *, id> *)restoreIsolatedAirDropTest",
+            capture_start,
+        )
+        capture = self.remix[capture_start:capture_end]
+        self.assertIn("CNDRemixCanonicalRGBAHashForPNG", capture)
+        self.assertIn("CNDShareSheetTelemetryCapture()", capture)
+        self.assertIn('result[@"requestThemed"]', capture)
+        self.assertIn('result[@"activityImageThemed"]', capture)
+        self.assertIn('result[@"displayedImageThemed"]', capture)
+        self.assertIn(
+            '@"explicit-iconservices-probe-returned-nonthemed-pixels"', capture
+        )
+        self.assertIn(
+            '@"activity-provider-returned-nonthemed-pixels"', capture
+        )
+        self.assertIn(
+            '@"materialized-airdrop-cell-retained-nonthemed-pixels"',
+            capture,
+        )
+        self.assertIn('result[@"mutationsIssued"] = @NO', capture)
+
+    def test_live_capture_ui_keeps_share_sheet_alive_until_completion(self) -> None:
+        live_start = self.settings.index("- (void)runAirDropLiveTelemetry")
+        live_end = self.settings.index("- (void)toggleChanged:", live_start)
+        live = self.settings[live_start:live_end]
+        self.assertIn("UIActivityViewController", live)
+        self.assertIn("500 * NSEC_PER_MSEC", live)
+        self.assertIn(
+            "settings_run_snowboard_remix_operation_with_completion", live
+        )
+        self.assertIn(
+            '@"Isolated AirDrop Live Capture", YES, YES', live
+        )
+        self.assertIn("captureIsolatedAirDropPresentation", live)
+        self.assertIn("dismissViewControllerAnimated:YES", live)
 
     def test_isolated_restore_skips_broad_springboard_presentation(self) -> None:
         restore_start = self.remix.index(

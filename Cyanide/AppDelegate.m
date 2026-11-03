@@ -14,6 +14,8 @@
 #import "CNDUatObserverProbe.h"
 #import "CNDUatContextProbe.h"
 #import "CNDUatQueueProbe.h"
+#import "CNDUatHardwareProbe.h"
+#import "CyanideLabBridge.h"
 #import "kexploit/kexploit_opa334.h"
 #import <notify.h>
 #import <signal.h>
@@ -93,7 +95,161 @@ static void CNDCmdEndProbeTask(UIBackgroundTaskIdentifier task)
     }
 }
 
-static void CNDCmdRun(NSString *command, const char *source)
+typedef void (^CNDCmdResultHandler)(NSDictionary<NSString *, id> *report);
+
+static NSObject *CNDCmdReplyLock(void)
+{
+    static NSObject *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lock = [NSObject new]; });
+    return lock;
+}
+
+static NSString *g_cmdReplyRequestID;
+static NSString *g_cmdReplyCommand;
+static NSDictionary<NSString *, id> *g_cmdReplyResult;
+static BOOL g_cmdReplyComplete;
+static NSUInteger g_cmdReplyGeneration;
+
+static BOOL CNDCmdValidHexCredential(NSString *value,
+                                     NSUInteger minimum,
+                                     NSUInteger maximum)
+{
+    if (![value isKindOfClass:NSString.class] ||
+        value.length < minimum || value.length > maximum) {
+        return NO;
+    }
+    NSCharacterSet *notHex = [[NSCharacterSet
+        characterSetWithCharactersInString:@"0123456789abcdefABCDEF"]
+        invertedSet];
+    return [value rangeOfCharacterFromSet:notHex].location == NSNotFound;
+}
+
+static void CNDCmdCompleteLiveReply(NSString *requestID,
+                                    NSDictionary<NSString *, id> *report)
+{
+    @synchronized (CNDCmdReplyLock()) {
+        if (![g_cmdReplyRequestID isEqualToString:requestID] ||
+            g_cmdReplyComplete) {
+            return;
+        }
+        g_cmdReplyResult = [report copy] ?: @{};
+        g_cmdReplyComplete = YES;
+    }
+}
+
+static BOOL CNDCmdStartLiveReply(NSString *requestID,
+                                 NSString *token,
+                                 NSString *command)
+{
+    if (!CNDCmdValidHexCredential(requestID, 32, 64) ||
+        !CNDCmdValidHexCredential(token, 64, 128)) {
+        log_user("[CND_CMD] refused invalid live-reply credentials\n");
+        return NO;
+    }
+
+    __block NSUInteger generation = 0;
+    @synchronized (CNDCmdReplyLock()) {
+        if (g_cmdReplyRequestID != nil) {
+            log_user("[CND_CMD] refused overlapping live-reply request\n");
+            return NO;
+        }
+        g_cmdReplyRequestID = [requestID copy];
+        g_cmdReplyCommand = [command copy];
+        g_cmdReplyResult = nil;
+        g_cmdReplyComplete = NO;
+        generation = ++g_cmdReplyGeneration;
+    }
+
+    NSError *error = nil;
+    BOOL started = cyanide_lab_bridge_start_with_token(
+        ^NSDictionary *(NSDictionary *request) {
+            NSString *incomingID = [request[@"requestID"]
+                isKindOfClass:NSString.class] ? request[@"requestID"] : @"";
+            NSString *operation = [request[@"command"]
+                isKindOfClass:NSString.class] ? request[@"command"] : @"";
+            NSDictionary *result = nil;
+            NSString *registeredCommand = nil;
+            BOOL complete = NO;
+            @synchronized (CNDCmdReplyLock()) {
+                if (![g_cmdReplyRequestID isEqualToString:incomingID]) {
+                    return @{ @"ok": @NO,
+                              @"error": @"request-mismatch",
+                              @"message": @"The live-reply request ID did not match.",
+                              @"protocolVersion": @1 };
+                }
+                result = g_cmdReplyResult;
+                registeredCommand = g_cmdReplyCommand;
+                complete = g_cmdReplyComplete;
+            }
+            if ([operation isEqualToString:@"probe.result"]) {
+                NSMutableDictionary *response = [@{
+                    @"ok": @YES,
+                    @"status": complete ? @"complete" : @"pending",
+                    @"requestID": incomingID,
+                    @"command": registeredCommand ?: @"",
+                    @"pid": @(getpid()),
+                    @"protocolVersion": @1,
+                } mutableCopy];
+                if (complete) response[@"result"] = result ?: @{};
+                return response;
+            }
+            if ([operation isEqualToString:@"probe.ack"] && complete) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                    (int64_t)(250 * NSEC_PER_MSEC)),
+                    dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                        cyanide_lab_bridge_stop();
+                    });
+                return @{ @"ok": @YES, @"status": @"acknowledged",
+                          @"requestID": incomingID,
+                          @"protocolVersion": @1 };
+            }
+            return @{ @"ok": @NO, @"error": @"invalid-probe-request",
+                      @"message": @"Use probe.result, then probe.ack after completion.",
+                      @"protocolVersion": @1 };
+        }, ^{
+            @synchronized (CNDCmdReplyLock()) {
+                if ([g_cmdReplyRequestID isEqualToString:requestID]) {
+                    g_cmdReplyRequestID = nil;
+                    g_cmdReplyCommand = nil;
+                    g_cmdReplyResult = nil;
+                    g_cmdReplyComplete = NO;
+                }
+            }
+        }, token, &error);
+    if (!started) {
+        @synchronized (CNDCmdReplyLock()) {
+            if ([g_cmdReplyRequestID isEqualToString:requestID]) {
+                g_cmdReplyRequestID = nil;
+                g_cmdReplyCommand = nil;
+                g_cmdReplyResult = nil;
+                g_cmdReplyComplete = NO;
+            }
+        }
+        log_user("[CND_CMD] live-reply bridge refused: %s\n",
+                 error.localizedDescription.UTF8String ?: "unknown error");
+        return NO;
+    }
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+        (int64_t)(120 * NSEC_PER_SEC)),
+        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            BOOL expired = NO;
+            @synchronized (CNDCmdReplyLock()) {
+                expired = g_cmdReplyGeneration == generation &&
+                    [g_cmdReplyRequestID isEqualToString:requestID];
+            }
+            if (expired) {
+                log_user("[CND_CMD] live-reply bridge expired request=%s\n",
+                         requestID.UTF8String);
+                cyanide_lab_bridge_stop();
+            }
+        });
+    return YES;
+}
+
+static void CNDCmdRun(NSString *command, const char *source,
+                      CNDCmdResultHandler resultHandler)
 {
     NSString *cmd = [command stringByTrimmingCharactersInSet:
         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -113,10 +269,12 @@ static void CNDCmdRun(NSString *command, const char *source)
                 @"pid": @(getpid()), @"source": sourceName,
                 @"at": @([[NSDate date] timeIntervalSince1970]) });
             if (!kexploit_krw_ready()) {
-                CNDCmdWriteJSON(@"cnd-result.json", @{
+                NSDictionary *report = @{
                     @"command": cmd, @"result": @"refused-krw-not-ready",
                     @"pid": @(getpid()), @"source": sourceName,
-                    @"at": @([[NSDate date] timeIntervalSince1970]) });
+                    @"at": @([[NSDate date] timeIntervalSince1970]) };
+                CNDCmdWriteJSON(@"cnd-result.json", report);
+                if (resultHandler) resultHandler(report);
                 log_user("[CND_CMD] refused %s: KRW not ready\n", cmd.UTF8String);
                 CNDCmdEndProbeTask(task);
                 return;
@@ -127,7 +285,9 @@ static void CNDCmdRun(NSString *command, const char *source)
                 @"at": @([[NSDate date] timeIntervalSince1970]) });
             void (^finish)(NSDictionary<NSString *, id> *) =
                 ^(NSDictionary<NSString *, id> *report) {
-                    CNDCmdWriteJSON(@"cnd-result.json", report ?: @{});
+                    NSDictionary *finished = report ?: @{};
+                    CNDCmdWriteJSON(@"cnd-result.json", finished);
+                    if (resultHandler) resultHandler(finished);
                     CNDCmdEndProbeTask(task);
                 };
             if ([cmd isEqualToString:@"control"]) {
@@ -136,11 +296,24 @@ static void CNDCmdRun(NSString *command, const char *source)
                 CNDUatImageProbeRun(finish);
             } else if ([cmd isEqualToString:@"queue"]) {
                 CNDUatQueueProbeRun(NO, finish);
+            } else if ([cmd isEqualToString:@"uat-binding-read"]) {
+                CNDUatHardwareBindingProbeRun(NO, finish);
+            } else if ([cmd isEqualToString:@"uat-binding-write"]) {
+                CNDUatHardwareBindingProbeRun(YES, finish);
+            } else if ([cmd isEqualToString:@"uat-record-state"]) {
+                CNDUatHardwareRecordStateProbeRun(finish);
+            } else if ([cmd isEqualToString:@"uat-signer-inventory"]) {
+                CNDPhysicalKCall1UatSignerInventoryRun(finish);
+            } else if ([cmd isEqualToString:@"uat-get-pte"]) {
+                finish(@{
+                    @"command": cmd,
+                    @"result": @"disabled-after-device-panic",
+                    @"reason": @"The mediated GET_PT_ENTRY chain is quarantined pending panic-log analysis.",
+                });
             } else {
-                CNDCmdWriteJSON(@"cnd-result.json", @{
+                finish(@{
                     @"command": cmd, @"result": @"unknown-command",
                     @"at": @([[NSDate date] timeIntervalSince1970]) });
-                CNDCmdEndProbeTask(task);
             }
         }
     });
@@ -164,7 +337,7 @@ static void CNDCmdRunPendingIfAny(const char *source)
     }
     // Consume first: a probe that faults must not re-run on reboot.
     [[NSFileManager defaultManager] removeItemAtPath:cmdPath error:nil];
-    CNDCmdRun(cmd, source);
+    CNDCmdRun(cmd, source, nil);
 }
 
 BOOL CNDHandleCommandURL(NSURL *url, const char *source)
@@ -176,13 +349,33 @@ BOOL CNDHandleCommandURL(NSURL *url, const char *source)
     }
 
     NSString *cmd = url.path.lastPathComponent.lowercaseString;
-    if (![@[ @"control", @"image", @"queue" ] containsObject:cmd]) {
+    if (![@[ @"control", @"image", @"queue", @"uat-binding-read",
+             @"uat-binding-write", @"uat-record-state",
+             @"uat-signer-inventory", @"uat-get-pte" ] containsObject:cmd]) {
         log_user("[CND_CMD] refused unknown URL command %s in pid=%d\n",
                  cmd.UTF8String ?: "(missing)", getpid());
         return NO;
     }
 
-    CNDCmdRun(cmd, source ?: "url");
+    NSString *replyToken = nil;
+    NSString *requestID = nil;
+    NSURLComponents *components = [NSURLComponents
+        componentsWithURL:url resolvingAgainstBaseURL:NO];
+    for (NSURLQueryItem *item in components.queryItems ?: @[]) {
+        if ([item.name isEqualToString:@"replyToken"]) replyToken = item.value;
+        if ([item.name isEqualToString:@"requestID"]) requestID = item.value;
+    }
+    BOOL requestedLiveReply = replyToken.length > 0 || requestID.length > 0;
+    if (requestedLiveReply &&
+        !CNDCmdStartLiveReply(requestID, replyToken, cmd)) {
+        return NO;
+    }
+    CNDCmdResultHandler reply = requestedLiveReply
+        ? ^(NSDictionary<NSString *, id> *report) {
+            CNDCmdCompleteLiveReply(requestID, report);
+          }
+        : nil;
+    CNDCmdRun(cmd, source ?: "url", reply);
     return YES;
 }
 
@@ -243,8 +436,10 @@ static void CNDCmdStartWatcher(void)
     // it recovered the old parked KRW generation before trusting process-local
     // ACTIVE bits. SnowBoard's persistent state survives independently.
     settings_reconcile_persisted_applied_state_on_launch();
-    settings_apply_snowboard_automatic_repair_enabled(
-        [[NSUserDefaults standardUserDefaults] boolForKey:kSettingsKeepAlive]);
+    // Establish Automatic Repair's audio/power lifetime now. The scene's
+    // did-become-active callback consumes the pending "Cyanide opened" repair
+    // once UIKit is foreground, without duplicating the cold-launch request.
+    settings_reconcile_snowboard_automatic_repair_lifetime();
     [self installTerminationHandlers];
     // Keeps the live process awake and retains legacy local command pickup. Host
     // commands arrive through the URL scene callback without touching appData.

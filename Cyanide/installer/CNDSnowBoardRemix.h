@@ -51,6 +51,11 @@ FOUNDATION_EXPORT NSString * const CNDSnowBoardRemixStatusesDidRefreshNotificati
 /// indexed/store hashes and the native source-registry association without
 /// refreshing SpringBoard or SharingUIService.
 + (NSDictionary<NSString *, id> *)auditIsolatedAirDropTest;
+/// Issues the exact measured AirDrop descriptors through resident signed code
+/// while a diagnostic Share sheet is visible. It records those explicit probe
+/// pixels, UIAirDropActivity provider pixels, and materialized tile pixels;
+/// no temporary SharingUIService hook or executable mapping is installed.
++ (NSDictionary<NSString *, id> *)captureIsolatedAirDropPresentation;
 /// Restores only the journaled AirDrop records and refreshes SharingUIService.
 /// It does not run the broad SpringBoard presentation restore.
 + (NSDictionary<NSString *, id> *)restoreIsolatedAirDropTest;

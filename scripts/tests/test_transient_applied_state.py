@@ -401,15 +401,38 @@ class TransientAppliedStateTests(unittest.TestCase):
             "static void settings_reset_springboard_remote_call_health_locked",
         )
         recover = self.persistence[
-            self.persistence.index("bool krw_persistence_recover(void)") :
+            self.persistence.index(
+                "CNDKRWPersistenceRecoveryResult krw_persistence_recover_with_status(void)"
+            ) :
         ]
-        self.assertIn("krw_persistence_recover()", launch)
+        self.assertIn("krw_persistence_recover_with_status()", launch)
         self.assertIn("if (!off_proc_p_pid)", recover)
         self.assertIn('SYSTEM_VERSION_LESS_THAN(@"26.1")', recover)
         self.assertLess(recover.index("offsets_init();"),
                         recover.index("persist_consume_saved_token("))
         self.assertLess(recover.index("off_thread_t_tro"),
                         recover.index("kutils_recover_self_proc_from("))
+
+    def test_retryable_recovery_preserves_applied_state_and_blocks_acquisition(self) -> None:
+        launch = self.method(
+            self.settings,
+            "void settings_reconcile_persisted_applied_state_on_launch(void)",
+            "static void settings_reset_springboard_remote_call_health_locked",
+        )
+        self.assertIn("recoveryUncertain", launch)
+        self.assertLess(
+            launch.index("if (recoveryUncertain)"),
+            launch.index("CNDTransientAppliedStateResetAfterKRWLoss"),
+        )
+        ensure = self.method(
+            self.settings,
+            "static BOOL settings_ensure_kexploit(void)",
+            "static void settings_run_lsreg_baseline_action",
+        )
+        retryable = ensure.index("CNDKRWPersistenceRecoveryRetryableFailure")
+        acquire = ensure.index("res = kexploit_opa334()")
+        self.assertLess(retryable, acquire)
+        self.assertIn("refused to run a fresh exploit", ensure[retryable:acquire])
 
     def test_process_fix_actions_save_independent_active_states(self) -> None:
         self.assertIn("CNDTransientAppliedStateSpringBoardFixes", self.queue)
@@ -423,8 +446,8 @@ class TransientAppliedStateTests(unittest.TestCase):
             "static BOOL settings_ensure_kexploit(void)",
             "static void settings_run_lsreg_baseline_action",
         )
-        acquisition = ensure[ensure.index("int res = kexploit_opa334()") :]
-        before_acquisition = ensure[: ensure.index("int res = kexploit_opa334()")]
+        acquisition = ensure[ensure.index("res = kexploit_opa334()") :]
+        before_acquisition = ensure[: ensure.index("res = kexploit_opa334()")]
         self.assertIn("CNDTransientAppliedStateResetAfterKRWLoss", before_acquisition)
         self.assertNotIn("CNDTransientAppliedStateReconcileCurrentEpoch", acquisition)
         self.assertNotIn("CNDTransientAppliedStateReconcileCurrentEpoch", ensure)

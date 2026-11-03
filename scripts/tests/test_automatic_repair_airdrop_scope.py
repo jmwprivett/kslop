@@ -31,8 +31,9 @@ class AutomaticRepairAirDropScopeTests(unittest.TestCase):
         self.assertIn("+ (BOOL)hasAutomaticRepairData;", self.header)
         for signature in (
             "static void settings_arm_snowboard_automatic_repair(void)\n{",
-            "static void settings_schedule_snowboard_automatic_repair_internal(\n"
-            "    NSString *reason,\n    NSTimeInterval delay,\n    NSUInteger attempt)\n{",
+            "static void settings_enqueue_snowboard_automatic_repair(\n"
+            "    NSString *reason,\n    NSTimeInterval delay,\n"
+            "    NSUInteger attempt,\n    BOOL immediate)\n{",
         ):
             self.assertIn("settings_snowboard_automatic_repair_is_active()",
                           definition(self.settings, signature))
@@ -54,6 +55,26 @@ class AutomaticRepairAirDropScopeTests(unittest.TestCase):
             self.assertIn("CNDRemixAirDropPseudoBundleIdentifier", definition(
                 self.remix, f"+ (NSDictionary<NSString *, id> *){action}"))
 
+    def test_share_diagnostics_require_explicit_or_actual_airdrop_work(self) -> None:
+        apply = definition(self.remix,
+                           "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(")
+        self.assertIn(
+            "BOOL airDropTargetRequested = [foldedBundleFilter containsObject:\n"
+            "        CNDRemixAirDropPseudoBundleIdentifier.lowercaseString];", apply)
+        self.assertRegex(
+            apply,
+            r"if \(airDropTargetRequested \|\|\s*"
+            r"\[matched containsObject:\s*"
+            r"CNDRemixAirDropPseudoBundleIdentifier\]\) \{\s*"
+            r"log_user\(\"\[SBR_SHARE\] airdrop asset=",
+        )
+        self.assertRegex(
+            apply,
+            r"if \(airDropTargetRequested \|\| airDropResult \|\| "
+            r"airDropUnthemed \|\|\s*airDropActive\) \{\s*"
+            r"log_user\(\"\[SBR_SHARE\] airdrop active=",
+        )
+
     @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"),
                          "requires macOS Foundation and clang")
     def test_production_selection_and_journal_predicates_exclude_airdrop(self) -> None:
@@ -62,7 +83,7 @@ class AutomaticRepairAirDropScopeTests(unittest.TestCase):
         installed_start = self.remix.index("            for (NSString *bundleIdentifier in installed)")
         installed_end = self.remix.index("            BOOL debugApplicationLimit", installed_start)
         pseudo_start = self.remix.index("            for (NSString *pseudoBundleIdentifier in", installed_end)
-        pseudo_end = self.remix.index('            log_user("[SBR_SHARE] airdrop asset=', pseudo_start)
+        pseudo_end = self.remix.index('            if (airDropTargetRequested ||', pseudo_start)
         parts = {
             "// PSEUDO_PREDICATE": definition(self.remix,
                 "static BOOL CNDRemixIsSupportedPseudoBundleIdentifier("),

@@ -35,8 +35,9 @@ class PhysicalCalculatorPACProbeTests(unittest.TestCase):
         source = REMOTE_CALL.read_text()
         self.assertIn("thread_convert_sign_state_for_target(\n"
                       "                    g_RC_identityThreadPort", source)
+        self.assertIn("g_RC_identityTaskPort", source)
         self.assertGreaterEqual(
-            source.count("remote_call_release_identity_thread_right();"), 3
+            source.count("remote_call_release_identity_rights();"), 3
         )
         self.assertIn("g_RC_identityConversionFailures++", source)
 

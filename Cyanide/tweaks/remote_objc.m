@@ -149,6 +149,16 @@ uint64_t r_dlsym_call(int timeout, const char *fnName,
     return r_call_stable(timeout, fnName, a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
+uint64_t r_call_address(int timeout, uint64_t address,
+                        const char *diagnosticName,
+                        uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
+                        uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7)
+{
+    return r_call_stable_addr(
+        timeout, address, diagnosticName,
+        a0, a1, a2, a3, a4, a5, a6, a7);
+}
+
 uint64_t r_autorelease_pool_push(void)
 {
     return r_dlsym_call(R_TIMEOUT, "objc_autoreleasePoolPush",
@@ -1349,6 +1359,48 @@ uint64_t r_cfstr(const char *s)
                                 0, buf, 0x08000100, 0, 0, 0, 0, 0);
     r_free(buf);
     return cf;
+}
+
+uint64_t r_cfstr_register_only(const char *s)
+{
+    /* Keep this deliberately small: every distinct byte run is one stable
+     * target-side memset call. No target page is mapped into Cyanide and no
+     * remote_write* helper participates in the transfer. */
+    static const size_t kMaximumUTF8Length = 512;
+    if (!s) return 0;
+    size_t length = strnlen(s, kMaximumUTF8Length + 1);
+    if (length > kMaximumUTF8Length || !remote_call_current_success()) {
+        return 0;
+    }
+
+    uint64_t bytes = r_call_stable(
+        R_TIMEOUT, "calloc", 1, length + 1, 0, 0, 0, 0, 0, 0);
+    if (!bytes || !remote_call_current_success()) return 0;
+
+    bool materialized = true;
+    for (size_t offset = 0; offset < length;) {
+        unsigned char value = (unsigned char)s[offset];
+        size_t runLength = 1;
+        while (offset + runLength < length &&
+               (unsigned char)s[offset + runLength] == value) {
+            runLength++;
+        }
+        uint64_t destination = bytes + offset;
+        uint64_t result = r_call_stable(
+            R_TIMEOUT, "memset", destination, value, runLength,
+            0, 0, 0, 0, 0);
+        if (result != destination || !remote_call_current_success()) {
+            materialized = false;
+            break;
+        }
+        offset += runLength;
+    }
+
+    uint64_t string = materialized ? r_call_stable(
+        R_TIMEOUT, "CFStringCreateWithBytes",
+        0, bytes, length, 0x08000100, 0, 0, 0, 0) : 0;
+    if (remote_call_current_success()) r_free(bytes);
+    return r_is_objc_ptr(string) && remote_call_current_success() ? string : 0;
 }
 
 uint64_t r_nsstr_retained(const char *s)
