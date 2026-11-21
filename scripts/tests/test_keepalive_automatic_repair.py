@@ -65,8 +65,10 @@ class KeepAliveAutomaticRepairTests(unittest.TestCase):
         lifetime = body(self.settings, "void settings_reconcile_snowboard_automatic_repair_lifetime(")
         self.assertLess(lifetime.index("dispatch_block_t reconcile = ^{"),
                         lifetime.index("BOOL active = settings_snowboard_automatic_repair_is_active();"))
-        self.assertIn("active || substantialHandoff || queueHandoff", lifetime)
-        self.assertIn("g_queue_post_respring_foreground_armed", lifetime)
+        self.assertIn("ds_keepalive_apply_enabled(active);", lifetime)
+        self.assertNotIn("substantialHandoff", lifetime)
+        self.assertNotIn("queueHandoff", lifetime)
+        self.assertNotIn("g_queue_post_respring_foreground_armed", lifetime)
         inactive = lifetime[lifetime.index("if (!active)"):lifetime.index("if (!g_sbl_automatic_repair_power_observer)")]
         self.assertIn("dispatch_source_cancel(g_sbl_automatic_repair_timer)", inactive)
         self.assertIn("settings_cancel_pending_snowboard_automatic_repair();", inactive)
@@ -74,8 +76,9 @@ class KeepAliveAutomaticRepairTests(unittest.TestCase):
         self.assertIn("return;", inactive)
         self.assertIn("if (NSThread.isMainThread) reconcile();", lifetime)
         self.assertIn("dispatch_async(dispatch_get_main_queue(), reconcile)", lifetime)
-        # One centralized decision owns audio for Automatic Repair and both
-        # bounded respring handoffs; unrelated background entry cannot revive it.
+        # One centralized decision owns audio for Automatic Repair alone.
+        # Unrelated background entry cannot revive it, and a pending respring
+        # handoff no longer extends this process's background lifetime.
         self.assertEqual(self.settings.count("ds_keepalive_apply_enabled("), 1)
 
     def test_launch_toggle_and_background_reconcile_lifetime(self) -> None:
@@ -275,8 +278,8 @@ class KeepAliveAutomaticRepairTests(unittest.TestCase):
             "static void settings_attempt_substantial_repair_respring_if_ready(",
         )
         self.assertIn("UIApplicationStateActive", admission)
-        self.assertIn(
-            "settings_schedule_pre_respring_cyanide_activation();", admission
+        self.assertNotIn(
+            "settings_request_cyanide_foreground_through_springboard", admission
         )
         self.assertIn("g_sbl_substantial_repair_respring_start_attempt >= 3U", admission)
         self.assertIn(
@@ -300,119 +303,84 @@ class KeepAliveAutomaticRepairTests(unittest.TestCase):
             explicit,
         )
 
-    def test_post_respring_activation_is_recovery_only_pid_bound_and_bounded(self) -> None:
-        activation = body(
-            self.settings,
-            "static BOOL settings_attempt_post_respring_cyanide_activation(",
-        )
-        self.assertIn("krw_persistence_has_saved_recovery()", activation)
-        self.assertIn("krw_persistence_recover()", activation)
-        self.assertNotIn("settings_ensure_kexploit()", activation)
-        self.assertNotIn("kexploit_opa334()", activation)
-        self.assertIn("currentPID == substantialPreviousPID", activation)
-        self.assertIn("currentPID == queuePreviousPID", activation)
-        self.assertIn(
-            "settings_request_cyanide_foreground_through_springboard(",
-            activation,
-        )
-        self.assertIn(
-            '@"post-respring presentation repair", 2.0', activation
-        )
+    def test_cyanide_never_foregrounds_itself_through_springboard(self) -> None:
+        """Opening the app must not recover KRW, inject into SpringBoard, or relaunch Cyanide.
 
-        foreground = body(
-            self.settings,
-            "static BOOL settings_request_cyanide_foreground_through_springboard(",
-        )
-        self.assertIn('"SBSLaunchApplicationWithIdentifier"', foreground)
-        self.assertIn("NSBundle.mainBundle.bundleIdentifier", foreground)
-
-        pre_respring = body(
-            self.settings,
-            "static void settings_schedule_pre_respring_cyanide_activation(",
-        )
-        self.assertIn("kexploit_krw_ready()", pre_respring)
-        self.assertNotIn("krw_persistence_recover()", pre_respring)
-        self.assertNotIn("settings_ensure_kexploit()", pre_respring)
-        self.assertIn("attempt < 3U", pre_respring)
-        self.assertIn(
-            "settings_request_cyanide_foreground_through_springboard(",
-            pre_respring,
-        )
-
-        scheduler = body(
-            self.settings,
-            "static void settings_schedule_post_respring_cyanide_activation(",
-        )
-        for delay in (
-            "500LL * NSEC_PER_MSEC",
-            "1LL * NSEC_PER_SEC",
-            "2LL * NSEC_PER_SEC",
-            "5LL * NSEC_PER_SEC",
-            "10LL * NSEC_PER_SEC",
+        A controlled respring is a continuity boundary the user is present for.
+        Cyanide must never manufacture a foreground to start one, and must never
+        re-enter a replacement SpringBoard to bring itself back afterwards.
+        """
+        for removed in (
+            "settings_request_cyanide_foreground_through_springboard",
+            "settings_attempt_post_respring_cyanide_activation",
+            "settings_has_armed_post_respring_foreground_handoff",
+            "settings_schedule_post_respring_cyanide_activation",
+            "settings_schedule_pre_respring_cyanide_activation",
+            "SBSLaunchApplicationWithIdentifier",
         ):
-            self.assertIn(delay, scheduler)
-        self.assertIn(
-            "g_post_respring_activation_running, 0, 1", scheduler
-        )
-        self.assertIn(
-            '@"bounded post-respring activation attempts were exhausted"',
-            scheduler,
-        )
-        self.assertIn(
-            "settings_clear_queued_post_respring_foreground_handoff(", scheduler
-        )
+            self.assertNotIn(removed, self.settings)
 
+        # A SpringBoard restart drops every cached pointer and does nothing else.
         restart = body(self.settings, "static void settings_handle_springboard_restart(")
         self.assertIn("g_sbl_automatic_hail_mary_confirmed, 0", restart)
-        self.assertIn(
-            "settings_schedule_post_respring_cyanide_activation();", restart
-        )
+        self.assertIn("abandon_remote_call()", restart)
+        self.assertNotIn("krw_persistence_recover", restart)
 
-    def test_queue_post_respring_handoff_reuses_durable_authority(self) -> None:
+        # The admission path can only start a respring from a live window.
+        admission = body(
+            self.settings,
+            "static void settings_attempt_substantial_repair_respring_if_ready(",
+        )
+        self.assertIn(
+            "UIApplication.sharedApplication.applicationState !=\n"
+            "            UIApplicationStateActive",
+            admission,
+        )
+        self.assertNotIn('@"requesting Cyanide foreground', admission)
+        self.assertIn("the controlled respring waits until the app is opened", admission)
+
+    def test_queue_continuation_stays_durable_and_user_initiated(self) -> None:
         header = (ROOT / "Cyanide/SettingsViewController.h").read_text(
             encoding="utf-8"
         )
-        self.assertIn(
+        self.assertNotIn(
             "settings_arm_queued_post_respring_foreground_handoff", header
         )
-        transaction = body(
-            self.settings,
-            "static CNDQueuedTransaction *\nsettings_queued_post_respring_handoff_transaction(",
-        )
-        self.assertIn("CNDQueuedTransactionStateAwaitingRespring", transaction)
-        self.assertIn("CNDQueuedActionPhaseAfterRespring", transaction)
-        self.assertIn("remaining.count > 0", transaction)
+        for removed in (
+            "settings_arm_queued_post_respring_foreground_handoff",
+            "settings_queued_post_respring_handoff_transaction",
+            "settings_queued_post_respring_handoff_is_armed",
+            "settings_clear_queued_post_respring_foreground_handoff",
+            "settings_resume_queued_post_respring_actions_if_ready",
+            "g_queue_post_respring_foreground_armed",
+            "kQueuedPostRespringForegroundMaximumAge",
+        ):
+            self.assertNotIn(removed, self.settings)
+            self.assertNotIn(removed, self.queue)
 
-        arm = body(
-            self.settings,
-            "void settings_arm_queued_post_respring_foreground_handoff(",
+        # The durable AwaitingRespring checkpoint is still the sole continuation
+        # authority, and it is still persisted before the UI is told.
+        coordinator = body(self.queue, "- (void)runCoordinatorBeforeRespring")
+        boundary = coordinator.index("CNDQueuedTransactionStateAwaitingRespring")
+        persisted = coordinator.index("persistDurableTransaction", boundary)
+        notify = coordinator.index(
+            "PackageQueueReadyForRespringNotification", persisted
         )
-        self.assertIn("g_queue_post_respring_foreground_armed, 1", arm)
+        self.assertLess(boundary, persisted)
+        self.assertLess(persisted, notify)
         self.assertIn(
-            "settings_reconcile_snowboard_automatic_repair_lifetime();", arm
-        )
-        self.assertIn("kQueuedPostRespringForegroundMaximumAge", arm)
-
-        resume = body(
-            self.settings,
-            "static void settings_resume_queued_post_respring_actions_if_ready(",
-        )
-        self.assertIn("UIApplicationStateActive", resume)
-        self.assertIn("settings_prepare_queued_system_actions", resume)
-        self.assertIn("currentPID == transaction.preRespringSpringBoardPID", resume)
-        self.assertIn("resumePendingPostRespringActionsIfReady", resume)
-        self.assertIn(
-            "settings_clear_queued_post_respring_foreground_handoff(", resume
+            "reopen Cyanide and continue the saved queue",
+            coordinator[persisted:notify],
         )
 
+        # Becoming active must not resume the queue or recover KRW for it.
         observer = self.settings[self.settings.index(
             "UIApplicationDidBecomeActiveNotification"
         ):self.settings.index(
             '(void)settings_refresh_screen_awake_state("startup")'
         )]
-        self.assertIn(
-            "settings_resume_queued_post_respring_actions_if_ready();", observer
-        )
+        self.assertNotIn("settings_resume_queued_post_respring", observer)
+        self.assertNotIn("krw_persistence_recover", observer)
 
     def test_queued_apply_restore_wait_and_release_on_success_failure_or_exception(self) -> None:
         queued = body(self.queue, "- (BOOL)executeSnowBoardAction:")
@@ -506,9 +474,6 @@ static dispatch_block_t duringRun;
 static NSUInteger runCount;
 static NSUInteger lastAttempt;
 static volatile int g_sbl_automatic_hail_mary_confirmed;
-static volatile int g_sbl_substantial_repair_respring_armed;
-static volatile int g_queue_post_respring_foreground_armed;
-static NSDictionary *settings_substantial_repair_respring_marker(void) { return nil; }
 static BOOL fakeAudioEnabled;
 static void ds_keepalive_apply_enabled(BOOL enabled) { fakeAudioEnabled = enabled; }
 void settings_reconcile_snowboard_automatic_repair_lifetime(void);

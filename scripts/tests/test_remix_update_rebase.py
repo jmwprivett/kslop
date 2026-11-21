@@ -85,7 +85,7 @@ class RemixUpdateRebaseTests(unittest.TestCase):
             "NSMutableDictionary *journal = retainedJournal.count",
             rebase_call,
         )
-        publish = apply.index("CNDIconServicesPublisherPublishVariantInBatch(", new_journal)
+        publish = apply.index("CNDIconServicesPublisherPublishVariantsInBatch(", new_journal)
         self.assertLess(rebase_call, new_journal)
         self.assertLess(new_journal, publish)
         self.assertIn('journal[@"applicationFingerprint"]', apply[new_journal:publish])
@@ -101,7 +101,7 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         self.assertNotIn("CNDIconServicesPublisherRestore", adoption)
         self.assertNotIn("CNDIconServicesPublisherPublish", adoption)
 
-    def test_update_repair_enables_live_persistence_audit(self) -> None:
+    def test_update_repair_skips_global_live_persistence_audit(self) -> None:
         selector = "repairInstalledApplicationUpdatesWithProgress:"
         self.assertIn(selector, self.remix_header)
         start = self.remix.index(f"+ (NSDictionary<NSString *, id> *){selector}")
@@ -112,23 +112,27 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         repair = self.remix[start:end]
         self.assertIn(
             "CNDRemixApplyIconServicesTheme(\n"
-            "            nil, YES, NO, YES, progress, cancellation)",
+            "            nil, YES, NO, YES, NO, progress, cancellation)",
             repair,
         )
         self.assertIn('@"operationMode"] = @"update-repair"', repair)
-        self.assertIn('@"liveRepairApplications"]', repair)
-        self.assertIn("substantialApplicationThreshold = 8U", repair)
-        self.assertIn("substantialVariantThreshold = 48U", repair)
+        self.assertIn(
+            '@"repairScope"] = @"installed-application-updates"', repair
+        )
+        self.assertIn('@"livePersistenceAuditPerformed"] = @NO', repair)
         self.assertIn('@"substantialRepairPerformed"]', repair)
         self.assertIn('@"respringRecommended"]', repair)
+        self.assertIn('@"respringRequired"]', repair)
+        self.assertIn('@"presentationPending"]', repair)
         self.assertIn('[repair[@"applied"] unsignedIntegerValue]', repair)
         self.assertIn(
             '[repair[@"publishedVariants"] unsignedIntegerValue]', repair
         )
-        self.assertIn('[repair[@"ok"] boolValue] &&', repair)
+        self.assertIn('repair[@"respringRecommended"] = @NO', repair)
         self.assertNotIn("elapsedMilliseconds", repair)
         self.assertNotIn("CNDIconServicesPublisherBeginBatch(", repair)
         self.assertNotIn("CNDIconServicesPublisherPublishVariantInBatch(", repair)
+        self.assertNotIn("CNDIconServicesPublisherPublishVariantsInBatch(", repair)
 
     def test_normal_apply_does_not_pay_for_live_persistence_audit(self) -> None:
         start = self.remix.index(
@@ -141,7 +145,7 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         apply = self.remix[start:end]
         self.assertIn(
             "CNDRemixApplyIconServicesTheme(\n"
-            "            nil, YES, NO, NO, progress, cancellation)",
+            "            nil, YES, NO, NO, NO, progress, cancellation)",
             apply,
         )
 
@@ -187,6 +191,90 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         self.assertIn('@"transportMatrix": matrixSummary', repair)
         self.assertNotIn("CNDIconServicesPublisherAuditVariantInBatch(", repair)
 
+    def test_live_repair_defers_one_ambiguous_variant_instead_of_failing_the_app(
+        self,
+    ) -> None:
+        # The forward declaration comes first; anchor on the definition.
+        start = self.remix.rindex(
+            "static NSDictionary *CNDRemixAuditActiveJournalForRepairInBatch("
+        )
+        end = self.remix.index(
+            "static NSDictionary *CNDRemixCompareAppliedAuditRecords(", start
+        )
+        audit = self.remix[start:end]
+        loop_start = audit.index(
+            "for (NSMutableDictionary *record in records) {"
+        )
+        loop = audit[
+            loop_start:
+            audit.index("if (repairSpecifications.count == 0", loop_start)
+        ]
+        # The classification loop counts an ambiguous record and keeps going.
+        self.assertIn("ambiguousCount++;", loop)
+        self.assertNotIn("return @{", loop)
+        # The deferred record keeps its classification and its audit evidence.
+        self.assertIn(
+            'deferred[@"repairClassification"] = classification;', loop
+        )
+        self.assertIn('deferred[@"repairAudit"] = compact;', loop)
+        self.assertIn("[deferredVariants addObject:deferred];", loop)
+        self.assertIn('@"ambiguousVariantCount": @(ambiguousCount)', audit)
+        self.assertIn('@"deferredVariants": deferredVariants,', audit)
+        self.assertIn(
+            '@"deferredAmbiguousIdentities": deferredIdentities,', audit
+        )
+        # ok=NO survives only when there is nothing republishable.
+        condition = (
+            "if (repairSpecifications.count == 0 && ambiguousCount > 0) {"
+        )
+        self.assertIn(condition, audit)
+        self.assertIn('@"stage": @"live-persistence-ambiguous",', audit)
+        failure = audit[
+            audit.index(condition):
+            audit.index('@"ok": @YES', audit.index(condition))
+        ]
+        for key in (
+            '@"ok": @NO', '@"stage": @"live-persistence-ambiguous"',
+            '@"descriptorIdentity"', '@"records": compactRecords',
+            '@"mutationsIssued": @NO',
+        ):
+            self.assertIn(key, failure)
+        self.assertNotIn('@"retainedVariants"', failure)
+        # A repair specification alongside an ambiguous descriptor still wins.
+        self.assertIn(
+            "@\"stage\": repairSpecifications.count > 0\n"
+            "            ? @\"live-persistence-repair-required\"",
+            audit,
+        )
+        # The transport-matrix failure shape is untouched.
+        self.assertIn('@"stage": matrixAudit[@"stage"] ?:', audit)
+        self.assertIn('@"records": @[],', audit)
+        self.assertIn('@"transportMatrix": matrixSummary,', audit)
+
+    def test_live_repair_journal_carries_deferred_variants_and_logs_the_count(
+        self,
+    ) -> None:
+        apply_start = self.remix.index(
+            "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
+        )
+        apply_end = self.remix.index(
+            "static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals(",
+            apply_start,
+        )
+        apply = self.remix[apply_start:apply_end]
+        self.assertIn('liveRepairAudit[@"deferredVariants"] ?: @[]', apply)
+        merge = apply[
+            apply.index('NSArray<NSDictionary *> *retainedVariants ='):
+            apply.index('liveRepairJournal = retainedJournal;')
+        ]
+        self.assertIn("arrayByAddingObjectsFromArray:", merge)
+        self.assertIn('retainedJournal[@"variants"] =', merge)
+        self.assertIn('liveRepairAudit[@"retainedVariants"]', merge)
+        log_start = apply.index('log_user("[SBR_UPDATE_REPAIR] app=%s ')
+        log_line = apply[log_start:apply.index(");", log_start)]
+        self.assertIn("ambiguous=%lu", log_line)
+        self.assertIn('@"ambiguousVariantCount"', log_line)
+
     def test_live_repair_prunes_only_repair_targets_before_publication(self) -> None:
         apply_start = self.remix.index(
             "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
@@ -199,14 +287,14 @@ class RemixUpdateRebaseTests(unittest.TestCase):
         audit = apply.index("CNDRemixAuditActiveJournalForRepairInBatch(")
         prune = apply.index(
             'retainedJournal[@"variants"] =\n'
-            '                                liveRepairAudit[@"retainedVariants"]',
+            '                                [retainedVariants',
             audit,
         )
         checkpoint = apply.index(
             "CNDRemixWriteIconServicesJournal(journal)", prune
         )
         publish = apply.index(
-            "CNDIconServicesPublisherPublishVariantInBatch(", checkpoint
+            "CNDIconServicesPublisherPublishVariantsInBatch(", checkpoint
         )
         self.assertLess(audit, prune)
         self.assertLess(prune, checkpoint)

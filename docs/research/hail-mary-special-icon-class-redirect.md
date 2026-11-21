@@ -9,7 +9,7 @@ a physical level-3 write fault panic; the replacement targets two
 SpringBoardHome `__got` class pointers in the non-executable `.33.dylddata`
 subcache.
 **Target:** `iPhone17,2`, iOS 26.0 (`23A341`).
-**Module:** `Cyanide/CNDHailMarySpecialIconClassRedirect.{h,m}`.
+**Module:** `Cyanide/probes/CNDHailMarySpecialIconClassRedirect.{h,m}`.
 **Offline manifest:**
 [`special-icon-class-got-redirect-23A341-iphone17,2.json`](special-icon-class-got-redirect-23A341-iphone17,2.json).
 

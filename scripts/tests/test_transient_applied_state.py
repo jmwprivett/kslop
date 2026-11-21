@@ -147,8 +147,39 @@ class TransientAppliedStateTests(unittest.TestCase):
         self.assertNotIn("CNDTransientAppliedStateReconcileCurrentEpoch", body)
         self.assertNotIn("CNDTransientAppliedStateCurrentSpringBoardPID", body)
         self.assertNotIn("kexploit_krw_ready", body)
+        self.assertIn("kill(storedPID, 0)", body)
+        self.assertIn("probeError == EPERM", body)
+        self.assertIn(
+            "CNDTransientAppliedStateInvalidateProcessLocalStatesLocked", body
+        )
         self.assertLess(body.index("CNDTransientAppliedStateBootMatches"),
                         body.index("states[stateKey]"))
+
+    def test_springboard_restart_notification_clears_sbc_marker(self) -> None:
+        helper = self.method(
+            self.source,
+            "static BOOL CNDTransientAppliedStateInvalidateProcessLocalStatesLocked",
+            "BOOL CNDTransientAppliedStateReconcileCurrentEpoch",
+        )
+        self.assertIn("CNDTransientAppliedStateRemoveProcessLocalStates", helper)
+        self.assertIn('updated[@"spotlightPID"] = @0', helper)
+        self.assertIn("pendingTransactionIdentifier", helper)
+        self.assertIn("states.count > 0 || pending.length > 0", helper)
+
+        restart = self.method(
+            self.settings,
+            "static void settings_handle_springboard_restart",
+            "static void settings_install_screen_awake_observers",
+        )
+        self.assertIn(
+            "CNDTransientAppliedStateInvalidateProcessLocalStatesForSpringBoardRestart",
+            restart,
+        )
+        cleared = restart.index(
+            "settings_mark_tweak_applied(kSettingsSBCEnabled, NO)"
+        )
+        deferred = restart.index("dispatch_async", cleared)
+        self.assertLess(cleared, deferred)
 
     def test_coordinator_prepares_authorized_transition_before_awaiting(self) -> None:
         body = self.method(
@@ -239,6 +270,32 @@ class TransientAppliedStateTests(unittest.TestCase):
         self.assertIn("CNDTransientAppliedStateFontChanger", body)
         self.assertIn("CNDTransientAppliedStateSBCustomizer", body)
 
+    def test_sbc_does_not_synthesize_a_post_restart_queue_intent(self) -> None:
+        body = self.method(
+            self.package_m,
+            "- (BOOL)isQueuedForApply",
+            "- (BOOL)isInstallDisabled",
+        )
+        sbc = body.index('com.darksword.sbcustomizer')
+        defaults = body.index("NSUserDefaults", sbc)
+        self.assertIn("return NO;", body[sbc:defaults])
+        self.assertIn("explicit PackageQueue transaction", body[sbc:defaults])
+
+    def test_legacy_sbc_marker_failure_is_retired_without_replay(self) -> None:
+        body = self.method(
+            self.queue,
+            "- (void)hydrateDurableTransaction",
+            "- (CNDQueuedTransaction *)durableTransaction",
+        )
+        legacy = body.index("kLegacySBCustomizerMarkerFailure")
+        completed = body.index("CNDQueuedTransactionStateCompleted", legacy)
+        removed = body.index("self.transaction = nil", completed)
+        self.assertIn("hasFailedSBCustomizerAction", body[legacy:completed])
+        self.assertIn("allActionsTerminal", body[legacy:completed])
+        self.assertLess(legacy, completed)
+        self.assertLess(completed, removed)
+        self.assertIn("without replaying it", body[removed:])
+
     def test_snowboard_font_and_sbc_render_active_with_pending_precedence(self) -> None:
         list_body = self.method(
             self.list_ui,
@@ -328,7 +385,7 @@ class TransientAppliedStateTests(unittest.TestCase):
         helper = self.method(
             self.settings,
             "static void settings_release_sbc_one_shot_channel_async",
-            "static void settings_prepare_for_respring_sync",
+            "static BOOL settings_prepare_for_respring_sync",
         )
         self.assertIn("dispatch_async", helper)
         self.assertIn("settings_rc_lock", helper)
@@ -364,17 +421,18 @@ class TransientAppliedStateTests(unittest.TestCase):
         )
         self.assertLess(queued_completion, deferred_release)
 
-    def test_app_launch_recovery_reconciles_or_resets_without_fresh_exploit(self) -> None:
+    def test_app_launch_never_attempts_krw_recovery(self) -> None:
         launch = self.method(
             self.settings,
             "void settings_reconcile_persisted_applied_state_on_launch(void)",
             "static void settings_reset_springboard_remote_call_health_locked",
         )
-        self.assertIn("krw_persistence_recover", launch)
-        self.assertIn("CNDTransientAppliedStateReconcileCurrentEpoch", launch)
+        self.assertNotIn("krw_persistence_recover", launch)
+        self.assertNotIn("kexploit_krw_ready", launch)
+        self.assertNotIn("CNDTransientAppliedStateReconcileCurrentEpoch", launch)
         self.assertIn("CNDTransientAppliedStateResetAfterKRWLoss", launch)
         self.assertNotIn("kexploit_opa334", launch)
-        self.assertIn(
+        self.assertNotIn(
             "settings_reconcile_persisted_applied_state_on_launch();",
             self.app_delegate,
         )
@@ -394,45 +452,34 @@ class TransientAppliedStateTests(unittest.TestCase):
         )
         self.assertIn("CNDTransientAppliedStateWriteLocked(nil)", reset)
 
-    def test_cold_launch_initializes_offsets_before_consuming_recovery_tokens(self) -> None:
+    def test_cold_launch_never_touches_parked_krw(self) -> None:
         launch = self.method(
             self.settings,
             "void settings_reconcile_persisted_applied_state_on_launch(void)",
             "static void settings_reset_springboard_remote_call_health_locked",
         )
-        recover = self.persistence[
-            self.persistence.index(
-                "CNDKRWPersistenceRecoveryResult krw_persistence_recover_with_status(void)"
-            ) :
-        ]
-        self.assertIn("krw_persistence_recover_with_status()", launch)
-        self.assertIn("if (!off_proc_p_pid)", recover)
-        self.assertIn('SYSTEM_VERSION_LESS_THAN(@"26.1")', recover)
-        self.assertLess(recover.index("offsets_init();"),
-                        recover.index("persist_consume_saved_token("))
-        self.assertLess(recover.index("off_thread_t_tro"),
-                        recover.index("kutils_recover_self_proc_from("))
+        self.assertNotIn("krw_persistence_recover", launch)
+        self.assertNotIn("kexploit_krw_ready", launch)
+        self.assertIn("CNDTransientAppliedStateResetAfterKRWLoss", launch)
+        self.assertNotIn(
+            "settings_reconcile_persisted_applied_state_on_launch();",
+            self.app_delegate,
+        )
 
-    def test_retryable_recovery_preserves_applied_state_and_blocks_acquisition(self) -> None:
+    def test_explicit_action_has_one_recovery_owner(self) -> None:
         launch = self.method(
             self.settings,
             "void settings_reconcile_persisted_applied_state_on_launch(void)",
             "static void settings_reset_springboard_remote_call_health_locked",
         )
-        self.assertIn("recoveryUncertain", launch)
-        self.assertLess(
-            launch.index("if (recoveryUncertain)"),
-            launch.index("CNDTransientAppliedStateResetAfterKRWLoss"),
-        )
+        self.assertNotIn("CNDKRWPersistenceRecoveryRetryableFailure", launch)
         ensure = self.method(
             self.settings,
             "static BOOL settings_ensure_kexploit(void)",
             "static void settings_run_lsreg_baseline_action",
         )
-        retryable = ensure.index("CNDKRWPersistenceRecoveryRetryableFailure")
-        acquire = ensure.index("res = kexploit_opa334()")
-        self.assertLess(retryable, acquire)
-        self.assertIn("refused to run a fresh exploit", ensure[retryable:acquire])
+        self.assertNotIn("krw_persistence_recover_with_status", ensure)
+        self.assertIn("res = kexploit_opa334()", ensure)
 
     def test_process_fix_actions_save_independent_active_states(self) -> None:
         self.assertIn("CNDTransientAppliedStateSpringBoardFixes", self.queue)
@@ -448,10 +495,9 @@ class TransientAppliedStateTests(unittest.TestCase):
         )
         acquisition = ensure[ensure.index("res = kexploit_opa334()") :]
         before_acquisition = ensure[: ensure.index("res = kexploit_opa334()")]
-        self.assertIn("CNDTransientAppliedStateResetAfterKRWLoss", before_acquisition)
+        self.assertNotIn("krw_persistence_recover", before_acquisition)
         self.assertNotIn("CNDTransientAppliedStateReconcileCurrentEpoch", acquisition)
         self.assertNotIn("CNDTransientAppliedStateReconcileCurrentEpoch", ensure)
-        self.assertIn("settings_notify_package_queue_changed_async", ensure)
 
 
 if __name__ == "__main__":

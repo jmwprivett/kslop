@@ -195,6 +195,135 @@ int main(void) {
 '''
 
 
+STOCK_ORIGINAL_HARNESS = r'''
+#define CHECK(condition) do { if (!(condition)) { \
+    fprintf(stderr, "stock-original fixture failed at line %d: %s\n", \
+            __LINE__, #condition); return 1; } } while (0)
+static NSArray *filesIn(NSURL *directory) {
+    return [NSFileManager.defaultManager
+        contentsOfDirectoryAtURL:directory includingPropertiesForKeys:nil
+        options:NSDirectoryEnumerationSkipsHiddenFiles error:nil];
+}
+int main(void) {
+    @autoreleasepool {
+        NSString *bundle = @"com.example.stock.originals";
+        NSString *identity = @"68x68@3:a0:v0:o0";
+        NSString *uuid = @"6D4A0F7C-2E33-4C41-9A6E-2E5C8B9A1234";
+        NSData *bytes = [@"stock-original-bytes" dataUsingEncoding:NSUTF8StringEncoding];
+        NSString *hash = CNDRemixSHA256(bytes);
+        NSURL *directory = CNDRemixIconServicesStockOriginalDirectoryURL(bundle);
+
+        /* The sidecars live inside the existing journal tree. */
+        CHECK([directory.path hasPrefix:CNDRemixIconServicesRootURL().path]);
+        CHECK(![directory.path hasPrefix:
+            CNDRemixIconServicesTransactionsURL().path]);
+
+        /* Write, then require an exact byte readback. */
+        CHECK(CNDRemixWriteStockOriginal(bundle, identity, uuid, hash, bytes));
+        NSString *filename = CNDRemixStockOriginalFilename(identity, uuid, hash);
+        CHECK(filename.length > 0);
+        CHECK([filename containsString:@"68x68-3-a0-v0-o0"]);
+        CHECK([filename containsString:uuid.lowercaseString]);
+        CHECK([filename containsString:hash]);
+        NSDictionary *variant = @{@"stockOriginalPath": filename,
+                                  @"stockOriginalSHA256": hash};
+        CHECK([CNDRemixLoadStockOriginal(bundle, variant) isEqualToData:bytes]);
+
+        /* One descriptor owns one file: a new UUID or hash replaces the old
+         * entry instead of accumulating beside it. */
+        NSData *replacement = [@"second-stock-original"
+            dataUsingEncoding:NSUTF8StringEncoding];
+        NSString *replacementHash = CNDRemixSHA256(replacement);
+        CHECK(CNDRemixWriteStockOriginal(
+            bundle, identity, uuid, replacementHash, replacement));
+        CHECK([filesIn(directory) count] == 1);
+        CHECK(CNDRemixLoadStockOriginal(bundle, variant) == nil);
+
+        NSDictionary *current = @{
+            @"stockOriginalPath": CNDRemixStockOriginalFilename(
+                identity, uuid, replacementHash),
+            @"stockOriginalSHA256": replacementHash,
+        };
+        CHECK([CNDRemixLoadStockOriginal(bundle, current)
+            isEqualToData:replacement]);
+
+        /* A tampered file fails closed on its recorded hash. */
+        NSURL *file = [directory
+            URLByAppendingPathComponent:current[@"stockOriginalPath"]
+                            isDirectory:NO];
+        CHECK([[@"tampered" dataUsingEncoding:NSUTF8StringEncoding]
+            writeToURL:file options:NSDataWritingAtomic error:nil]);
+        CHECK(CNDRemixLoadStockOriginal(bundle, current) == nil);
+
+        /* So does a missing file, an unrecorded entry, and a path escape. */
+        CHECK([NSFileManager.defaultManager removeItemAtURL:file error:nil]);
+        CHECK(CNDRemixLoadStockOriginal(bundle, current) == nil);
+        CHECK(CNDRemixLoadStockOriginal(bundle, @{}) == nil);
+        CHECK(CNDRemixLoadStockOriginal(bundle,
+            @{@"stockOriginalPath": @"anything.isdata"}) == nil);
+        CHECK(CNDRemixLoadStockOriginal(bundle, @{
+            @"stockOriginalPath": @"../escape.isdata",
+            @"stockOriginalSHA256": replacementHash}) == nil);
+
+        /* The bounded write refuses an oversize original. */
+        NSData *oversize = [NSMutableData dataWithLength:
+            CNDIconServicesPublisherMaximumStructuredDataLength + 1];
+        CHECK(!CNDRemixWriteStockOriginal(
+            bundle, identity, uuid, CNDRemixSHA256(oversize), oversize));
+        CHECK(!CNDRemixWriteStockOriginal(bundle, identity, uuid, hash, nil));
+        CHECK(!CNDRemixWriteStockOriginal(bundle, identity, uuid, @"", bytes));
+        CHECK(!CNDRemixWriteStockOriginal(bundle, @"", uuid, hash, bytes));
+        CHECK(!CNDRemixWriteStockOriginal(bundle, identity, @"", hash, bytes));
+
+        /* A publication records only what survived exact readback. */
+        NSDictionary *variantRecord = @{@"descriptorIdentity": identity};
+        NSDictionary *captured = @{@"originalData": replacement,
+                                   @"uuid": uuid,
+                                   @"dataSHA256": replacementHash};
+        NSDictionary *saved = CNDRemixSaveStockOriginal(bundle, variantRecord,
+            @{@"stockResponse": captured});
+        CHECK([saved count] == 2);
+        CHECK([saved[@"stockOriginalSHA256"] isEqualToString:replacementHash]);
+        CHECK([CNDRemixLoadStockOriginal(bundle, saved)
+            isEqualToData:replacement]);
+        NSDictionary *noBytes = @{@"uuid": uuid,
+                                  @"dataSHA256": replacementHash};
+        CHECK([CNDRemixSaveStockOriginal(bundle, variantRecord,
+            @{@"stockResponse": noBytes}) count] == 0);
+        CHECK([CNDRemixSaveStockOriginal(bundle, variantRecord, @{}) count] == 0);
+        CHECK([CNDRemixSaveStockOriginal(bundle, @{},
+            @{@"stockResponse": captured}) count] == 0);
+        NSDictionary *badHash = @{@"originalData": replacement, @"uuid": uuid,
+                                  @"dataSHA256": @"not-a-hash"};
+        CHECK([CNDRemixSaveStockOriginal(bundle, variantRecord,
+            @{@"stockResponse": badHash}) count] == 0);
+        /* An oversize capture is not persisted and so is not recorded. */
+        NSDictionary *oversizeCapture = @{@"originalData": oversize,
+            @"uuid": uuid, @"dataSHA256": CNDRemixSHA256(oversize)};
+        CHECK([CNDRemixSaveStockOriginal(bundle, variantRecord,
+            @{@"stockResponse": oversizeCapture}) count] == 0);
+
+        /* Retiring the journal retires this app's originals with it. */
+        NSMutableDictionary *journal = [@{
+            @"schemaVersion": @2,
+            @"bundleIdentifier": bundle,
+            @"state": @"persistent-stock-verified",
+            @"variants": @[],
+            @"updatedAt": NSDate.date,
+        } mutableCopy];
+        CHECK(CNDRemixWriteIconServicesJournal(journal));
+        CHECK(CNDRemixWriteStockOriginal(
+            bundle, identity, uuid, replacementHash, replacement));
+        CHECK([filesIn(directory) count] == 1);
+        CHECK(CNDRemixRemoveIconServicesJournal(bundle));
+        CHECK(![NSFileManager.defaultManager
+            fileExistsAtPath:directory.path]);
+    }
+    return 0;
+}
+'''
+
+
 class RemixJournalStateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -247,7 +376,7 @@ class RemixJournalStateTests(unittest.TestCase):
 
     def test_stock_uuid_uses_owned_scratch_before_the_source_gate(self) -> None:
         start = self.transport.index("__block NSString *stockHash =")
-        settle = self.transport.index("persistentIndexIdentitySettled = persistentIndexScratch", start)
+        settle = self.transport.index("persistentIndexIdentitySettled = ", start)
         capture = self.transport.index(
             "stockUUIDText = cnd_publisher_audit_copy_indexed_identifier(", settle
         )
@@ -273,28 +402,207 @@ class RemixJournalStateTests(unittest.TestCase):
         block = self.source.index('BOOL predatesStorePreservation =', start)
         self.assertLess(reconcile, block)
 
-    def test_each_publication_has_a_durable_dispatch_checkpoint_and_result(self) -> None:
-        start = self.source.index("if (!currentDispatchCheckpointed)")
-        dispatch = self.source.index(
-            'dispatchVariant[@"publicationDispatchPossible"]', start
+    def test_publication_matrix_has_one_predispatch_checkpoint_and_results(self) -> None:
+        apply_start = self.source.index(
+            "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
+        )
+        arm = self.source.index(
+            'dispatchVariant[@"publicationDispatchPossible"]', apply_start
         )
         checkpoint = self.source.index(
-            "CNDRemixAppendIconServicesJournalCheckpoint(", dispatch
+            "CNDRemixAppendIconServicesJournalCheckpoint(", arm
         )
         publish = self.source.index(
-            "CNDIconServicesPublisherPublishVariantInBatch(", checkpoint
+            "CNDIconServicesPublisherPublishVariantsInBatch(", checkpoint
         )
         result = self.source.index('variantJournal[@"publication"] =', publish)
-        next_dispatch = self.source.index(
-            "NSMutableDictionary *nextDispatch", result
-        )
-        result_checkpoint = self.source.index(
-            "CNDRemixAppendIconServicesJournalCheckpoint(", next_dispatch
-        )
         self.assertLess(checkpoint, publish)
-        self.assertLess(result, next_dispatch)
-        self.assertLess(result, result_checkpoint)
-        self.assertIn('@"publicationDispatchPossible": @NO', self.source[:start])
+        self.assertLess(publish, result)
+        self.assertIn('@"publicationDispatchPossible": @NO', self.source[:arm])
+        self.assertNotIn("CNDIconServicesPublisherPublishVariantInBatch(",
+                         self.source[apply_start:])
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("clang"),
+                         "requires macOS Foundation and clang")
+    def test_compiled_stock_original_write_readback_invalidate_and_delete(self) -> None:
+        def section(start: str, end: str) -> str:
+            begin = self.source.index(start)
+            return self.source[begin:self.source.index(end, begin)]
+
+        sha256_function = section(
+            "static NSString *CNDRemixSHA256(NSData *data)",
+            "static NSString *CNDRemixCanonicalRGBAHashForPNG(",
+        )
+        sha_string = section(
+            "static BOOL CNDRemixIsSHA256String(NSString *value)\n{",
+            "static NSString *CNDRemixPayloadPlatformIdentifier(",
+        )
+        journal_helpers = section(
+            "static NSURL *CNDRemixIconServicesJournalURL(",
+            "static NSDictionary<NSString *, NSData *> *CNDRemixNormalizedThemeLookup(",
+        )
+        originals = section(
+            "static NSString *CNDRemixStockOriginalFilename(",
+            "static NSArray<CNDIconServicesDescriptorSpec *> *\n"
+            "CNDRemixDescriptorSpecificationsForBundleIdentifier(",
+        )
+        self.assertIn("CNDRemixIconServicesStockOriginalDirectoryURL(", journal_helpers)
+        with tempfile.TemporaryDirectory(prefix="cyanide-stock-originals-") as directory:
+            source = Path(directory) / "originals.m"
+            executable = Path(directory) / "originals"
+            root_literal = (
+                Path(directory).as_posix().replace("\\", "\\\\").replace('"', '\\"')
+            )
+            source.write_text(
+                "#import <Foundation/Foundation.h>\n"
+                "#include <stdio.h>\n"
+                "#import <CommonCrypto/CommonDigest.h>\n"
+                "const NSUInteger CNDIconServicesPublisherMaximumStructuredDataLength"
+                " = 64;\n"
+                "static const NSUInteger CNDRemixIconServicesCheckpointSchemaVersion = 1;\n"
+                "static const NSUInteger CNDRemixIconServicesCheckpointMaximumRecords = 256;\n"
+                "static const NSUInteger "
+                "CNDRemixIconServicesCheckpointMaximumVariantUpdates = 64;\n"
+                f'static NSString * const TestRoot = @"{root_literal}/store";\n'
+                "static NSURL *CNDRemixIconServicesRootURL(void) {\n"
+                "    return [NSURL fileURLWithPath:TestRoot isDirectory:YES];\n"
+                "}\n"
+                "static NSURL *CNDRemixIconServicesTransactionsURL(void) {\n"
+                "    return [CNDRemixIconServicesRootURL() "
+                "URLByAppendingPathComponent:@\"Transactions\" isDirectory:YES];\n"
+                "}\n"
+                + sha256_function + sha_string + journal_helpers + originals
+                + STOCK_ORIGINAL_HARNESS,
+                encoding="utf-8",
+            )
+            subprocess.run(["clang", "-fobjc-arc", "-framework", "Foundation",
+                            str(source), "-o", str(executable)],
+                           check=True, capture_output=True)
+            subprocess.run([str(executable)], check=True, capture_output=True)
+
+    def test_transport_saved_original_falls_back_to_generation(self) -> None:
+        start = self.transport.index("if (savedStockOriginal) {")
+        end = self.transport.index(
+            "triggerFinishedAt = CFAbsoluteTimeGetCurrent();", start
+        )
+        branch = self.transport[start:end]
+        self.assertIn(
+            '"findStoreUnitForIcon:descriptor:UUID:validationToken:"', branch
+        )
+        self.assertIn("managerCache,", branch)
+        # The journaled original is only used when the live index still carries
+        # this descriptor's record; otherwise the run generates its own stock.
+        self.assertIn("stockUsedSavedOriginal = stockUUID && stockToken;",
+                      branch)
+        self.assertIn("if (stockUsedSavedOriginal) {", branch)
+        self.assertIn("if (!stockUsedSavedOriginal) {", branch)
+        resolve = branch.index("stockUsedSavedOriginal = stockUUID && stockToken;")
+        generate = branch.index('"generateImageWithDescriptor:"')
+        self.assertLess(resolve, generate)
+        self.assertIn("? @\"stock-api-saved-original-identity\"\n"
+                      "                        : @\"stock-api-generation-response\"",
+                      self.transport)
+        # The daemon copy must equal the journaled bytes before any write, and
+        # a mismatch falls back to generation rather than failing the run.
+        readback = branch.index("![staged isEqualToData:savedStockOriginal]")
+        self.assertIn("NSData *staged = stockData", branch)
+        self.assertLess(readback, branch.index("if (!stockUsedSavedOriginal) {"))
+        self.assertIn("stockUsedSavedOriginal = NO;", branch[readback:])
+        remove = self.transport.index("directStoreRemoveIssued = YES;")
+        self.assertLess(self.transport.index("![staged isEqualToData:", 0), remove)
+        # The report never claims a journaled original it fell back from.
+        self.assertIn('report[@"stockOriginalUsed"] = @(stockUsedSavedOriginal);',
+                      self.transport)
+        self.assertIn("report[@\"stockIdentitySource\"] = stockUsedSavedOriginal",
+                      self.transport)
+        # The saved bytes are supplied only for the bundle that recorded them.
+        self.assertIn(
+            "!replacing && [batch.savedStockOriginalsBundleIdentifier\n"
+            "            isEqualToString:bundleIdentifier]",
+            self.transport,
+        )
+
+    def test_restore_supplies_only_hash_verified_originals(self) -> None:
+        start = self.source.index(
+            "static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals("
+        )
+        end = self.source.index("\n@implementation CNDSnowBoardRemix", start)
+        restore = self.source[start:end]
+        load = restore.index("CNDRemixLoadStockOriginal(")
+        supply = restore.index(
+            "CNDIconServicesPublisherSetSavedStockOriginalsInBatch("
+        )
+        matrix = restore.index(
+            "CNDIconServicesPublisherRestoreStockVariantsInBatch("
+        )
+        clear = restore.index(
+            "CNDIconServicesPublisherSetSavedStockOriginalsInBatch(\n"
+            "                        nil, bundleIdentifier);",
+            supply,
+        )
+        self.assertLess(load, supply)
+        self.assertLess(supply, matrix)
+        self.assertLess(matrix, clear)
+        self.assertIn("[identity isKindOfClass:NSString.class]", restore)
+        # An updated application must never reuse pre-update saved bytes.
+        fingerprint = restore.index(
+            "BOOL originalsMatchCurrentInstallation ="
+        )
+        self.assertIn("CNDRemixApplicationFingerprintMatches(", restore)
+        self.assertIn('saved[@"applicationFingerprint"]', restore)
+        self.assertLess(fingerprint, load)
+        # A restored app clears the whole app's originals with its journal.
+        self.assertIn("CNDRemixRemoveIconServicesJournal(bundleIdentifier)", restore)
+
+    def test_apply_captures_and_records_the_stock_original(self) -> None:
+        start = self.source.index(
+            "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme("
+        )
+        end = self.source.index(
+            "CNDRemixDeferredSpringBoardPresentationRestore(", start
+        )
+        apply = self.source[start:end]
+        capture = apply.index(
+            "CNDIconServicesPublisherSetCapturesStockOriginalsInBatch("
+        )
+        publish = apply.index("CNDIconServicesPublisherPublishVariantsInBatch(")
+        released = apply.index(
+            "CNDIconServicesPublisherSetCapturesStockOriginalsInBatch(\n"
+            "                        NO);"
+        )
+        self.assertLess(capture, publish)
+        self.assertLess(publish, released)
+        self.assertIn("CNDRemixSaveStockOriginal(", apply)
+        self.assertIn("[variantJournal\n                                addEntriesFromDictionary:stockOriginal];",
+                      apply)
+
+    def test_update_rebase_regenerates_stock_instead_of_reusing_originals(self) -> None:
+        start = self.source.index(
+            "static NSDictionary *CNDRemixRebaseActiveJournalToCurrentStock("
+        )
+        end = self.source.index(
+            "static NSDictionary<NSString *, id> *CNDRemixApplyIconServicesTheme(",
+            start,
+        )
+        rebase = self.source[start:end]
+        self.assertNotIn("CNDRemixLoadStockOriginal(", rebase)
+        self.assertNotIn("SetSavedStockOriginalsInBatch", rebase)
+        self.assertIn("CNDRemixRemoveIconServicesJournal(", rebase)
+
+    def test_journal_retirement_removes_the_app_originals(self) -> None:
+        start = self.source.index(
+            "static BOOL CNDRemixRemoveIconServicesJournal(NSString *bundleIdentifier)"
+        )
+        end = self.source.index(
+            "static NSArray<NSDictionary *> *CNDRemixIconServicesJournals(void)",
+            start,
+        )
+        retirement = self.source[start:end]
+        journal_removal = retirement.index("if (!removed) return NO;")
+        originals = retirement.index(
+            "CNDRemixIconServicesStockOriginalDirectoryURL(bundleIdentifier)"
+        )
+        self.assertLess(journal_removal, originals)
 
     def test_airdrop_diagnostics_read_the_nested_publication_report(self) -> None:
         start = self.source.index("for (NSDictionary *variantResult in airDropVariantResults)")

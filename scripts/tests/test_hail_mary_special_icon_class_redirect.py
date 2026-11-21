@@ -6,15 +6,15 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide" / "CNDHailMarySpecialIconClassRedirect.m"
-HEADER = ROOT / "Cyanide" / "CNDHailMarySpecialIconClassRedirect.h"
+SOURCE = ROOT / "Cyanide" / "probes" / "CNDHailMarySpecialIconClassRedirect.m"
+HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMarySpecialIconClassRedirect.h"
 SETTINGS = ROOT / "Cyanide" / "SettingsViewController.m"
 SETTINGS_HEADER = ROOT / "Cyanide" / "SettingsViewController.h"
 APP_DELEGATE = ROOT / "Cyanide" / "AppDelegate.m"
 MANIFEST = (ROOT / "docs" / "research" /
             "special-icon-class-got-redirect-23A341-iphone17,2.json")
-LEGACY_WRITER = ROOT / "Cyanide" / "CNDHailMaryImpRedirect.m"
-LEGACY_PROBE = ROOT / "Cyanide" / "CNDHailMaryReadOnlyDataPage.m"
+LEGACY_WRITER = ROOT / "Cyanide" / "probes" / "CNDHailMaryImpRedirect.m"
+LEGACY_PROBE = ROOT / "Cyanide" / "probes" / "CNDHailMaryReadOnlyDataPage.m"
 
 
 class HailMarySpecialIconClassRedirectTests(unittest.TestCase):
@@ -206,9 +206,14 @@ class HailMarySpecialIconClassRedirectTests(unittest.TestCase):
         self.assertIn("CNDHailMarySpecialIconClassRedirectRun(operation",
                       SETTINGS.read_text())
 
-    def test_settings_probes_expose_the_special_class_controls(self):
+    def test_settings_retains_special_class_controls_but_old_rows_stay_hidden(self):
         settings = SETTINGS.read_text()
-        self.assertIn("case RootSectionProbes:         return 17;", settings)
+        self.assertIn("case RootSectionProbes:         return 7;", settings)
+        self.assertIn(
+            "static const NSInteger rows[] = {17, 18, 28, 29, 30, 31, 32};",
+            settings,
+        )
+        self.assertIn("settings_root_probe_underlying_row", settings)
         for title in (
             "Run Special-Class GOT Probe",
             "Apply Static Clock + Calendar Icons",

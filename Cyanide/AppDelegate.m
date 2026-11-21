@@ -8,15 +8,20 @@
 #import "AppDelegate.h"
 #import "SettingsViewController.h"
 #import "LogTextView.h"
-#import "CNDPhysicalEntitlementAuditProbe.h"
-#import "CNDPhysicalIOUserEthernetSignerProbe.h"
-#import "CNDPhysicalKCall1Probe.h"
-#import "CNDUatObserverProbe.h"
-#import "CNDUatContextProbe.h"
-#import "CNDUatQueueProbe.h"
-#import "CNDUatHardwareProbe.h"
-#import "CyanideLabBridge.h"
+#import "probes/CNDPhysicalEntitlementAuditProbe.h"
+#import "probes/CNDPhysicalIOUserEthernetSignerProbe.h"
+#import "probes/CNDAudioCodecs86969Probe.h"
+#import "probes/CNDPhysicalKCall1Probe.h"
+#import "probes/CNDUatObserverProbe.h"
+#import "probes/CNDUatContextProbe.h"
+#import "probes/CNDUatQueueProbe.h"
+#import "probes/CNDUatHardwareProbe.h"
+#import "probes/CNDUatE1ObserveProbe.h"
+#import "probes/CNDAGXFirmwarePreflightProbe.h"
+#import "probes/CNDDiscordAudioModeProbe.h"
+#import "probes/CyanideLabBridge.h"
 #import "kexploit/kexploit_opa334.h"
+#import "kexploit/persistence.h"
 #import <notify.h>
 #import <signal.h>
 #import <sys/stat.h>
@@ -30,6 +35,7 @@
 static dispatch_source_t g_sigterm_source;
 static int g_lab_pm_cross_class_notification_token;
 static int g_lab_pm_m68_notification_token;
+static NSString *g_updateHandoffRequestID;
 
 @implementation AppDelegate
 
@@ -62,14 +68,16 @@ static void CNDCmdWriteJSON(NSString *name, NSDictionary *payload)
     }
 }
 
-// kexploit_krw_ready() is the only global readiness signal that is not
-// file-static inside SettingsViewController.m.
+// Host state never calls checked readiness. The additive lifecycle evidence is
+// the latest immutable observation published by an actual lifecycle owner.
 // Lock-free: never call KRW helpers from a timer handler that other work depends
 // on, because they take the lock a running probe holds.
 static void CNDCmdPublishStateNoKrw(void)
 {
     CNDCmdWriteJSON(@"cnd-state.json", @{
         @"krwReady": @(-1),
+        @"krwLifecycle":
+            settings_current_krw_lifecycle_snapshot().agentRepresentation,
         @"pid": @(getpid()),
         @"at": @([[NSDate date] timeIntervalSince1970]),
     });
@@ -97,12 +105,49 @@ static void CNDCmdEndProbeTask(UIBackgroundTaskIdentifier task)
 
 typedef void (^CNDCmdResultHandler)(NSDictionary<NSString *, id> *report);
 
+static dispatch_queue_t CNDCmdExecutionQueue(void)
+{
+    static dispatch_queue_t queue;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        queue = dispatch_queue_create(
+            "com.zeroxjf.cyanide.host-krw-commands",
+            DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
+
 static NSObject *CNDCmdReplyLock(void)
 {
     static NSObject *lock;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ lock = [NSObject new]; });
     return lock;
+}
+
+static NSString *CNDCmdCurrentUpdateHandoffRequestID(void)
+{
+    @synchronized (CNDCmdReplyLock()) {
+        return [g_updateHandoffRequestID copy] ?: @"";
+    }
+}
+
+static NSDictionary *CNDCmdTerminationPayload(
+    NSString *reason, CNDKRWTerminationDisposition disposition)
+{
+    return @{
+        @"reason": reason ?: @"unknown",
+        @"pid": @(getpid()),
+        @"disposition":
+            @(kexploit_termination_disposition_name(disposition)),
+        @"handoffRequestID": CNDCmdCurrentUpdateHandoffRequestID(),
+        @"recoveryStage": @(krw_persistence_last_recovery_stage()),
+        @"tokenBurn": @(krw_persistence_last_recovery_token_burn()),
+        @"nextProcessArmed": @(krw_persistence_next_process_armed()),
+        @"handoffSerial": @(krw_persistence_current_handoff_serial()),
+        @"generationID": krw_persistence_current_generation_id() ?: @"",
+        @"at": @([[NSDate date] timeIntervalSince1970]),
+    };
 }
 
 static NSString *g_cmdReplyRequestID;
@@ -249,6 +294,7 @@ static BOOL CNDCmdStartLiveReply(NSString *requestID,
 }
 
 static void CNDCmdRun(NSString *command, const char *source,
+                      NSString *requestID,
                       CNDCmdResultHandler resultHandler)
 {
     NSString *cmd = [command stringByTrimmingCharactersInSet:
@@ -261,36 +307,206 @@ static void CNDCmdRun(NSString *command, const char *source,
     log_user("[CND_CMD] accepted %s via %s in pid=%d\n",
              cmd.UTF8String, sourceName.UTF8String, getpid());
 
+    if ([cmd isEqualToString:@"krw-diagnostic"]) {
+        /* This path must remain usable precisely when KRW is not ready. It
+         * returns cached/persisted evidence only, on the caller's thread;
+         * no probe task, lifecycle lease, readiness, recovery, or cleanup. */
+        if (resultHandler == nil) {
+            log_user("[CND_CMD] refused diagnostic without live reply\n");
+            return;
+        }
+        resultHandler(@{
+            @"command": cmd,
+            @"result": @"pass-read-only-evidence",
+            @"evidenceOnly": @YES,
+            @"recoveryRan": @NO,
+            @"acquisitionRan": @NO,
+            @"readinessChecked": @NO,
+            @"socketOperationPerformed": @NO,
+            @"pid": @(getpid()),
+            @"at": @([[NSDate date] timeIntervalSince1970]),
+            @"krwLifecycle":
+                settings_current_krw_lifecycle_snapshot().agentRepresentation,
+            @"persistence": krw_persistence_diagnostic_snapshot(),
+            @"processSocket": kexploit_krw_socket_diagnostic_snapshot(),
+            @"termination":
+                krw_persistence_termination_diagnostic_snapshot(),
+        });
+        return;
+    }
     UIBackgroundTaskIdentifier task = CNDCmdBeginProbeTask(@"cnd-probe");
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    dispatch_async(CNDCmdExecutionQueue(), ^{
         @autoreleasepool {
+            BOOL requiresKrw = !([cmd isEqualToString:@"krw-import-recovery-handoff"] ||
+                                 [cmd isEqualToString:@"a86969-playback-benign"] ||
+                                 [cmd isEqualToString:@"a86969-raw"]);
+            BOOL existingKrwOnly =
+                [cmd isEqualToString:@"krw-update-handoff"] ||
+                [cmd isEqualToString:@"uat-e1-observe"] ||
+                [cmd isEqualToString:@"uat-agx-bootstrap-root"] ||
+                [cmd isEqualToString:@"uat-agx-rtbuddy-alias"] ||
+                [cmd isEqualToString:@"uat-agx-firmware-preflight"] ||
+                [cmd isEqualToString:@"uat-e2-retire"] ||
+                [cmd isEqualToString:@"uat-e4-inflight"] ||
+                [cmd isEqualToString:@"uat-e5-owner-release"] ||
+                [cmd isEqualToString:@"uat-e5-device-release"] ||
+                [cmd isEqualToString:@"uat-e5-connection-release"] ||
+                [cmd isEqualToString:@"uat-e5-raw-queue-release"] ||
+                [cmd isEqualToString:@"uat-e5-raw-queue-bind-release"];
+            BOOL requiresExternalLifecycleLock = requiresKrw ||
+                [cmd isEqualToString:@"krw-import-recovery-handoff"];
+            __block BOOL externalLifecycleLockHeld = NO;
+            if (requiresExternalLifecycleLock) {
+                externalLifecycleLockHeld =
+                    settings_begin_external_krw_action(cmd.UTF8String);
+                if (!externalLifecycleLockHeld) {
+                    NSMutableDictionary<NSString *, id> *busy = [@{
+                        @"command": cmd,
+                        @"result": @"refused-lifecycle-action-in-progress",
+                        @"krwLifecycle":
+                            settings_current_krw_lifecycle_snapshot().agentRepresentation,
+                        @"pid": @(getpid()), @"source": sourceName,
+                        @"at": @([[NSDate date] timeIntervalSince1970]) } mutableCopy];
+                    CNDCmdWriteJSON(@"cnd-result.json", busy);
+                    if (resultHandler) resultHandler(busy);
+                    CNDCmdEndProbeTask(task);
+                    return;
+                }
+            }
+            NSObject *completionLock = [NSObject new];
+            __block BOOL completionDelivered = NO;
+            void (^finish)(NSDictionary<NSString *, id> *) =
+                ^(NSDictionary<NSString *, id> *report) {
+                    @synchronized (completionLock) {
+                        if (completionDelivered) return;
+                        completionDelivered = YES;
+                        if (externalLifecycleLockHeld) {
+                            settings_end_external_krw_action(cmd.UTF8String);
+                            externalLifecycleLockHeld = NO;
+                        }
+                    }
+                    NSMutableDictionary<NSString *, id> *finished =
+                        [(report ?: @{}) mutableCopy];
+                    // This is cached boundary evidence only. Do not turn result
+                    // publication into another readiness or recovery operation.
+                    finished[@"krwLifecycle"] =
+                        settings_current_krw_lifecycle_snapshot().agentRepresentation;
+                    CNDCmdWriteJSON(@"cnd-result.json", finished);
+                    if (resultHandler) resultHandler(finished);
+                    CNDCmdEndProbeTask(task);
+                };
+            NSString *krwPolicy = requiresKrw
+                ? (existingKrwOnly
+                    ? @"shared-tweak-lifecycle-existing-only"
+                    : @"shared-tweak-lifecycle") : @"none";
             CNDCmdWriteJSON(@"cnd-stage.json", @{
-                @"stage": @"checking-krw", @"command": cmd,
+                @"stage": requiresKrw ? @"checking-krw" :
+                    @"preflight-no-krw",
+                @"requiresKrw": @(requiresKrw), @"command": cmd,
+                @"krwPolicy": krwPolicy,
                 @"pid": @(getpid()), @"source": sourceName,
                 @"at": @([[NSDate date] timeIntervalSince1970]) });
-            if (!kexploit_krw_ready()) {
+            // Probe URLs are explicit KRW actions. A cold URL launch may have
+            // a valid parked generation but no process-local socket state yet,
+            // so recover through the same single owner as the UI's Run action.
+            // All KRW-backed commands use a shared lifecycle owner rather than
+            // implementing policy inside a probe. E1 is stricter: it may reuse
+            // or recover an existing generation, but its explicit observer
+            // contract forbids the shared owner from falling through to fresh
+            // acquisition. It still performs its own pinned checked-read
+            // witness before following any kernel object edge.
+            BOOL krwReady = !requiresKrw ? YES :
+                (existingKrwOnly
+                    ? settings_ensure_existing_krw_for_probe()
+                    : settings_ensure_krw_for_probe());
+            if (!krwReady) {
                 NSDictionary *report = @{
-                    @"command": cmd, @"result": @"refused-krw-not-ready",
+                    @"command": cmd,
+                    @"result": existingKrwOnly
+                        ? @"refused-existing-krw-unavailable"
+                        : @"refused-krw-not-ready",
+                    @"krwPolicy": krwPolicy,
                     @"pid": @(getpid()), @"source": sourceName,
                     @"at": @([[NSDate date] timeIntervalSince1970]) };
-                CNDCmdWriteJSON(@"cnd-result.json", report);
-                if (resultHandler) resultHandler(report);
                 log_user("[CND_CMD] refused %s: KRW not ready\n", cmd.UTF8String);
-                CNDCmdEndProbeTask(task);
+                finish(report);
                 return;
             }
             log_user("[CND_CMD] running %s in pid=%d\n", cmd.UTF8String, getpid());
             CNDCmdWriteJSON(@"cnd-stage.json", @{
                 @"stage": @"running", @"command": cmd, @"pid": @(getpid()),
                 @"at": @([[NSDate date] timeIntervalSince1970]) });
-            void (^finish)(NSDictionary<NSString *, id> *) =
-                ^(NSDictionary<NSString *, id> *report) {
-                    NSDictionary *finished = report ?: @{};
-                    CNDCmdWriteJSON(@"cnd-result.json", finished);
-                    if (resultHandler) resultHandler(finished);
-                    CNDCmdEndProbeTask(task);
-                };
-            if ([cmd isEqualToString:@"control"]) {
+            if ([cmd isEqualToString:@"krw-update-handoff"]) {
+                NSString *terminationPath = CNDCmdPath(@"cnd-termination.json");
+                if (terminationPath.length > 0) {
+                    [NSFileManager.defaultManager
+                        removeItemAtPath:terminationPath error:nil];
+                }
+                CNDKRWTerminationPreparation preparation = {0};
+                BOOL armed = kexploit_prepare_recoverable_termination(
+                    &preparation);
+                NSString *generationID =
+                    krw_persistence_current_generation_id() ?: @"";
+                BOOL exact = armed && preparation.parkVerified &&
+                    preparation.defunctProtected &&
+                    preparation.controlLinkExact &&
+                    preparation.controlChecksumExact &&
+                    preparation.rwStateExact &&
+                    preparation.anchorVerified &&
+                    preparation.currentGenerationExact &&
+                    preparation.nextProcessArmed &&
+                    preparation.handoffSerial > 0 &&
+                    generationID.length > 0 && requestID.length > 0;
+                if (exact) {
+                    @synchronized (CNDCmdReplyLock()) {
+                        g_updateHandoffRequestID = [requestID copy];
+                    }
+                }
+                finish(@{
+                    @"schema": @"com.zeroxjf.cyanide.krw-update-handoff",
+                    @"command": cmd,
+                    @"requestID": requestID ?: @"",
+                    @"result": exact ? @"armed-exact" : @"refused-unproven",
+                    @"parkVerified": @(preparation.parkVerified),
+                    @"defunctProtected": @(preparation.defunctProtected),
+                    @"controlLinkExact": @(preparation.controlLinkExact),
+                    @"controlChecksumExact":
+                        @(preparation.controlChecksumExact),
+                    @"rwStateExact": @(preparation.rwStateExact),
+                    @"anchorVerified": @(preparation.anchorVerified),
+                    @"currentGenerationExact":
+                        @(preparation.currentGenerationExact),
+                    @"nextProcessArmed": @(preparation.nextProcessArmed),
+                    @"handoffSerial": @(preparation.handoffSerial),
+                    @"generationID": generationID,
+                    @"pid": @(getpid()),
+                    @"at": @([[NSDate date] timeIntervalSince1970]),
+                });
+            } else if ([cmd isEqualToString:@"krw-import-recovery-handoff"]) {
+                NSString *handoffPath = CNDCmdPath(@"CNDKRWRecoveryHandoff.plist");
+                NSError *readError = nil;
+                NSDictionary *handoff = handoffPath.length > 0
+                    ? [NSDictionary dictionaryWithContentsOfURL:
+                        [NSURL fileURLWithPath:handoffPath]
+                        error:&readError]
+                    : nil;
+                NSString *stage = @"handoff-file-read";
+                BOOL imported = handoff != nil &&
+                    krw_persistence_import_recovery_handoff(handoff, &stage);
+                log_user("[KRW] recovery handoff import result=%s stage=%s; no recovery or acquisition ran\n",
+                         imported ? "pass" : "fail-clean",
+                         stage.UTF8String ?: "unknown");
+                finish(@{
+                    @"command": cmd,
+                    @"result": imported ? @"pass-imported-exact" : @"fail-clean",
+                    @"stage": stage ?: @"unknown",
+                    @"fileRead": @(handoff != nil),
+                    @"readError": readError.localizedDescription ?: @"",
+                    @"recoveryRan": @NO,
+                    @"acquisitionRan": @NO,
+                    @"pid": @(getpid()),
+                });
+            } else if ([cmd isEqualToString:@"control"]) {
                 CNDUatPhysControlRun(finish);
             } else if ([cmd isEqualToString:@"image"]) {
                 CNDUatImageProbeRun(finish);
@@ -302,14 +518,48 @@ static void CNDCmdRun(NSString *command, const char *source,
                 CNDUatHardwareBindingProbeRun(YES, finish);
             } else if ([cmd isEqualToString:@"uat-record-state"]) {
                 CNDUatHardwareRecordStateProbeRun(finish);
+            } else if ([cmd isEqualToString:@"uat-e1-observe"]) {
+                CNDUatE1ObserveRun(finish);
+            } else if ([cmd isEqualToString:@"uat-agx-bootstrap-root"]) {
+                CNDUatAGXBootstrapRootRun(finish);
+            } else if ([cmd isEqualToString:@"uat-agx-rtbuddy-alias"]) {
+                CNDUatAGXRTBuddyAliasRun(finish);
+            } else if ([cmd isEqualToString:@"uat-agx-firmware-preflight"]) {
+                CNDAGXFirmwarePreflightRun(requestID, finish);
+            } else if ([cmd isEqualToString:@"uat-e2-retire"]) {
+                CNDUatE2RetireRun(finish);
+            } else if ([cmd isEqualToString:@"uat-e4-inflight"]) {
+                CNDUatE4InflightRun(finish);
+            } else if ([cmd isEqualToString:@"uat-e5-owner-release"]) {
+                CNDUatE5OwnerReleaseRun(finish);
+            } else if ([cmd isEqualToString:@"uat-e5-device-release"]) {
+                CNDUatE5DeviceReleaseRun(finish);
+            } else if ([cmd isEqualToString:@"uat-e5-connection-release"]) {
+                CNDUatE5ConnectionReleaseRun(finish);
+            } else if ([cmd isEqualToString:@"uat-e5-raw-queue-release"]) {
+                CNDUatE5RawQueueReleaseRun(finish);
+            } else if ([cmd isEqualToString:@"uat-e5-raw-queue-bind-release"]) {
+                CNDUatE5RawQueueBindReleaseRun(finish);
             } else if ([cmd isEqualToString:@"uat-signer-inventory"]) {
                 CNDPhysicalKCall1UatSignerInventoryRun(finish);
+            } else if ([cmd isEqualToString:@"uat-signer-oracle"]) {
+                CNDPhysicalKCall1UatSignerOracleRun(finish);
+            } else if ([cmd isEqualToString:@"krw-scratch-write"]) {
+                CNDPhysicalKCall1ScratchWriteOracleRun(finish);
             } else if ([cmd isEqualToString:@"uat-get-pte"]) {
                 finish(@{
                     @"command": cmd,
                     @"result": @"disabled-after-device-panic",
                     @"reason": @"The mediated GET_PT_ENTRY chain is quarantined pending panic-log analysis.",
                 });
+            } else if ([cmd isEqualToString:@"a86969-playback-benign"]) {
+                CNDAudioCodecs86969PlaybackTraceRun(finish);
+            } else if ([cmd isEqualToString:@"a86969-raw"]) {
+                CNDAudioCodecs86969ProbeRun(NO, finish);
+            } else if ([cmd isEqualToString:@"discord-audio-apply"]) {
+                CNDDiscordAudioModeProbeApply(finish);
+            } else if ([cmd isEqualToString:@"discord-audio-restore"]) {
+                CNDDiscordAudioModeProbeRestore(finish);
             } else {
                 finish(@{
                     @"command": cmd, @"result": @"unknown-command",
@@ -337,7 +587,7 @@ static void CNDCmdRunPendingIfAny(const char *source)
     }
     // Consume first: a probe that faults must not re-run on reboot.
     [[NSFileManager defaultManager] removeItemAtPath:cmdPath error:nil];
-    CNDCmdRun(cmd, source, nil);
+    CNDCmdRun(cmd, source, nil, nil);
 }
 
 BOOL CNDHandleCommandURL(NSURL *url, const char *source)
@@ -349,9 +599,22 @@ BOOL CNDHandleCommandURL(NSURL *url, const char *source)
     }
 
     NSString *cmd = url.path.lastPathComponent.lowercaseString;
-    if (![@[ @"control", @"image", @"queue", @"uat-binding-read",
+    if (![@[ @"krw-diagnostic", @"krw-update-handoff",
+             @"krw-import-recovery-handoff",
+             @"control", @"image", @"queue", @"uat-binding-read",
              @"uat-binding-write", @"uat-record-state",
-             @"uat-signer-inventory", @"uat-get-pte" ] containsObject:cmd]) {
+             @"uat-e1-observe", @"uat-agx-bootstrap-root",
+             @"uat-agx-rtbuddy-alias", @"uat-agx-firmware-preflight",
+             @"uat-e2-retire", @"uat-e4-inflight",
+             @"uat-e5-owner-release",
+             @"uat-e5-device-release",
+             @"uat-e5-connection-release",
+             @"uat-e5-raw-queue-release",
+             @"uat-e5-raw-queue-bind-release",
+             @"uat-signer-inventory", @"uat-signer-oracle", @"krw-scratch-write",
+             @"uat-get-pte", @"a86969-playback-benign",
+             @"discord-audio-apply", @"discord-audio-restore" ]
+            containsObject:cmd]) {
         log_user("[CND_CMD] refused unknown URL command %s in pid=%d\n",
                  cmd.UTF8String ?: "(missing)", getpid());
         return NO;
@@ -366,6 +629,15 @@ BOOL CNDHandleCommandURL(NSURL *url, const char *source)
         if ([item.name isEqualToString:@"requestID"]) requestID = item.value;
     }
     BOOL requestedLiveReply = replyToken.length > 0 || requestID.length > 0;
+    BOOL authenticatedLive =
+        [cmd isEqualToString:@"krw-diagnostic"] ||
+        [cmd isEqualToString:@"krw-update-handoff"];
+    if (authenticatedLive &&
+        (!requestedLiveReply || replyToken.length == 0 || requestID.length == 0)) {
+        log_user("[CND_CMD] refused unauthenticated authenticated-live command in pid=%d\n",
+                 getpid());
+        return NO;
+    }
     if (requestedLiveReply &&
         !CNDCmdStartLiveReply(requestID, replyToken, cmd)) {
         return NO;
@@ -375,7 +647,7 @@ BOOL CNDHandleCommandURL(NSURL *url, const char *source)
             CNDCmdCompleteLiveReply(requestID, report);
           }
         : nil;
-    CNDCmdRun(cmd, source ?: "url", reply);
+    CNDCmdRun(cmd, source ?: "url", requestID, reply);
     return YES;
 }
 
@@ -431,11 +703,8 @@ static void CNDCmdStartWatcher(void)
     [self logBootIdentity];
     settings_register_defaults();
     log_set_verbose(YES);
-    // This is intentionally launch-only, not a foreground callback. A living
-    // Cyanide process keeps its current state; a new process must prove that
-    // it recovered the old parked KRW generation before trusting process-local
-    // ACTIVE bits. SnowBoard's persistent state survives independently.
-    settings_reconcile_persisted_applied_state_on_launch();
+    // Match the original KRW lifecycle: cold launch must not touch a parked
+    // kernel primitive. Recovery happens only from an explicit KRW action.
     // Establish Automatic Repair's audio/power lifetime now. The scene's
     // did-become-active callback consumes the pending "Cyanide opened" repair
     // once UIKit is foreground, without duplicating the cold-launch request.
@@ -536,6 +805,101 @@ static void CNDCmdStartWatcher(void)
                 @"--hail-mary-special-icon-dispatch-verify-original"]) {
         physicalLaunchAction = ^{
             settings_run_hail_mary_special_icon_class_dispatch_verify_original_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-presentation-probe"]) {
+        physicalLaunchAction = ^{
+            settings_run_special_icon_presentation_probe_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-clock-presentation-apply"]) {
+        physicalLaunchAction = ^{
+            settings_run_clock_static_presentation_apply_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-clock-presentation-restore"]) {
+        physicalLaunchAction = ^{
+            settings_run_clock_static_presentation_restore_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-clock-presentation-verify-redirected"]) {
+        physicalLaunchAction = ^{
+            settings_run_clock_static_presentation_verify_redirected_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-clock-presentation-verify-original"]) {
+        physicalLaunchAction = ^{
+            settings_run_clock_static_presentation_verify_original_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-calendar-presentation-apply"]) {
+        physicalLaunchAction = ^{
+            settings_run_calendar_static_presentation_apply_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-calendar-presentation-restore"]) {
+        physicalLaunchAction = ^{
+            settings_run_calendar_static_presentation_restore_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-calendar-presentation-verify-redirected"]) {
+        physicalLaunchAction = ^{
+            settings_run_calendar_static_presentation_verify_redirected_action();
+        };
+    } else if ([arguments containsObject:
+                @"--special-icon-calendar-presentation-verify-original"]) {
+        physicalLaunchAction = ^{
+            settings_run_calendar_static_presentation_verify_original_action();
+        };
+    } else if ([arguments containsObject:
+                @"--switcher-presentation-probe"]) {
+        physicalLaunchAction = ^{
+            settings_run_switcher_presentation_probe_action();
+        };
+    } else if ([arguments containsObject:
+                @"--switcher-presentation-apply"]) {
+        physicalLaunchAction = ^{
+            settings_run_switcher_static_presentation_apply_action();
+        };
+    } else if ([arguments containsObject:
+                @"--switcher-presentation-restore"]) {
+        physicalLaunchAction = ^{
+            settings_run_switcher_static_presentation_restore_action();
+        };
+    } else if ([arguments containsObject:
+                @"--switcher-presentation-verify-redirected"]) {
+        physicalLaunchAction = ^{
+            settings_run_switcher_static_presentation_verify_redirected_action();
+        };
+    } else if ([arguments containsObject:
+                @"--switcher-presentation-verify-original"]) {
+        physicalLaunchAction = ^{
+            settings_run_switcher_static_presentation_verify_original_action();
+        };
+    } else if ([arguments containsObject:
+                @"--app-library-miniature-presentation-probe"]) {
+        physicalLaunchAction = ^{
+            settings_run_app_library_miniature_presentation_probe_action();
+        };
+    } else if ([arguments containsObject:
+                @"--app-library-miniature-presentation-apply"]) {
+        physicalLaunchAction = ^{
+            settings_run_app_library_miniature_static_presentation_apply_action();
+        };
+    } else if ([arguments containsObject:
+                @"--app-library-miniature-presentation-restore"]) {
+        physicalLaunchAction = ^{
+            settings_run_app_library_miniature_static_presentation_restore_action();
+        };
+    } else if ([arguments containsObject:
+                @"--app-library-miniature-presentation-verify-redirected"]) {
+        physicalLaunchAction = ^{
+            settings_run_app_library_miniature_static_presentation_verify_redirected_action();
+        };
+    } else if ([arguments containsObject:
+                @"--app-library-miniature-presentation-verify-original"]) {
+        physicalLaunchAction = ^{
+            settings_run_app_library_miniature_static_presentation_verify_original_action();
         };
     } else if ([arguments containsObject:@"--icon-class-audit"]) {
         physicalLaunchAction = ^{
@@ -738,8 +1102,18 @@ static void CNDCmdStartWatcher(void)
         dispatch_source_set_event_handler(g_sigterm_source, ^{
             log_user("[CLEANUP] SIGTERM received; starting best-effort termination cleanup.\n");
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                settings_best_effort_termination_cleanup("SIGTERM");
-                _Exit(0);
+                CNDKRWTerminationDisposition disposition =
+                    settings_best_effort_termination_cleanup("SIGTERM");
+                const char *name =
+                    kexploit_termination_disposition_name(disposition);
+                /* Persist the disposition for the next launch's post-mortem;
+                 * stdout dies with the process. A SIGTERM cannot be vetoed
+                 * here (the installer gate runs before it is sent), so an
+                 * unsafe disposition is recorded loudly and exits non-zero. */
+                CNDCmdWriteJSON(@"cnd-termination.json",
+                    CNDCmdTerminationPayload(@"SIGTERM", disposition));
+                log_user("[CLEANUP] termination disposition=%s\n", name);
+                _Exit(disposition == CNDKRWTerminationUnsafe ? 3 : 0);
             });
         });
         dispatch_resume(g_sigterm_source);
@@ -747,7 +1121,10 @@ static void CNDCmdStartWatcher(void)
 }
 
 - (void)applicationWillTerminateNotification:(NSNotification *)note {
-    settings_best_effort_termination_cleanup("UIApplicationWillTerminateNotification");
+    CNDKRWTerminationDisposition disposition =
+        settings_best_effort_termination_cleanup("UIApplicationWillTerminateNotification");
+    CNDCmdWriteJSON(@"cnd-termination.json", CNDCmdTerminationPayload(
+        @"UIApplicationWillTerminateNotification", disposition));
 }
 
 - (void)installBarAppearances {
@@ -785,7 +1162,10 @@ static void CNDCmdStartWatcher(void)
 }
 
 - (void)applicationWillTerminate:(UIApplication *)application {
-    settings_best_effort_termination_cleanup("applicationWillTerminate");
+    CNDKRWTerminationDisposition disposition =
+        settings_best_effort_termination_cleanup("applicationWillTerminate");
+    CNDCmdWriteJSON(@"cnd-termination.json", CNDCmdTerminationPayload(
+        @"applicationWillTerminate", disposition));
 }
 
 @end

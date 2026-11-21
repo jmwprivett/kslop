@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide/CNDPhysicalPACIdentityCanary.m"
+SOURCE = ROOT / "Cyanide/probes/CNDPhysicalPACIdentityCanary.m"
 SETTINGS = ROOT / "Cyanide/SettingsViewController.m"
 APP_DELEGATE = ROOT / "Cyanide/AppDelegate.m"
 

@@ -14,12 +14,15 @@ class QueuedActionCoordinatorTests(unittest.TestCase):
         cls.queue_h = (ROOT / "Cyanide/installer/PackageQueue.h").read_text()
         cls.progress = (ROOT / "Cyanide/installer/InstallProgressViewController.m").read_text()
         cls.review = (ROOT / "Cyanide/installer/QueueReviewViewController.m").read_text()
+        cls.snapshot = (ROOT / "Cyanide/installer/CNDQueueExecutionSnapshot.m").read_text()
         cls.transaction_h = (ROOT / "Cyanide/installer/CNDQueuedTransaction.h").read_text()
         cls.transaction_m = (ROOT / "Cyanide/installer/CNDQueuedTransaction.m").read_text()
         cls.hook = (ROOT / "Cyanide/installer/CNDIconServicesConsumerHook.m").read_text()
         cls.remix = (ROOT / "Cyanide/installer/CNDSnowBoardRemix.m").read_text()
         cls.settings_h = (ROOT / "Cyanide/SettingsViewController.h").read_text()
         cls.settings = (ROOT / "Cyanide/SettingsViewController.m").read_text()
+        cls.log_h = (ROOT / "Cyanide/LogTextView.h").read_text()
+        cls.log_m = (ROOT / "Cyanide/LogTextView.m").read_text()
 
     def queue_method(self, marker: str, next_marker: str) -> str:
         start = self.queue.index(marker)
@@ -135,7 +138,7 @@ class QueuedActionCoordinatorTests(unittest.TestCase):
         self.assertIn("settings_current_springboard_pid", body)
         self.assertIn("settings_current_boot_epoch", body)
 
-    def test_real_post_respring_work_arms_foreground_handoff(self) -> None:
+    def test_real_post_respring_work_persists_without_arming_a_foreground_return(self) -> None:
         body = self.queue_method(
             "- (void)runCoordinatorBeforeRespring",
             "- (BOOL)executeSpringBoardFixesAction:",
@@ -143,14 +146,14 @@ class QueuedActionCoordinatorTests(unittest.TestCase):
         persisted = body.index("persistDurableTransaction", body.index(
             "CNDQueuedTransactionStateAwaitingRespring"
         ))
-        arm = body.index(
-            "settings_arm_queued_post_respring_foreground_handoff", persisted
-        )
-        notify = body.index("PackageQueueReadyForRespringNotification", arm)
-        self.assertLess(persisted, arm)
-        self.assertLess(arm, notify)
-        self.assertIn("if (boundaryOnly)", body[:arm])
-        self.assertIn("} else {", body[:arm])
+        notify = body.index("PackageQueueReadyForRespringNotification", persisted)
+        self.assertLess(persisted, notify)
+        self.assertIn("if (boundaryOnly)", body)
+        self.assertIn("} else {", body)
+        # Cyanide never inflates its own process lifetime or foregrounds itself
+        # to bridge a respring; the saved checkpoint waits for the user.
+        self.assertNotIn("settings_arm_queued_post_respring_foreground_handoff", body)
+        self.assertNotIn("SBSLaunchApplicationWithIdentifier", body)
 
         resume = self.queue_method(
             "- (BOOL)resumePendingPostRespringActionsIfReady",
@@ -167,7 +170,7 @@ class QueuedActionCoordinatorTests(unittest.TestCase):
     def test_ui_runs_exact_three_second_countdown_then_shared_respring(self) -> None:
         self.assertIn("PackageQueueReadyForRespringNotification", self.queue_h)
         body = self.progress[self.progress.index(
-            "- (void)didReceiveReadyForRespringNotification:"
+            "- (void)startRespringCountdown"
         ):self.progress.index("- (void)scheduleHideHomeBarRespringPrompt")]
         self.assertIn("runRespringCountdownValue:3", body)
         self.assertIn("NSEC_PER_SEC", body)
@@ -426,10 +429,144 @@ class QueuedActionCoordinatorTests(unittest.TestCase):
         self.assertLess(persisted, cleared)
         self.assertLess(cleared, removed)
 
+    def test_unrecordable_applied_state_marker_cannot_strand_the_queue(self) -> None:
+        complete = self.queue_method(
+            "- (void)completeCoordinator",
+            "- (void)continueCoordinatorAfterRespring",
+        )
+        # The SBCustomizer action already applied: the marker is still
+        # attempted, but its failure no longer marks the transaction failed
+        # and retryable.
+        self.assertIn("recordOrdinaryCurrentEpochStateForTransaction", complete)
+        self.assertIn("recordedState", complete)
+        self.assertNotIn("the queue remains retryable", complete)
+        marker = complete.index("if (!recordedState)")
+        cancelled = complete.index(
+            "CNDTransientAppliedStateCancelPreparedTransition", marker
+        )
+        terminal = complete.index(
+            "CNDQueuedTransactionStateCompleted", cancelled
+        )
+        # The outstanding prepared transition is released before the queue
+        # reaches its terminal state, so later marker writes are not refused.
+        self.assertLess(cancelled, terminal)
+
+        finish = self.queue_method(
+            "- (void)finishSuccessfullyPostingCompletion:",
+            "- (void)postCompletionWithSuccess:",
+        )
+        self.assertIn("CNDQueuedActionStateSucceeded", finish)
+        self.assertNotIn("CNDQueuedTransactionStateFailed", finish)
+
+        completion = self.queue_method(
+            "- (void)settingsActionsDidComplete:",
+            "- (void)finishWithFailure:",
+        )
+        recorded = completion.index("recordOrdinaryCurrentEpochStateForTransaction")
+        branch = completion[recorded:completion.index("} else {", recorded)]
+        self.assertIn("CNDTransientAppliedStateCancelPreparedTransition", branch)
+        # A successful SBCustomizer apply with an unrecordable marker clears the
+        # queue and reports the marker instead of re-queueing the action.
+        self.assertIn("finishSuccessfullyPostingCompletion:NO", branch)
+        self.assertNotIn("finishWithFailure", branch)
+
     def test_review_exposes_manual_resume_and_no_phase_three_placeholder(self) -> None:
-        self.assertIn("Continue After Respring", self.review)
+        self.assertIn("Continue After Respring", self.snapshot)
+        self.assertIn("CNDQueuePrimaryActionContinueAfterRespring", self.snapshot)
         self.assertNotIn("Shared Respring Plan Saved", self.review)
         self.assertNotIn("execution coordinator is not active", self.queue)
+
+    def test_each_queue_batch_owns_a_session_across_every_exit(self) -> None:
+        for marker, next_marker, loop_phase in (
+            (
+                "- (void)runCoordinatorBeforeRespring",
+                "- (BOOL)executeSpringBoardFixesAction:",
+                "CNDQueuedActionPhaseBeforeRespring",
+            ),
+            (
+                "- (void)continueCoordinatorAfterRespring",
+                "- (void)resumeCoordinatorAfterVerifiedRespring",
+                "CNDQueuedActionPhaseAfterRespring",
+            ),
+        ):
+            with self.subTest(phase=loop_phase):
+                body = self.queue_method(marker, next_marker)
+                self.assertIn(loop_phase, body)
+                self.assertEqual(body.count("log_session_begin();"), 1)
+                self.assertEqual(body.count("log_session_end();"), 1)
+                begin = body.index("log_session_begin();")
+                try_begin = body.index("@try {", begin)
+                loop = body.index("for (CNDQueuedAction *action in actions)", try_begin)
+                cleanup = body.index("@finally", loop)
+                end = body.index("log_session_end();", cleanup)
+                self.assertLess(begin, try_begin)
+                self.assertLess(try_begin, loop)
+                self.assertLess(loop, cleanup)
+                self.assertLess(cleanup, end)
+                # Every return after acquiring the session is inside @try and
+                # therefore passes through @finally, including toggle handoffs.
+                acquired = body[begin:]
+                try_body = body[try_begin:cleanup]
+                self.assertIn("return;", try_body)
+                self.assertEqual(
+                    acquired.count("return;"), try_body.count("return;")
+                )
+
+    def test_nested_session_begin_does_not_replace_the_outer_file(self) -> None:
+        start = self.log_m.index("void log_session_begin(void)")
+        stop = self.log_m.index("void log_session_end(void)", start)
+        begin = self.log_m[start:stop]
+        nested = begin.index("if (log_session_nesting_depth > 0)")
+        outer = begin.index("log_session_nesting_depth = 1;", nested)
+        nested_body = begin[nested:outer]
+        self.assertIn("log_session_nesting_depth++", nested_body)
+        self.assertIn("pthread_mutex_unlock(&log_mutex)", nested_body)
+        self.assertIn("return;", nested_body)
+        for file_mutation in (
+            "fclose(log_file)",
+            "fopen(log_file_path_c",
+            "# kslop chain session",
+            "log_prune_old_sessions",
+        ):
+            with self.subTest(file_mutation=file_mutation):
+                self.assertNotIn(file_mutation, nested_body)
+                self.assertIn(file_mutation, begin[outer:])
+
+    def test_only_final_session_end_closes_and_extra_end_is_safe(self) -> None:
+        start = self.log_m.index("void log_session_end(void)")
+        stop = self.log_m.index("int log_session_depth(void)", start)
+        end = self.log_m[start:stop]
+        empty_guard = end.index("if (log_session_nesting_depth == 0)")
+        decrement = end.index("log_session_nesting_depth--", empty_guard)
+        final_release = end.index(
+            "if (log_session_nesting_depth == 0)", decrement
+        )
+        self.assertLess(empty_guard, decrement)
+        self.assertIn("return;", end[empty_guard:decrement])
+        self.assertLess(decrement, final_release)
+        self.assertNotIn("fflush(log_file)", end[:final_release])
+        self.assertNotIn("fclose(log_file)", end[:final_release])
+        final_body = end[final_release:]
+        self.assertIn("fflush(log_file)", final_body)
+        self.assertIn("fclose(log_file)", final_body)
+        self.assertIn("log_file = NULL", final_body)
+        self.assertIn("log_file_path_c[0] = '\\0'", final_body)
+        self.assertIn("pthread_mutex_lock(&log_mutex)", end)
+        self.assertIn("pthread_mutex_unlock(&log_mutex)", end)
+
+    def test_session_depth_accessor_uses_the_existing_mutex(self) -> None:
+        self.assertIn("int log_session_depth(void);", self.log_h)
+        self.assertIn("tee'd into that file", self.log_h)
+        start = self.log_m.index("int log_session_depth(void)")
+        stop = self.log_m.index("NSString *log_inapp_buffer_snapshot(void)", start)
+        accessor = self.log_m[start:stop]
+        lock = accessor.index("pthread_mutex_lock(&log_mutex)")
+        read = accessor.index("int depth = log_session_nesting_depth", lock)
+        unlock = accessor.index("pthread_mutex_unlock(&log_mutex)", read)
+        returned = accessor.index("return depth;", unlock)
+        self.assertLess(lock, read)
+        self.assertLess(read, unlock)
+        self.assertLess(unlock, returned)
 
 
 if __name__ == "__main__":

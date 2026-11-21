@@ -83,9 +83,10 @@
     self.statusLabel.text = @"Running — stay here until complete.";
     self.statusLabel.font = [UIFont systemFontOfSize:13.5 weight:UIFontWeightRegular];
     self.statusLabel.textColor = [UIColor colorWithWhite:0.55 alpha:1.0];
-    self.statusLabel.numberOfLines = 1;
+    self.statusLabel.numberOfLines = 2;
     self.statusLabel.adjustsFontSizeToFitWidth = YES;
     self.statusLabel.minimumScaleFactor = 0.8;
+    self.statusLabel.accessibilityIdentifier = @"queue.activity.status";
     [footer.contentView addSubview:self.statusLabel];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -139,11 +140,56 @@
                                              selector:@selector(didReceiveReadyForRespringNotification:)
                                                  name:PackageQueueReadyForRespringNotification
                                                object:nil];
+    if (self.expectsPackageQueueCompletion) {
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(queueDidChange:)
+                                                     name:PackageQueueDidChangeNotification
+                                                   object:[PackageQueue sharedQueue]];
+        [self refreshFromQueueSnapshot];
+    }
 }
 
 - (void)dealloc
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)beginSavedQueueRespringCountdown
+{
+    // Queue Review calls this only for its respring-primary snapshot. Defer
+    // until viewDidLoad has installed every completion/countdown observer.
+}
+
+- (void)queueDidChange:(NSNotification *)note
+{
+    (void)note;
+    [self refreshFromQueueSnapshot];
+}
+
+- (void)refreshFromQueueSnapshot
+{
+    if (!self.expectsPackageQueueCompletion || self.completed ||
+        self.respringCountdownActive || self.respringRetryAvailable) return;
+    CNDQueueExecutionSnapshot *snapshot =
+        [PackageQueue sharedQueue].executionSnapshot;
+    if (snapshot.primaryAction == CNDQueuePrimaryActionRespring) {
+        [self startRespringCountdown];
+        return;
+    }
+    self.statusLabel.text = snapshot.activityStatus;
+    self.statusLabel.accessibilityHint = snapshot.recoveryGuidance;
+}
+
+- (void)startRespringCountdown
+{
+    if (self.completed || self.respringCountdownActive) return;
+    self.respringCountdownActive = YES;
+    self.modalInPresentation = YES;
+    self.hideOrDoneButton.enabled = NO;
+    [self.spinner startAnimating];
+    self.spinner.hidden = NO;
+    NSUInteger generation = ++self.respringCountdownGeneration;
+    [self runRespringCountdownValue:3 generation:generation];
 }
 
 - (void)didReceiveCompleteNotification:(NSNotification *)note
@@ -177,13 +223,7 @@
 - (void)didReceiveReadyForRespringNotification:(NSNotification *)note
 {
     (void)note;
-    if (self.completed || self.respringCountdownActive) return;
-    self.respringCountdownActive = YES;
-    self.modalInPresentation = YES;
-    self.hideOrDoneButton.enabled = NO;
-    [self.spinner startAnimating];
-    NSUInteger generation = ++self.respringCountdownGeneration;
-    [self runRespringCountdownValue:3 generation:generation];
+    [self startRespringCountdown];
 }
 
 - (void)runRespringCountdownValue:(NSInteger)value
@@ -288,13 +328,7 @@
 {
     if (self.respringRetryAvailable && !self.respringCountdownActive) {
         self.respringRetryAvailable = NO;
-        self.respringCountdownActive = YES;
-        self.modalInPresentation = YES;
-        self.hideOrDoneButton.enabled = NO;
-        [self.spinner startAnimating];
-        self.spinner.hidden = NO;
-        NSUInteger generation = ++self.respringCountdownGeneration;
-        [self runRespringCountdownValue:3 generation:generation];
+        [self startRespringCountdown];
         return;
     }
     UIViewController *presenter = self.presentingViewController;

@@ -41,6 +41,19 @@ FOUNDATION_EXPORT NSString * const CNDSnowBoardRemixStatusesDidRefreshNotificati
 /// restarts, or reopens either consumer after the write.
 + (NSDictionary<NSString *, id> *)setTransparencyFixEnabled:(BOOL)enabled;
 
+/// Applies the complete per-boot static Icon Fixes transaction used by the
+/// base SnowBoard Apply: Hail Mary flat-image transparency, then the exact
+/// Clock, Calendar, Switcher, and App Library miniature presentation dispatch
+/// redirects. This synchronous queue primitive requires the shared KRW
+/// lifecycle to be ready already and performs no consumer injection, call,
+/// migration, launch, or restart.
++ (NSDictionary<NSString *, id> *)applyIconFixes;
+/// Blanket counterpart used by SnowBoard Restore All. It restores App Library
+/// miniatures, Switcher, Calendar, Clock, then Hail Mary transparency without
+/// undoing a successful component merely because a later restore component
+/// fails.
++ (NSDictionary<NSString *, id> *)restoreIconFixes;
+
 /// Physical-device diagnostic that publishes only the two measured Share-sheet
 /// records for com.apple.Sharing.AirDrop. It requires the exact selected-theme
 /// asset, forces a fresh stock-to-theme cycle when an active AirDrop journal is
@@ -88,6 +101,11 @@ FOUNDATION_EXPORT NSString * const CNDSnowBoardRemixStatusesDidRefreshNotificati
 /// IconServices/SpringBoard publication, restore, invalidation, purge, reload,
 /// relayout, or presentation change is performed.
 + (NSDictionary<NSString *, id> *)auditAppliedIconState;
+/// Explicitly discards every local IconServices recovery journal without
+/// inspecting or changing live icon state. The operator is responsible for
+/// confirming that the device is already stock. A subsequent Apply sees no
+/// active journals and republishes every otherwise eligible themed app.
++ (NSDictionary<NSString *, id> *)resetIconServicesJournals;
 + (NSArray<NSDictionary<NSString *, id> *> *)applicationStatuses;
 /// Returns the last exact status snapshot without doing catalog or hash I/O.
 /// The first caller should request a background refresh; an empty array means

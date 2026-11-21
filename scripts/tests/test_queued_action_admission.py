@@ -15,7 +15,9 @@ class QueuedActionAdmissionTests(unittest.TestCase):
         cls.settings = (ROOT / "Cyanide/SettingsViewController.m").read_text()
         cls.review = (ROOT / "Cyanide/installer/QueueReviewViewController.m").read_text()
         cls.popup = (ROOT / "Cyanide/installer/QueuePopupBar.m").read_text()
+        cls.snapshot = (ROOT / "Cyanide/installer/CNDQueueExecutionSnapshot.m").read_text()
         cls.snowboard = (ROOT / "Cyanide/tweaks/snowboardlite.m").read_text()
+        cls.detail = (ROOT / "Cyanide/installer/PackageDetailViewController.m").read_text()
 
     def queue_method(self, marker: str, next_marker: str) -> str:
         start = self.queue_m.index(marker)
@@ -45,7 +47,9 @@ class QueuedActionAdmissionTests(unittest.TestCase):
         self.assertIn("CNDQueuedActionHasSupportedShape", body)
         self.assertIn("CNDQueuedActionConflictKey(action)", body)
         self.assertIn("CNDQueuedActionConflictKey(existing)", body)
-        self.assertIn("transactionByUpdatingState:CNDQueuedTransactionStateCollecting", body)
+        self.assertIn("transactionByUpdatingState:executing", body)
+        self.assertIn("CNDQueuedTransactionStateCollecting", body)
+        self.assertIn("hasExecutingTransaction", body)
         self.assertIn("self.transaction = oldTransaction", body)
         self.assertIn("persistDurableTransaction", body)
 
@@ -70,8 +74,9 @@ class QueuedActionAdmissionTests(unittest.TestCase):
             "- (PackageQueueIntent)intentForPackage:",
         )
         self.assertIn("self.queuedStandaloneActions.count", pending)
-        self.assertIn("q.queuedStandaloneActions.count", self.popup)
-        self.assertIn("system action", self.popup)
+        self.assertIn("snapshot.popupSubtitle", self.popup)
+        self.assertIn("_standaloneActionCount", self.snapshot)
+        self.assertIn("system action", self.snapshot)
 
     def test_system_file_packages_are_no_longer_forced_to_run_alone(self) -> None:
         self.assertNotIn("PackageRequiresExclusiveRespringEdit", self.queue_m)
@@ -100,9 +105,61 @@ class QueuedActionAdmissionTests(unittest.TestCase):
             "- (BOOL)queueStandaloneAction:",
             "- (BOOL)removeStandaloneActionForConflictKey:",
         )
-        self.assertIn("prepareTransactionForQueueEditing", package_admission)
+        # Admission no longer gates on the saved plan; the reopen happens in
+        # the enqueue path, where a stopped plan joins the new item.
+        self.assertNotIn("prepareTransactionForQueueEditing", package_admission)
         self.assertIn("prepareTransactionForQueueEditing", standalone_admission)
         self.assertNotIn("Finish or retry the saved respring plan", self.queue_m)
+
+    def test_admission_never_blocks_and_defers_conflicts_to_execution(self) -> None:
+        admission = self.queue_method(
+            "- (BOOL)canQueueIntent:",
+            "- (BOOL)hasExecutingTransaction",
+        )
+        # Queueing is refused only by a durable store that cannot be written.
+        self.assertIn("durableStoreUnavailable", admission)
+        self.assertNotIn("commitInFlight", admission)
+        self.assertNotIn("still applying", admission)
+
+        enqueue = self.queue_method(
+            "- (BOOL)queueIntent:",
+            "- (void)queueIntent:",
+        )
+        # A stopped plan is reopened and an executing plan is appended to in
+        # place instead of being replaced or dropped.
+        self.assertIn("prepareTransactionForQueueEditing", enqueue)
+        self.assertIn("hasExecutingTransaction", enqueue)
+        self.assertIn("saveCollectingTransaction", enqueue)
+        # The one remaining refusal is a failed durable write, and it reports.
+        self.assertIn("The queued change could not be saved.", enqueue)
+
+        collecting = self.queue_method(
+            "- (BOOL)saveCollectingTransaction",
+            "- (BOOL)prepareTransactionForInstalls:",
+        )
+        # An executing transaction keeps its state and boundary metadata.
+        self.assertIn("self.commitInFlight", collecting)
+        self.assertIn("executing", collecting)
+        self.assertIn("CNDQueuedTransactionStateCollecting", collecting)
+
+    def test_finished_pass_never_swallows_work_queued_during_it(self) -> None:
+        for marker, next_marker in (
+            ("- (void)completeCoordinator",
+             "- (void)continueCoordinatorAfterRespring"),
+            ("- (void)finishSuccessfullyPostingCompletion:",
+             "- (void)postCompletionWithSuccess:"),
+        ):
+            with self.subTest(method=marker):
+                body = self.queue_method(marker, next_marker)
+                # An action queued while the pass ran stays Pending and durable
+                # for the next pass instead of being cleared away.
+                self.assertIn("CNDQueuedActionStatePending", body)
+                self.assertIn("retainUnstartedActions", body)
+
+    def test_package_admission_reports_a_failed_durable_write(self) -> None:
+        self.assertIn("- (BOOL)queueIntent:(PackageQueueIntent)intent", self.queue_h)
+        self.assertIn("presentQueueFailure", self.detail)
+        self.assertIn("queueIntent:intent\n                                      forPackage:self.package\n                                          reason:&reason", self.detail)
 
     def test_snowboard_buttons_admit_durable_actions(self) -> None:
         rows = self.settings_method(
@@ -112,8 +169,14 @@ class QueuedActionAdmissionTests(unittest.TestCase):
         self.assertIn('CNDQueuedActionConflictKeySnowBoardRemix', rows)
         self.assertIn('action": @"sbl-queue-apply"', rows)
         self.assertIn('action": @"sbl-queue-restore"', rows)
-        self.assertIn('action": @"sbl-queue-springboard-fixes"', rows)
-        self.assertIn('action": @"sbl-queue-spotlight-fixes"', rows)
+        self.assertIn('@"title": @"Manual Icon Fix"', rows)
+        self.assertIn('action": @"sbl-manual-icon-fix"', rows)
+        self.assertNotIn('action": @"sbl-queue-transparency-fix"', rows)
+        self.assertNotIn(
+            'action": @"sbl-queue-transparency-fix-restore"', rows
+        )
+        self.assertNotIn('action": @"sbl-queue-springboard-fixes"', rows)
+        self.assertNotIn('action": @"sbl-queue-spotlight-fixes"', rows)
         self.assertNotIn('action": @"sbl-test-calendar-repair"', rows)
         self.assertNotIn('action": @"sbl-start-kernel-consumer-watcher"', rows)
         self.assertNotIn('action": @"sbl-repair-springboard-transparency"', rows)
@@ -126,8 +189,12 @@ class QueuedActionAdmissionTests(unittest.TestCase):
         )]
         self.assertIn("CNDQueuedSnowBoardRemixAction(YES", selection)
         self.assertIn("CNDQueuedSnowBoardRemixAction(NO", selection)
-        self.assertIn("CNDQueuedSpringBoardFixesAction", selection)
-        self.assertIn("CNDQueuedSpotlightFixesAction", selection)
+        self.assertIn('settings_run_snowboard_remix_operation(\n'
+                      '                    @"Manual Icon Fix", YES', selection)
+        self.assertIn("[CNDSnowBoardRemix applyIconFixes]", selection)
+        self.assertNotIn("CNDQueuedTransparencyFixAction", selection)
+        self.assertNotIn("CNDQueuedSpringBoardFixesAction", selection)
+        self.assertNotIn("CNDQueuedSpotlightFixesAction", selection)
         self.assertNotIn("repairSpringBoardCalendarForTesting", selection)
         self.assertNotIn("settings_apply_snowboard_remix()", selection)
         self.assertNotIn("settings_restore_all_snowboard_remix()", selection)

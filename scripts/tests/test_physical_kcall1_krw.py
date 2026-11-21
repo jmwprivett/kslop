@@ -250,7 +250,7 @@ class RouteTableTests(unittest.TestCase):
         # `bti c; ldr w0,[x0]; ret`. The role stays the one that
         # reproduces the VM pin's 6-element outline run element for
         # element (fffffff008a4b130); the other (fffffff00826a470,
-        # Cyanide/CNDPhysicalIOUserEthernetSignerProbe.m:38-39) is the
+        # Cyanide/probes/CNDPhysicalIOUserEthernetSignerProbe.m:38-39) is the
         # counterpart of the VM's non-BTI fffffe0007b19544 - a
         # shape-selected, unreferenced constant, not a second derivation.
         rejected = 0xFFFFFFF00826A470
@@ -259,7 +259,7 @@ class RouteTableTests(unittest.TestCase):
         self.assertNotIn(rejected, {entry.address
                                     for entry in MODULE.PHONE_ROUTE.values()})
         probe = (TRIGGER_M.parents[2] /
-                 "Cyanide/CNDPhysicalIOUserEthernetSignerProbe.m").read_text()
+                 "Cyanide/probes/CNDPhysicalIOUserEthernetSignerProbe.m").read_text()
         self.assertIn("UINT64_C(0xfffffff00826a470);", probe)
         self.assertEqual(probe.count("CNDPhysicalSignerStaticLoadW0FromX0"), 1)
         record = (MODULE.DERIVATION_DIR /

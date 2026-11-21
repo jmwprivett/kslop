@@ -33,6 +33,19 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertNotIn("r_msg2", self.facade)
         self.assertNotIn("remote_call_with_session", self.facade)
 
+    def test_live_session_teardown_never_abandons_an_inflight_call(self) -> None:
+        start = self.adapter.index(
+            "cnd_publisher_teardown_session_safely(RemoteCallSession *session)"
+        )
+        end = self.adapter.index("\nstatic ", start + 8)
+        teardown = self.adapter[start:end]
+        self.assertIn("[session hasInFlightSyntheticCall]", teardown)
+        self.assertIn(
+            "[session deferTeardownForInFlightSyntheticCall]", teardown
+        )
+        self.assertNotIn("abandonRemoteCall", teardown)
+        self.assertNotIn("[session abandonRemoteCall]", self.adapter)
+
     def test_protocol_covers_complete_publisher_lifecycle(self) -> None:
         normalized = "".join(self.transport.split())
         for selector in (
@@ -45,6 +58,9 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
             self.assertIn(selector, normalized)
         self.assertIn("publishBundleIdentifier:", normalized)
         self.assertIn("structuredImageData:", normalized)
+        self.assertIn("variants:", normalized)
+        self.assertIn("restoreStockForBundleIdentifier:", normalized)
+        self.assertIn("descriptorSpecifications:", normalized)
 
     def test_bundle_identifier_validation_accepts_single_component_ids(self) -> None:
         start = self.adapter.index(
@@ -79,6 +95,17 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         )
         self.assertIn("[transport publishBundleIdentifier:bundleIdentifier", self.facade)
         self.assertIn("[transport restoreStockForBundleIdentifier:bundleIdentifier]", self.facade)
+        self.assertIn(
+            "[batch.transport publishBundleIdentifier:bundleIdentifier\n"
+            "                                           variants:variants]",
+            self.facade,
+        )
+        self.assertIn(
+            "[batch.transport restoreStockForBundleIdentifier:bundleIdentifier\n"
+            "                                 descriptorSpecifications:"
+            "descriptorSpecifications]",
+            self.facade,
+        )
 
     def test_applied_state_audit_is_getter_only(self) -> None:
         start = self.adapter.index(
@@ -412,7 +439,7 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertIn('r_msg2(managerIndex, "invalidate"', settle_helper)
 
         settle = publication.index(
-            "persistentIndexIdentitySettled = persistentIndexScratch"
+            "persistentIndexIdentitySettled = "
         )
         remove = publication.index("directStoreRemoveIssued = YES")
         write_verified = publication.index("directStoreWriteVerified =")
@@ -503,7 +530,13 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         self.assertIn("CNDIconServicesPublisherMaximumAuditMatrixCount", matrix)
         self.assertIn(
             "cnd_publisher_audit_variant(\n"
-            "            bundleIdentifier, specification, YES)",
+            "            bundleIdentifier, specification, recordedStoreIdentifier, YES)",
+            matrix,
+        )
+        # The matrix carries each variant's recorded unit UUID positionally.
+        self.assertIn("index < recordedStoreIdentifiers.count", matrix)
+        self.assertIn(
+            "bundleIdentifier, specification, recordedStoreIdentifier, YES)",
             matrix,
         )
         self.assertIn('@"applicationContextSetupCount"', matrix)
@@ -1237,6 +1270,169 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         ):
             self.assertIn(field, wrapper)
 
+    def test_stock_store_reports_lab_compatible_phase_timing(self) -> None:
+        start = self.adapter.index(
+            "static NSDictionary<NSString *, id> *\n"
+            "cnd_publisher_run_stock_store(NSString *bundleIdentifier,"
+        )
+        end = self.adapter.index(
+            "\nstatic NSDictionary<NSString *, id> *\ncnd_publisher_run(", start
+        )
+        stock = self.adapter[start:end]
+        self.assertIn("__block CFAbsoluteTime setupFinishedAt = startedAt;", stock)
+        self.assertIn("__block CFAbsoluteTime triggerFinishedAt = startedAt;", stock)
+
+        ignore_cache = stock.index('(void)r_msg2(descriptor, "setIgnoreCache:"')
+        setup = stock.index(
+            "setupFinishedAt = CFAbsoluteTimeGetCurrent();", ignore_cache
+        )
+        generation = stock.index('canonicalIcon, "generateImageWithDescriptor:"')
+        retained_response = stock.index('r_msg2(generated, "retain"', generation)
+        trigger = stock.index(
+            "triggerFinishedAt = CFAbsoluteTimeGetCurrent();", retained_response
+        )
+        self.assertLess(ignore_cache, setup)
+        self.assertLess(setup, generation)
+        self.assertLess(generation, retained_response)
+        self.assertLess(retained_response, trigger)
+        self.assertIn("if (!transactionStarted) {", stock)
+        self.assertIn("triggerFinishedAt = setupFinishedAt;", stock)
+        self.assertIn("} else if (triggerFinishedAt == startedAt) {", stock)
+
+        self.assertIn(
+            "CFAbsoluteTime operationFinishedAt = CFAbsoluteTimeGetCurrent();",
+            stock,
+        )
+        for report_line in (
+            'report[@"setupSeconds"] = @(setupFinishedAt - startedAt);',
+            'report[@"triggerSeconds"] = @(triggerFinishedAt - setupFinishedAt);',
+            'report[@"verificationSeconds"] =\n'
+            "        @(operationFinishedAt - triggerFinishedAt);",
+            'report[@"durationSeconds"] = @(operationFinishedAt - startedAt);',
+        ):
+            self.assertIn(report_line, stock)
+
+        remix = REMIX.read_text(encoding="utf-8")
+        consumer_start = remix.index("static void CNDRemixRunTimingAdd(")
+        consumer_end = remix.index(
+            "static CNDRemixRunTiming CNDRemixRunTimingDelta(", consumer_start
+        )
+        consumer = remix[consumer_start:consumer_end]
+        for field in (
+            "setupSeconds", "triggerSeconds", "verificationSeconds",
+            "durationSeconds",
+        ):
+            self.assertIn(f'report[@"{field}"]', consumer)
+
+    def test_process_wide_stable_call_counter_remains_available(self) -> None:
+        """The process-wide total is kept for context, not for the delta.
+
+        Per-operation attribution lives in
+        test_stable_call_delta_is_session_scoped; this pins that the
+        process-wide counter and its accessor still exist and that the debug
+        snapshot remains scoped to the caller's current state.
+        """
+        count_start = self.adapter.index(
+            "static uint64_t cnd_publisher_stable_call_count(void)"
+        )
+        count_end = self.adapter.index(
+            "static NSDictionary<NSString *, id> *cnd_remote_transport_call(",
+            count_start,
+        )
+        count = self.adapter[count_start:count_end]
+        self.assertIn("return remote_call_total_stable_call_count();", count)
+        self.assertNotIn("remote_call_copy_debug_snapshot", count)
+
+        source = REMOTE_CALL.read_text(encoding="utf-8")
+        self.assertIn("static uint64_t g_RC_stableCallsTotal;", source)
+        note_start = source.index("static void remote_call_note_stable_call(")
+        note_end = source.index("static void remote_call_note_stable_failure(", note_start)
+        note = source[note_start:note_end]
+        self.assertLess(
+            note.index("g_RC_stableCalls++;"),
+            note.index("g_RC_stableCallsTotal++;"),
+        )
+
+        accessor_start = source.index("uint64_t remote_call_total_stable_call_count(void)")
+        accessor_end = source.index("int remote_call_current_pid(void)", accessor_start)
+        accessor = source[accessor_start:accessor_end]
+        self.assertIn("pthread_mutex_lock(&g_universal_ipc_mutex);", accessor)
+        self.assertIn("uint64_t count = g_RC_stableCallsTotal;", accessor)
+        self.assertIn("pthread_mutex_unlock(&g_universal_ipc_mutex);", accessor)
+        self.assertIn(
+            "uint64_t remote_call_total_stable_call_count(void);",
+            REMOTE_CALL_HEADER.read_text(encoding="utf-8"),
+        )
+
+        snapshot_start = source.index("bool remote_call_copy_debug_snapshot(")
+        snapshot_end = source.index(
+            "bool remote_call_copy_original_thread_state(", snapshot_start
+        )
+        snapshot = source[snapshot_start:snapshot_end]
+        self.assertIn("outSnapshot->stableCalls = g_RC_stableCalls;", snapshot)
+        self.assertNotIn("outSnapshot->stableCalls = g_RC_stableCallsTotal", snapshot)
+
+    def test_stable_call_delta_is_session_scoped(self) -> None:
+        """Per-operation attribution must read the session's own counter.
+
+        The process-wide total counts every other session's calls, so two
+        overlapping descriptors could each report the other's round trips.
+        """
+        helper_start = self.adapter.index(
+            "static uint64_t cnd_publisher_session_call_count("
+        )
+        helper_end = self.adapter.index(
+            "static NSDictionary<NSString *, id> *cnd_remote_transport_call(",
+            helper_start,
+        )
+        helper = self.adapter[helper_start:helper_end]
+        self.assertIn(
+            "return remote_call_session_stable_call_count(transport.batchState.session);",
+            helper,
+        )
+
+        call_start = self.adapter.index(
+            "static NSDictionary<NSString *, id> *cnd_remote_transport_call("
+        )
+        call_end = self.adapter.index(
+            "static BOOL cnd_remote_transport_health(", call_start
+        )
+        call = self.adapter[call_start:call_end]
+        self.assertIn(
+            "RemoteCallSession *sampledSession = transport.batchState.session;", call
+        )
+        self.assertIn(
+            "uint64_t callsBefore = cnd_publisher_session_call_count(transport);",
+            call,
+        )
+        self.assertIn(
+            "uint64_t callsAfter = cnd_publisher_session_call_count(transport);",
+            call,
+        )
+        self.assertIn(
+            "if (currentSession && currentSession == sampledSession)", call
+        )
+        # A session opened or replaced mid-operation starts at zero, so its
+        # running total is this operation's work.
+        self.assertIn("callDelta = callsAfter;", call)
+        self.assertIn('timed[@"remoteStableCalls"] = @(callDelta);', call)
+
+        source = REMOTE_CALL.read_text(encoding="utf-8")
+        accessor_start = source.index(
+            "uint64_t remote_call_session_stable_call_count(RemoteCallSession *session)"
+        )
+        accessor_end = source.index(
+            "int remote_call_current_pid(void)", accessor_start
+        )
+        accessor = source[accessor_start:accessor_end]
+        self.assertIn("if (!session) return 0;", accessor)
+        self.assertIn("[session remoteCallStatePointer]->stableCalls", accessor)
+
+        self.assertIn(
+            "uint64_t remote_call_session_stable_call_count(RemoteCallSession *session);",
+            REMOTE_CALL_HEADER.read_text(encoding="utf-8"),
+        )
+
     def test_persistent_index_settle_waits_locally(self) -> None:
         start = self.adapter.index(
             "static BOOL cnd_publisher_wait_for_persistent_index_identity("
@@ -1258,13 +1454,28 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         )
         end = remix.index("\n@implementation CNDSnowBoardRemix", start)
         restore = remix[start:end]
-        self.assertIn("BOOL currentDispatchCheckpointed = NO;", restore)
-        self.assertIn("BOOL nextWillDispatch = batchHealthy && !isAirDrop", restore)
-        self.assertIn("[checkpointIndexes addObject:@(nextIndex)];", restore)
+        self.assertEqual(
+            restore.count(
+                "CNDIconServicesPublisherRestoreStockVariantsInBatch("
+            ),
+            1,
+        )
+        self.assertIn("CNDIconServicesPublisherAuditVariantsInBatch(", restore)
+        self.assertIn("BOOL dispatchCheckpointed = YES;", restore)
+        self.assertIn("[dispatchIndexes addObject:@(variantIndex)];", restore)
         self.assertIn(
-            "currentDispatchCheckpointed =\n"
-            "                            resultSaved && nextWillDispatch;",
+            "CNDRemixWriteIconServicesJournal(journal);",
             restore,
+        )
+        arm = restore.index(
+            'dispatchVariant[@"restorationDispatchPossible"] ='
+        )
+        dispatch = restore.index(
+            "CNDIconServicesPublisherRestoreStockVariantsInBatch(", arm
+        )
+        self.assertNotIn(
+            "CNDRemixAppendIconServicesJournalCheckpoint(",
+            restore[arm:dispatch],
         )
         for field in (
             '@"wallSeconds"',
@@ -1275,6 +1486,442 @@ class IconServicesPublisherTransportTests(unittest.TestCase):
         ):
             self.assertIn(field, remix)
         self.assertIn('CNDRemixLogRunTiming("RESTORE", "total"', restore)
+
+    def test_mutation_matrix_methods_use_one_transport_call(self) -> None:
+        publish_start = self.adapter.index(
+            "variants:(NSArray<NSDictionary<NSString *,id> *> *)variants"
+        )
+        publish_end = self.adapter.index("\n- (", publish_start)
+        publish = self.adapter[publish_start:publish_end]
+        restore_start = self.adapter.index(
+            "descriptorSpecifications:(NSArray<NSDictionary<NSString *,"
+            "NSNumber *> *> *)descriptorSpecifications"
+        )
+        restore_end = self.adapter.index("\n- (", restore_start)
+        restore = self.adapter[restore_start:restore_end]
+        for method, mode in ((publish, "YES"), (restore, "NO")):
+            self.assertEqual(method.count("cnd_remote_transport_call("), 1)
+            self.assertIn("cnd_publisher_mutation_matrix(", method)
+            self.assertIn(f"variants, {mode})", method)
+
+        matrix_start = self.adapter.index(
+            "static NSDictionary<NSString *, id> *cnd_publisher_mutation_matrix("
+        )
+        matrix_end = self.adapter.index(
+            "\nstatic NSDictionary<NSString *, id> *cnd_publisher_audit_matrix(",
+            matrix_start,
+        )
+        matrix = self.adapter[matrix_start:matrix_end]
+        self.assertIn("CNDIconServicesPublisherMaximumMutationMatrixCount", matrix)
+        self.assertIn("cnd_publisher_run(", matrix)
+        self.assertIn('@"variants": reports', matrix)
+        for field in (
+            '"matrix-complete"',
+            '"matrix-partial"',
+            '"requestedCount"',
+            '"attemptedCount"',
+            '"completedCount"',
+            '"stoppedAtIndex"',
+            '"remoteStableCalls"',
+            '"transportSeconds"',
+        ):
+            self.assertIn(field, matrix)
+
+
+class IconServicesPublisherDeferredVerificationTests(unittest.TestCase):
+    """The matrix defers per-variant readbacks into one audit matrix."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.adapter = ADAPTER.read_text(encoding="utf-8")
+        cls.contract = (
+            INSTALLER / "CNDIconServicesPublisherContract.m"
+        ).read_text(encoding="utf-8")
+
+    def publication(self) -> str:
+        start = self.adapter.index(
+            "cnd_publisher_run_stock_store(NSString *bundleIdentifier"
+        )
+        end = self.adapter.index(
+            "\nstatic NSDictionary<NSString *, id> *\ncnd_publisher_run(", start
+        )
+        return self.adapter[start:end]
+
+    def matrix(self) -> str:
+        start = self.adapter.index(
+            "static NSDictionary<NSString *, id> *cnd_publisher_mutation_matrix("
+        )
+        end = self.adapter.index(
+            "\nstatic NSDictionary<NSString *, id> *cnd_publisher_audit_matrix(\n"
+            "    NSString *bundleIdentifier,",
+            start,
+        )
+        return self.adapter[start:end]
+
+    def merge(self) -> str:
+        start = self.adapter.index(
+            "static void cnd_publisher_merge_deferred_audit("
+        )
+        end = self.adapter.index(
+            "static NSDictionary<NSString *, id> *cnd_publisher_mutation_matrix(",
+            start,
+        )
+        return self.adapter[start:end]
+
+    def test_deferred_mode_defaults_off_and_only_the_matrix_enables_it(self) -> None:
+        state = self.adapter[
+            self.adapter.index("@interface CNDIconServicesPublisherBatchState"):
+            self.adapter.index("@end", self.adapter.index(
+                "@interface CNDIconServicesPublisherBatchState"))
+        ]
+        self.assertIn("BOOL defersVariantVerification;", state)
+        # One enable site, immediately around the single per-variant run, and
+        # always reset so no later operation inherits it.
+        self.assertEqual(
+            self.adapter.count("defersVariantVerification = deferredVerification;"),
+            1,
+        )
+        self.assertEqual(
+            self.adapter.count("matrixBatch.defersVariantVerification = NO;"), 1
+        )
+        matrix = self.matrix()
+        self.assertLess(
+            matrix.index("matrixBatch.defersVariantVerification = deferredVerification;"),
+            matrix.index("cnd_publisher_run("),
+        )
+        self.assertLess(
+            matrix.index("cnd_publisher_run("),
+            matrix.index("matrixBatch.defersVariantVerification = NO;"),
+        )
+        # Only the stock-store path consumes it.
+        self.assertIn(
+            "BOOL deferredVerification = batch.defersVariantVerification;",
+            self.publication(),
+        )
+
+    def test_deferred_path_keeps_every_prewrite_gate_and_the_rollback(self) -> None:
+        publication = self.publication()
+        for kept in (
+            "if (replacing && !stockGenerationInitiallyPersisted)",
+            "persistentIndexIdentitySettled = ",
+            "directStoreRemoveIssued = YES;",
+            "![staged isEqualToData:savedStockOriginal]",
+        ):
+            self.assertIn(kept, publication)
+        # The removal readback still precedes the write, the write is still
+        # acknowledged, and a refused write still triggers the rollback.
+        self.assertLess(
+            publication.index('store, "removeUnitForUUID:",'),
+            publication.index('store, "writeStoreUnit:",'),
+        )
+        self.assertIn(
+            "directStoreWriteAcknowledged = (written & 1U) != 0;", publication
+        )
+        self.assertIn(
+            "if (!directStoreWriteVerified &&\n"
+            "                        !(deferredVerification &&\n"
+            "                          directStoreWriteAcknowledged)) {",
+            publication,
+        )
+        self.assertIn("immediateStoreRollbackAttempted = YES;", publication)
+        # The post-write comparisons only run when nothing was deferred.
+        write = publication.index("directStoreWriteAcknowledged =")
+        self.assertLess(
+            write,
+            publication.index("if (deferredVerification) {", write),
+        )
+        self.assertLess(
+            write,
+            publication.index("if (!deferredVerification) {", write),
+        )
+
+    def test_deferred_report_carries_the_expected_identities(self) -> None:
+        publication = self.publication()
+        for expected in (
+            'report[@"expectedDataSHA256"] = expectedHash',
+            '@"uuid": stockUUIDText ?: @""',
+            '@"validationTokenSHA256": publishedValidationTokenHash ?: @""',
+            'report[@"descriptorSpecification"] = specification;',
+            'report[@"deferredVerificationRequested"] = @(deferredVerification);',
+        ):
+            self.assertIn(expected, publication)
+
+    def test_matrix_issues_one_audit_over_the_same_specifications(self) -> None:
+        matrix = self.matrix()
+        self.assertEqual(matrix.count("cnd_publisher_audit_matrix("), 1)
+        self.assertIn(
+            "cnd_publisher_audit_matrix(\n"
+            "                    bundleIdentifier, specifications,\n"
+            "                    recordedStoreIdentifiers)",
+            matrix,
+        )
+        self.assertIn(
+            'variants[index][@"descriptorSpecification"]', matrix
+        )
+        # Every audited variant carries the unit UUID its own write recorded.
+        self.assertIn('reports[index][@"stockResponse"]', matrix)
+        self.assertIn('[recordedStoreIdentifiers addObject:recorded ?: @""]',
+                      matrix)
+        # The audit follows the mutation loop, and the merge follows the audit.
+        loop = matrix.index("cnd_publisher_run(")
+        audit = matrix.index("cnd_publisher_audit_matrix(")
+        merge = matrix.index("cnd_publisher_merge_deferred_audit(")
+        self.assertLess(loop, audit)
+        self.assertLess(audit, merge)
+        # The deferred re-read reuses the audit matrix's own 64 bound.
+        self.assertNotIn("MaximumDeferred", self.adapter)
+        self.assertIn(
+            "CNDIconServicesPublisherMaximumAuditMatrixCount", self.adapter[
+                self.adapter.index(
+                    "static NSDictionary<NSString *, id> *cnd_publisher_audit_matrix("
+                    "\n    NSString *bundleIdentifier,"
+                ):
+            ]
+        )
+
+    def test_partial_or_missing_audit_cannot_verify(self) -> None:
+        merge = self.merge()
+        # Nothing is set from the audit alone: `anchored` needs an ok audit and
+        # every expected identity, and each field needs its own match.
+        self.assertIn('BOOL anchored = [audit[@"ok"] boolValue] &&', merge)
+        for match, evidence in (
+            ("storeIdentityTargeted", 'audit[@"storeIdentifier"]'),
+            ("indexMatches", 'audit[@"storeIndexEntryPresent"]'),
+            ("cacheMatches", 'audit[@"cacheDataSHA256"]'),
+        ):
+            self.assertIn(evidence, merge)
+            self.assertIn(f"BOOL {match} = anchored &&", merge)
+        # The byte-exact store proof is the audited unit's bytes for the
+        # recorded UUID.
+        self.assertIn('BOOL storeExact = storeIdentityTargeted &&', merge)
+        self.assertIn('audit[@"storeDataSHA256"], expectedDataHash', merge)
+        # A non-replacing restoration may instead be accepted on stock-class
+        # evidence: the write's own recorded UUID, a present and valid unit, and
+        # exactly the captured stock length. Generated stock is not reproducible
+        # and IconServices aliases renditions onto one unit, so byte-exactness is
+        # unattainable there. A replacement never gets this relaxation.
+        stock_class = merge[
+            merge.index("BOOL stockClassAccepted = "):
+            merge.index("BOOL storeMatches = ")
+        ]
+        self.assertIn("!replacing && storeIdentityTargeted &&", stock_class)
+        for evidence in (
+            '[audit[@"storeUnitPresent"] boolValue]',
+            '[audit[@"storeUnitValid"] boolValue]',
+            "expectedStockLength.unsignedIntegerValue > 0",
+        ):
+            self.assertIn(evidence, stock_class)
+        self.assertIn(
+            'expectedStockLength = [stockResponse[@"dataLength"]', merge
+        )
+        self.assertIn("[audit[@\"storeDataLength\"] isEqual:expectedStockLength]",
+                      stock_class)
+        self.assertIn(
+            "BOOL storeMatches = storeExact || stockClassAccepted;", merge
+        )
+        self.assertIn("BOOL verified = ", merge)
+        for match in ("storeMatches", "indexMatches"):
+            self.assertIn(f"{match} &&", merge)
+        # The process cache is disproving only when the audit read one.
+        self.assertIn("BOOL auditObservedCache = "
+                      '[audit[@"cacheResponsePresent"] boolValue];', merge)
+        self.assertIn("BOOL cacheConflicts = auditObservedCache && !cacheMatches;",
+                      merge)
+        self.assertIn("BOOL cacheProven = !replacing || !cacheConflicts;", merge)
+        self.assertIn("storeMatches && cacheProven && indexMatches && sourceProven",
+                      merge)
+        self.assertIn(
+            "BOOL published = replacing && storeMatches && indexMatches && "
+            "cacheProven;", merge
+        )
+        # A missing audit slice stays nil and is reported, never trusted.
+        self.assertIn('@"matrix-audit-missing"', merge)
+        self.assertIn("? audits[index] : nil;", self.matrix())
+        # Every merged field is written inside the verified branch only.
+        verified_index = merge.index("if (verified) {")
+        for field in (
+            "directStoreWriteVerified",
+            "stockGenerationPersisted",
+            "agentCacheReadbackVerified",
+            "persistentStoreReadbackVerified",
+            "persistentIndexTokenWriteVerified",
+            "persistentIndexTokenLookupVerified",
+            "replacementPublished",
+            "installed",
+            "triggerVerified",
+            "operationCompleted",
+        ):
+            self.assertGreater(
+                merge.index(f'report[@"{field}"] ='), verified_index
+            )
+        self.assertIn('report[@"ok"] = @(operationCompleted);', merge)
+        self.assertGreater(merge.index('report[@"ok"] ='), verified_index)
+
+    def test_non_replacing_restore_does_not_require_the_process_cache(self) -> None:
+        merge = self.merge()
+        # The volatile process-image cache is diagnostic: it is read in a
+        # second application context, after the write's response is gone, so
+        # its absence cannot disprove either a restoration or a publication.
+        self.assertIn("BOOL cacheProven = !replacing || !cacheConflicts;", merge)
+        verified = merge[
+            merge.index("BOOL verified = "):merge.index("BOOL operationCompleted")
+        ]
+        self.assertIn("cacheProven", verified)
+        self.assertNotIn("cacheMatches", verified)
+        # A cache response the audit actually read and contradicted still
+        # blocks the replacement from reporting `published`.
+        published = merge[
+            merge.index("BOOL published = "):merge.index("BOOL verified = ")
+        ]
+        self.assertIn("replacing && storeMatches && indexMatches && cacheProven",
+                      published)
+        # The cache outcome is still reported, so a stock restoration never
+        # claims a cache readback it did not observe.
+        self.assertIn('report[@"deferredCacheEvidenceMatches"] = @(cacheMatches);',
+                      merge)
+
+    def test_deferred_store_proof_records_which_evidence_carried_it(self) -> None:
+        merge = self.merge()
+        self.assertIn(
+            'report[@"deferredStoreProof"] = storeExact ? @"byte-exact"\n'
+            '        : (stockClassAccepted ? @"stock-class-identity" : @"none");',
+            merge,
+        )
+        # The exact path is evaluated first and still wins wherever the audited
+        # bytes agree, so the relaxation can never upgrade a mismatched store.
+        self.assertLess(
+            merge.index("BOOL storeExact = "),
+            merge.index("BOOL storeMatches = "),
+        )
+        self.assertIn(
+            "BOOL storeMatches = storeExact || stockClassAccepted;", merge
+        )
+
+    def test_replacing_publication_still_requires_the_exact_store(self) -> None:
+        merge = self.merge()
+        # The stock-class relaxation is unreachable for a replacement, so a
+        # publication is still the byte-exact store plus an uncontradicted
+        # cache, and the merged verdict still consumes `storeMatches`, not
+        # `storeExact`.
+        self.assertIn("!replacing && storeIdentityTargeted &&", merge)
+        self.assertIn(
+            "BOOL published = replacing && storeMatches && indexMatches && "
+            "cacheProven;", merge
+        )
+        verified = merge[
+            merge.index("BOOL verified = "):merge.index("BOOL operationCompleted")
+        ]
+        self.assertIn("storeMatches && cacheProven", verified)
+        self.assertNotIn("storeExact", verified)
+
+    def test_audit_targets_the_uuid_the_write_recorded(self) -> None:
+        audit = self.adapter[
+            self.adapter.index(
+                "static uint64_t cnd_publisher_audit_make_uuid("
+            ):
+            self.adapter.index(
+                "\n@implementation CNDIconServicesPublisherRemoteTransport"
+            )
+        ]
+        # The audit resolves the unit by the recorded write UUID, and only
+        # falls back to the index lookup when no UUID was carried.
+        self.assertIn(
+            "recordedStoreUUIDObject = cnd_publisher_audit_make_uuid(\n"
+            "                    recordedStoreIdentifier, auditScratch);", audit
+        )
+        self.assertIn(
+            "uint64_t auditUnitUUID =\n"
+            "                    recordedStoreUUIDObject ?: indexedUUID;", audit
+        )
+        self.assertIn(
+            'r_msg2(storeUnitClass, "storeUnitWithStoreURL:UUID:",\n'
+            "                             storeURL, auditUnitUUID, 0, 0)", audit
+        )
+        self.assertIn('storeIdentifierSource = @"recorded-write-uuid";', audit)
+        # The audit reports the UUID it actually audited and the UUID it was
+        # asked to audit, so the merge can require them to agree.
+        self.assertIn('@"storeIdentifierSource": storeIdentifierSource ?: @""',
+                      audit)
+        self.assertIn('@"recordedStoreIdentifier":', audit)
+        # The write recorded its UUID into the report the merge anchors on.
+        self.assertIn('@"uuid": stockUUIDText ?: @""', self.publication())
+        # The recorded UUID is only released after the audit is complete.
+        self.assertLess(
+            audit.index("recordedStoreUUIDObject = cnd_publisher_audit_make_uuid("),
+            audit.index('r_msg2(recordedStoreUUIDObject,\n'
+                        '                             "release", 0, 0, 0, 0);'),
+        )
+
+    def test_merged_evidence_satisfies_the_stock_direct_validators(self) -> None:
+        merge = self.merge()
+        direct = self.contract[
+            self.contract.index("static BOOL cnd_publisher_result_is_stock_api_direct("):
+            self.contract.index("BOOL CNDIconServicesPublisherResultIsSafeToFinalize(")
+        ]
+        self.assertIn('"stock-iconservices-direct"', direct)
+        # Every field the direct validators consume exists in the write path's
+        # report and is either produced there or merged from the audit.
+        required = set()
+        for source in (
+            self.contract[
+                self.contract.index("BOOL CNDIconServicesPublisherPublicationResultIsVerified("):
+                self.contract.index("BOOL CNDIconServicesPublisherRestorationResultIsVerified(")
+            ],
+            self.contract[
+                self.contract.index("BOOL CNDIconServicesPublisherRestorationResultIsVerified("):
+            ],
+            self.contract[
+                self.contract.index("BOOL CNDIconServicesPublisherResultIsSafeToFinalize("):
+                self.contract.index("BOOL CNDIconServicesPublisherPublicationResultIsVerified(")
+            ],
+        ):
+            for chunk in source.split('result[@"')[1:]:
+                required.add(chunk.split('"')[0])
+        deferred_from_audit = {
+            "agentCacheReadbackVerified",
+            "persistentStoreReadbackVerified",
+            "directStoreWriteVerified",
+            "replacementPublished",
+            "stockGenerationPersisted",
+            "persistentIndexTokenWriteVerified",
+            "persistentIndexTokenLookupVerified",
+            "triggerVerified",
+            "operationCompleted",
+        }
+        publication = self.publication()
+        for field in sorted(required):
+            in_report = f'report[@"{field}"]' in publication
+            in_merge = f'report[@"{field}"]' in merge
+            self.assertTrue(
+                in_report or in_merge,
+                f"{field} is required by a validator but produced nowhere",
+            )
+            if field in deferred_from_audit:
+                self.assertIn(f'report[@"{field}"] =', merge)
+        self.assertIn('@"acceptancePolicy"] = @"stock-iconservices-direct";',
+                      publication)
+
+    def test_restore_reuses_the_matrix_audit_instead_of_second_pass(self) -> None:
+        remix = REMIX.read_text(encoding="utf-8")
+        start = remix.index(
+            "static NSDictionary<NSString *, id> *CNDRemixRestoreIconServicesJournals("
+        )
+        end = remix.index("\n@implementation CNDSnowBoardRemix", start)
+        restore = remix[start:end]
+        self.assertEqual(
+            restore.count("CNDIconServicesPublisherAuditVariantInBatch("), 1
+        )
+        self.assertIn('restoration[@"deferredVerificationAudit"]', restore)
+        # The single remaining per-variant audit is the fallback for reports
+        # that carry no matrix audit.
+        fallback = restore.index("CNDIconServicesPublisherAuditVariantInBatch(")
+        self.assertLess(restore.index('restoration[@"deferredVerificationAudit"]'),
+                        fallback)
+        self.assertLess(restore.index("verified = postRestoreStockAudit &&"),
+                        restore.index("CNDRemixAuditProvesSavedStock(", fallback))
+        self.assertGreater(
+            restore.index("CNDRemixAuditProvesSavedStock(", fallback), fallback
+        )
 
 
 if __name__ == "__main__":

@@ -170,6 +170,19 @@ CNDIconServicesPublisherRestoreStockVariantInBatch(
 }
 
 NSDictionary<NSString *, id> *
+CNDIconServicesPublisherRestoreStockVariantsInBatch(
+    NSString *bundleIdentifier,
+    NSArray<NSDictionary<NSString *, NSNumber *> *> *descriptorSpecifications)
+{
+    CNDIconServicesPublisherBatch *batch = cnd_publisher_batch();
+    if (!batch || ![batch.transport isHealthy]) {
+        return cnd_publisher_batch_error();
+    }
+    return [batch.transport restoreStockForBundleIdentifier:bundleIdentifier
+                                   descriptorSpecifications:descriptorSpecifications];
+}
+
+NSDictionary<NSString *, id> *
 CNDIconServicesPublisherAuditVariantInBatch(
     NSString *bundleIdentifier,
     NSDictionary<NSString *, NSNumber *> *descriptorSpecification)

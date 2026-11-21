@@ -10,6 +10,7 @@
 #import <Foundation/Foundation.h>
 #import "Package.h"
 #import "CNDQueuedTransaction.h"
+#import "CNDQueueExecutionSnapshot.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -45,6 +46,9 @@ typedef NS_ENUM(NSInteger, PackageQueueIntent) {
 /// atomically removes all package and standalone intents; a started plan never
 /// attempts to undo actions already checkpointed.
 @property (nonatomic, readonly) BOOL canClear;
+/// One consistent, immutable projection of durable execution state and the
+/// process-local asynchronous wait flags. Safe to read from any thread.
+@property (nonatomic, readonly) CNDQueueExecutionSnapshot *executionSnapshot;
 
 - (PackageQueueIntent)intentForPackage:(Package *)package;
 - (BOOL)canQueueIntent:(PackageQueueIntent)intent
@@ -58,6 +62,12 @@ typedef NS_ENUM(NSInteger, PackageQueueIntent) {
 //   installed     + queued      → cancel queue
 - (void)toggleForPackage:(Package *)package;
 
+/// Adds one package intent to the durable queue. Conflicts with a plan that is
+/// already saved or executing are resolved at execution time, so this refuses
+/// only a genuine prerequisite or an unwritable durable store.
+- (BOOL)queueIntent:(PackageQueueIntent)intent
+         forPackage:(Package *)package
+             reason:(NSString * _Nullable * _Nullable)reason;
 - (void)queueIntent:(PackageQueueIntent)intent forPackage:(Package *)package;
 - (void)removePackage:(Package *)package;
 

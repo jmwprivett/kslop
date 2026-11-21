@@ -19,6 +19,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL promptsForSystemEditRespring;
 @property (nonatomic, copy, nullable) NSString *systemEditRespringTitle;
 @property (nonatomic, copy, nullable) NSString *systemEditRespringMessage;
+/// Re-enters the existing exact 3-2-1 flow for an already durable
+/// AwaitingRespring transaction. Does not commit or mutate queue state.
+- (void)beginSavedQueueRespringCountdown;
 @end
 
 NS_ASSUME_NONNULL_END

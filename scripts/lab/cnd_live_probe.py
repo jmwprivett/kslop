@@ -36,17 +36,33 @@ from cyanide_lab_bridge import (  # noqa: E402
 )
 
 
-BUNDLE_ID = "com.zeroxjf.ios-cyanide1"
+URL_SCHEME = "com.zeroxjf.ios-cyanide1"
+BUNDLE_ID = os.environ.get("CYANIDE_BUNDLE_ID", URL_SCHEME)
 DEFAULT_DEVICE = "828515D1-88C1-5CEB-A16F-5AD0AE3E3641"
 COMMANDS = (
+    "krw-diagnostic",
+    "krw-update-handoff",
     "control",
     "image",
     "queue",
     "uat-binding-read",
     "uat-binding-write",
     "uat-record-state",
+    "uat-e1-observe",
+    "uat-agx-bootstrap-root",
+    "uat-agx-rtbuddy-alias",
+    "uat-agx-firmware-preflight",
+    "uat-e2-retire",
+    "uat-e4-inflight",
+    "uat-e5-owner-release",
+    "uat-e5-device-release",
     "uat-signer-inventory",
+    "uat-signer-oracle",
+    "krw-scratch-write",
     "uat-get-pte",
+    "a86969-playback-benign",
+    "discord-audio-apply",
+    "discord-audio-restore",
 )
 
 
@@ -54,7 +70,7 @@ def probe_url(command: str, token: str, request_id: str) -> str:
     query = urllib.parse.urlencode(
         {"replyToken": token, "requestID": request_id}
     )
-    return f"{BUNDLE_ID}://probe/{command}?{query}"
+    return f"{URL_SCHEME}://probe/{command}?{query}"
 
 
 def read_live_result(
@@ -112,6 +128,144 @@ def read_live_result(
     raise TimeoutError(f"timed out waiting for live probe result{detail}")
 
 
+def validate_intended_result(
+    command: str, request_id: str, result: dict[str, object]
+) -> None:
+    """Reject a terminal signal that does not prove the requested path."""
+
+    if command == "krw-update-handoff":
+        expected = {
+            "schema": "com.zeroxjf.cyanide.krw-update-handoff",
+            "command": "krw-update-handoff",
+            "requestID": request_id,
+            "result": "armed-exact",
+            "parkVerified": True,
+            "defunctProtected": True,
+            "controlLinkExact": True,
+            "controlChecksumExact": True,
+            "rwStateExact": True,
+            "anchorVerified": True,
+            "currentGenerationExact": True,
+            "nextProcessArmed": True,
+        }
+        mismatches = [
+            f"{key}={result.get(key)!r} expected {value!r}"
+            for key, value in expected.items()
+            if result.get(key) != value
+        ]
+        generation_id = result.get("generationID")
+        if not isinstance(generation_id, str) or not generation_id:
+            mismatches.append("generationID is missing")
+        handoff_serial = result.get("handoffSerial")
+        if not isinstance(handoff_serial, int) or handoff_serial <= 0:
+            mismatches.append("handoffSerial is not positive")
+        if mismatches:
+            raise ValueError(
+                "KRW update handoff was not proved: " + "; ".join(mismatches)
+            )
+        return
+
+    if command == "discord-audio-apply":
+        expected = {
+            "schema": "com.zeroxjf.cyanide.discord-audio-mode-probe",
+            "operation": "apply",
+            "result": "applied-built-in-mic-a2dp-observed",
+            "applyCompleted": True,
+            "defaultModeActive": True,
+            "builtInInputActive": True,
+            "bluetoothA2DPObserved": True,
+            "fullQualityAirPodsRouteVerified": True,
+            "persistentAudioMutationActive": True,
+            "automaticAudioRestorePerformed": False,
+            "threadRestored": True,
+            "targetIdentityStable": True,
+            "reportSaved": True,
+        }
+        mismatches = [
+            f"{key}={result.get(key)!r} expected {value!r}"
+            for key, value in expected.items()
+            if result.get(key) != value
+        ]
+        if mismatches:
+            raise ValueError(
+                "Discord full-quality route was not verified: "
+                + "; ".join(mismatches)
+            )
+        return
+
+    if command == "discord-audio-restore":
+        expected = {
+            "schema": "com.zeroxjf.cyanide.discord-audio-mode-probe",
+            "operation": "restore",
+            "result": "restored-original-discord-audio-state",
+            "restoreCompleted": True,
+            "modeRestored": True,
+            "preferredInputRestored": True,
+            "threadRestored": True,
+            "targetIdentityStable": True,
+            "reportSaved": True,
+        }
+        mismatches = [
+            f"{key}={result.get(key)!r} expected {value!r}"
+            for key, value in expected.items()
+            if result.get(key) != value
+        ]
+        if mismatches:
+            raise ValueError(
+                "Discord audio restore was not verified: "
+                + "; ".join(mismatches)
+            )
+        return
+
+    if command != "uat-agx-firmware-preflight":
+        return
+    expected = {
+        "schema": "com.zeroxjf.cyanide.agx-firmware-preflight",
+        "state": "finished",
+        "result": "read-only-preflight-observed",
+        "requestID": request_id,
+        "reportPersistence": "atomic-write-completed",
+        "krwGenerationUnchanged": True,
+        "firmwareCommandInserted": False,
+        "firmwareKickAttempted": False,
+        "firmwareOutputReadAttempted": False,
+        "command20ReadClaimed": False,
+    }
+    mismatches = [
+        f"{key}={result.get(key)!r} expected {value!r}"
+        for key, value in expected.items()
+        if result.get(key) != value
+    ]
+    identity = result.get("deviceIdentity")
+    if not isinstance(identity, dict):
+        mismatches.append("deviceIdentity is not an object")
+    else:
+        if identity.get("productType") != "iPhone17,2":
+            mismatches.append(
+                f"productType={identity.get('productType')!r} expected 'iPhone17,2'"
+            )
+        if identity.get("productBuildVersion") != "23A341":
+            mismatches.append(
+                "productBuildVersion="
+                f"{identity.get('productBuildVersion')!r} expected '23A341'"
+            )
+    open_joins = result.get("openJoins")
+    required_open_joins = {
+        "command20-active-firmware-EL1-TTBR0-TTBR1-TCR",
+        "firmware-load-translation-to-owned-frame",
+        "fixed-output-table-CPU-alias",
+        "exclusive-producer-ownership",
+    }
+    if not isinstance(open_joins, list) or not required_open_joins.issubset(
+        set(open_joins)
+    ):
+        mismatches.append("required open joins are absent")
+    if mismatches:
+        raise ValueError(
+            "C50 intended-path verification failed: " + "; ".join(mismatches)
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=COMMANDS)
@@ -166,6 +320,11 @@ def main() -> int:
     print(rendered)
     if args.json_output:
         Path(args.json_output).write_text(rendered + "\n", encoding="utf-8")
+    try:
+        validate_intended_result(args.command, request_id, result)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

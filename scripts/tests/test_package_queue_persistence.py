@@ -213,8 +213,28 @@ class PackageQueuePersistenceTests(unittest.TestCase):
         self.assertLess(removed, cancel)
 
     def test_review_exposes_clear_for_stopped_transactions_with_warning(self) -> None:
-        self.assertIn("[PackageQueue sharedQueue].canClear", self.review)
+        self.assertIn("[PackageQueue sharedQueue].executionSnapshot.canClear", self.review)
         self.assertIn("Changes that already completed will not be undone", self.review)
+
+    def test_executing_plan_is_appended_to_without_losing_its_boundary(self) -> None:
+        collecting = self.method_body(
+            "- (BOOL)saveCollectingTransaction",
+            "- (BOOL)prepareTransactionForInstalls:",
+        )
+        # A plan that is already executing keeps its state, error, and
+        # process-boundary metadata, so a newly added item joins it as Pending
+        # instead of replacing or discarding the running plan.
+        self.assertIn("self.commitInFlight", collecting)
+        self.assertIn("transactionByUpdatingState:executing", collecting)
+        self.assertIn("self.transaction.state", collecting)
+        self.assertIn("self.transaction.lastError", collecting)
+        # The only path that discards the transaction is an empty queue, which
+        # appending an item can never produce.
+        discarded = collecting.index("self.transaction = nil")
+        self.assertLess(
+            collecting.index("self.installs.count == 0 && self.uninstalls.count == 0"),
+            discarded,
+        )
 
     def test_package_mutations_report_real_success(self) -> None:
         self.assertIn("- (BOOL)applyCommittedState:(BOOL)installed", self.package_h)

@@ -129,6 +129,13 @@ void PackageSetIdentifierFavorite(NSString *identifier, BOOL favorite)
 {
     if (self.kind != PackageInstallKindToggle || !self.enabledKey) return NO;
     if (self.isInstallDisabled) return NO;
+    if ([self.identifier isEqualToString:@"com.darksword.sbcustomizer"]) {
+        // SBCustomizer is a one-shot mutation of the current SpringBoard
+        // process. Its enabled preference stores configuration/installed state,
+        // not consent to run again after every respring or reboot. Only an
+        // explicit PackageQueue transaction may put it back in the queue.
+        return NO;
+    }
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     return [d boolForKey:self.enabledKey] && !settings_tweak_is_applied(self.enabledKey);
 }

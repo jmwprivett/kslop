@@ -9,7 +9,7 @@ the single kcall1 route role `load_w0_from_x0_stub` in the same phone build:
 
   A  fffffff008a4b130  kcall1 derivation            README.md:45,
                                                      phone-kernel-find.txt:54-60,70
-  B  fffffff00826a470  Cyanide/CNDPhysicalIOUserEthernetSignerProbe.m:38-39
+  B  fffffff00826a470  Cyanide/probes/CNDPhysicalIOUserEthernetSignerProbe.m:38-39
                        (CNDPhysicalSignerStaticLoadW0FromX0)
 
 Same role, same image, two addresses: either they are two distinct stubs, or
@@ -135,7 +135,7 @@ VERDICT
   VM pin. In the shape enumeration it aligns by kind and ordinal with the VM's
   non-BTI fffffe0007b19544 (entry 3, the byte/half/word/pointer family), which
   is offered as where it plausibly came from. It was never used: in
-  Cyanide/CNDPhysicalIOUserEthernetSignerProbe.m it is declared at :38-39 and
+  Cyanide/probes/CNDPhysicalIOUserEthernetSignerProbe.m it is declared at :38-39 and
   referenced nowhere (all six CNDPhysicalSignerStatic* constants are, :34-44);
   the VM signer path uses no kernel address at all
   (scripts/lab/cnd_iouserethernet_signer_trigger.m:12-19, report field

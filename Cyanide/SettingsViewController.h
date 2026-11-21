@@ -4,6 +4,8 @@
 //
 
 #import <UIKit/UIKit.h>
+#import "kexploit/kexploit_opa334.h"
+#import "kexploit/CNDKRWLifecycleSnapshot.h"
 #import <sys/types.h>
 
 extern NSString * const kSettingsAutoRunKexploit;
@@ -174,10 +176,6 @@ void settings_begin_system_edit_respring(UIViewController *host);
 void settings_begin_system_edit_respring_with_completion(
     UIViewController *host,
     void (^ _Nullable completion)(BOOL started, NSString *message));
-/// Keeps Cyanide alive across a queue-owned respring, then reuses the parked
-/// KRW generation to foreground the app. The durable queue transaction remains
-/// the sole authority for whether after-respring work may resume.
-void settings_arm_queued_post_respring_foreground_handoff(void);
 void settings_present_hide_home_bar_respring_prompt(UIViewController *host);
 void settings_present_system_edit_respring_prompt(UIViewController *host,
                                                   NSString *title,
@@ -187,6 +185,21 @@ void settings_present_system_edit_respring_prompt(UIViewController *host,
 // call kexploit() directly: that bypasses the stale-state/recovery logic here and
 // crashes inside the page exploit's OOB read.
 bool settings_ensure_krw_for_probe(void);
+// Strict shared-lifecycle variant for probes that are authorized to consume
+// only an already-live or parked generation. It may validate or recover the
+// saved generation, but it never falls through to fresh exploit acquisition.
+bool settings_ensure_existing_krw_for_probe(void);
+/// Serializes a host-driven KRW command with UI Apply, recovery, cleanup,
+/// respring, and update preparation. The caller must release exactly once
+/// after its asynchronous completion callback fires.
+bool settings_begin_external_krw_action(const char *owner);
+void settings_end_external_krw_action(const char *owner);
+
+FOUNDATION_EXPORT NSString * const kSettingsKRWLifecycleDidChangeNotification;
+/// Latest immutable observation published at lifecycle ownership/result
+/// boundaries. Readiness is initially unknown; this never polls locked KRW
+/// helpers and never acquires, recovers, parks, or terminates a primitive.
+CNDKRWLifecycleSnapshot *settings_current_krw_lifecycle_snapshot(void);
 
 void settings_run_actions(void);
 void settings_run_pending_actions(void);
@@ -274,6 +287,31 @@ void settings_run_hail_mary_special_icon_class_dispatch_verify_redirected_action
     void);
 void settings_run_hail_mary_special_icon_class_dispatch_verify_original_action(
     void);
+/// Proves all three exact Clock/Calendar presentation dispatch entries through
+/// SpringBoard only, then writes each existing low word back unchanged. The
+/// resulting same-boot ticket is required by both semantic routes.
+void settings_run_special_icon_presentation_probe_action(void);
+void settings_run_clock_static_presentation_apply_action(void);
+void settings_run_clock_static_presentation_restore_action(void);
+void settings_run_clock_static_presentation_verify_redirected_action(void);
+void settings_run_clock_static_presentation_verify_original_action(void);
+void settings_run_calendar_static_presentation_apply_action(void);
+void settings_run_calendar_static_presentation_restore_action(void);
+void settings_run_calendar_static_presentation_verify_redirected_action(void);
+void settings_run_calendar_static_presentation_verify_original_action(void);
+void settings_run_switcher_presentation_probe_action(void);
+void settings_run_switcher_static_presentation_apply_action(void);
+void settings_run_switcher_static_presentation_restore_action(void);
+void settings_run_switcher_static_presentation_verify_redirected_action(void);
+void settings_run_switcher_static_presentation_verify_original_action(void);
+void settings_run_app_library_miniature_presentation_probe_action(void);
+void settings_run_app_library_miniature_static_presentation_apply_action(void);
+void settings_run_app_library_miniature_static_presentation_restore_action(
+    void);
+void settings_run_app_library_miniature_static_presentation_verify_redirected_action(
+    void);
+void settings_run_app_library_miniature_static_presentation_verify_original_action(
+    void);
 /// Runs the read-only Clock/Calendar consumer audit from a launch argument.
 /// It reports the live model class, the inherited Method entry and IMP for
 /// `iconClassForApplicationWithBundleIdentifier:`, and the canonical/leaf
@@ -299,7 +337,10 @@ void settings_run_special_icon_object_rebuild_live_action(void);
 void settings_run_hail_mary_app_library_miniature_refresh_action(void);
 void settings_destroy_springboard_remote_call(void);
 void settings_destroy_springboard_remote_call_sync(void);
-void settings_best_effort_termination_cleanup(const char *reason);
+/// Last-chance teardown before process exit. Returns the explicit KRW
+/// termination disposition so the caller can record it instead of
+/// treating process exit as success.
+CNDKRWTerminationDisposition settings_best_effort_termination_cleanup(const char *reason);
 void settings_application_did_enter_background(void);
 void settings_application_will_enter_foreground(void);
 void settings_application_did_become_active(void);

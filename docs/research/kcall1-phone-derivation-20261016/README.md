@@ -1,5 +1,9 @@
 # kcall1 phone route derivation (iPhone17,2, iOS 26.0 23A341)
 
+**Status: probe derivation only — there is no kcall capability.** This is
+static analysis for the unfinished, unsuccessful `CNDPhysicalKCall1Probe`. It
+does not establish a callable primitive, a kernel ABI, or any production path.
+
 **Level: implemented.** Static derivation of the seven kcall1 route
 roles against the pinned phone kernelcache (UUID
 76BB58BF-911D-07E4-D681-DCE7F2DDA3CE; `phone-kernelcache-header.txt:3`
@@ -96,7 +100,7 @@ witness column is the record file that derived it.
   as the VM (6-element load run, 13-element mov run), each unique in the
   whole kernel.
 - The route's `load_w0_from_x0_stub` had a second claimant in the tree:
-  `Cyanide/CNDPhysicalIOUserEthernetSignerProbe.m:38-39` declares
+  `Cyanide/probes/CNDPhysicalIOUserEthernetSignerProbe.m:38-39` declares
   `0xfffffff00826a470` for the same role. Settled against the image -
   it is a different stub (aligned by kind and ordinal with the VM's
   non-BTI `fffffe0007b19544`), selected by shape before the
@@ -122,7 +126,7 @@ entry 12 of 13 on both. No producer change was needed.
 ## Running it on the phone
 
 The phone path is the **in-app probe**, not a host-driven binary:
-`Cyanide/CNDPhysicalKCall1Probe.{h,m}`, launched by the app's own
+`Cyanide/probes/CNDPhysicalKCall1Probe.{h,m}`, launched by the app's own
 `--kcall1-probe` argument (`Cyanide/AppDelegate.m:105-116`, the same shape
 as `--iouserethernet-signer-probe`). It runs the canary in-process on the
 app's own kexploit KRW — `kreadbuf` / `kwrite64` /

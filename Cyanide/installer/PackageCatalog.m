@@ -118,7 +118,7 @@ static const NSInteger kSecFontChanger      = 25;
         Package *sbc = [[Package alloc] initWithIdentifier:@"com.darksword.sbcustomizer"
                                            name:@"SBCustomizer"
                                shortDescription:@"Custom dock count and home screen grid"
-                                longDescription:@"Customizes the dock icon count and the home screen icon grid (columns and rows). Optionally hides icon labels.\n\nAdjust the per-axis counts and the label-hide switch in the Settings tab."
+                                longDescription:@"Customizes the dock icon count and the home screen icon grid (columns and rows). Optionally hides icon labels.\n\nAdjust the per-axis counts and the label-hide switch in the Settings tab. The layout applies to the current SpringBoard process; after a respring or reboot it becomes inactive and is not queued again automatically."
                                         version:version
                                          author:@"zeroxjf"
                                        category:@"Home Screen Layout"

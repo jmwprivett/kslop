@@ -1,5 +1,7 @@
 # Pulsar Control Center file-backed installation
 
+Research history (route traces, canaries, rejected routes): [cc-theming-research.md](cc-theming-research.md).
+
 The production Apply/Restore buttons now call `CNDCCThemingFileBackingApply`
 and `CNDCCThemingFileBackingRestore`. They do not call the old live-view seed or
 per-instance persistence installers and do not open a SpringBoard RemoteCall

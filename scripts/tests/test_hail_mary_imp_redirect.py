@@ -4,17 +4,17 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide" / "CNDHailMaryImpRedirect.m"
-HEADER = ROOT / "Cyanide" / "CNDHailMaryImpRedirect.h"
-RESOLVER = ROOT / "Cyanide" / "CNDHailMaryReadOnlyDataPage.m"
-RESOLVER_HEADER = ROOT / "Cyanide" / "CNDHailMaryReadOnlyDataPage.h"
+SOURCE = ROOT / "Cyanide" / "probes" / "CNDHailMaryImpRedirect.m"
+HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryImpRedirect.h"
+RESOLVER = ROOT / "Cyanide" / "probes" / "CNDHailMaryReadOnlyDataPage.m"
+RESOLVER_HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryReadOnlyDataPage.h"
 SETTINGS = ROOT / "Cyanide" / "SettingsViewController.m"
 SETTINGS_HEADER = ROOT / "Cyanide" / "SettingsViewController.h"
 APP_DELEGATE = ROOT / "Cyanide" / "AppDelegate.m"
 LEGACY_WRITERS = (
-    ROOT / "Cyanide" / "CNDHailMaryPatch.m",
-    ROOT / "Cyanide" / "CNDHailMaryDataPage.m",
-    ROOT / "Cyanide" / "CNDHailMaryReadOnlyDataPage.m",
+    ROOT / "Cyanide" / "probes" / "CNDHailMaryPatch.m",
+    ROOT / "Cyanide" / "probes" / "CNDHailMaryDataPage.m",
+    ROOT / "Cyanide" / "probes" / "CNDHailMaryReadOnlyDataPage.m",
 )
 
 
@@ -163,7 +163,7 @@ class HailMaryImpRedirectTests(unittest.TestCase):
         ):
             self.assertIn(token, run, token)
 
-    def test_transparency_fix_moves_to_snowboard_queue_and_leaves_launch_flags(self):
+    def test_transparency_fix_is_consolidated_into_manual_icon_fix(self):
         settings = SETTINGS.read_text()
         header = SETTINGS_HEADER.read_text()
         app_delegate = APP_DELEGATE.read_text()
@@ -172,10 +172,13 @@ class HailMaryImpRedirectTests(unittest.TestCase):
         queue = (ROOT / "Cyanide/installer/PackageQueue.m").read_text()
 
         self.assertIn('case RootSectionActions:        return 6;', settings)
-        self.assertIn('action": @"sbl-queue-transparency-fix"', settings)
-        self.assertIn('action": @"sbl-queue-transparency-fix-restore"', settings)
-        self.assertIn("CNDQueuedTransparencyFixAction(YES)", settings)
-        self.assertIn("CNDQueuedTransparencyFixAction(NO)", settings)
+        self.assertIn('action": @"sbl-manual-icon-fix"', settings)
+        self.assertIn('@"title": @"Manual Icon Fix"', settings)
+        self.assertNotIn('action": @"sbl-queue-transparency-fix"', settings)
+        self.assertNotIn(
+            'action": @"sbl-queue-transparency-fix-restore"', settings
+        )
+        self.assertIn("[CNDSnowBoardRemix applyIconFixes]", settings)
         self.assertIn("setTransparencyFixEnabled", remix)
         self.assertIn("CNDHailMaryImpRedirectRun", remix)
         self.assertIn("CNDQueuedActionKindTransparencyFix", catalog)
@@ -198,7 +201,7 @@ class HailMaryImpRedirectTests(unittest.TestCase):
         remix = (ROOT / "Cyanide/installer/CNDSnowBoardRemix.m").read_text()
         source = SOURCE.read_text()
         resolver = RESOLVER.read_text()
-        probe = (ROOT / "Cyanide/CNDHailMaryProbe.m").read_text()
+        probe = (ROOT / "Cyanide/probes/CNDHailMaryProbe.m").read_text()
         header = RESOLVER_HEADER.read_text()
 
         fix = remix.split(

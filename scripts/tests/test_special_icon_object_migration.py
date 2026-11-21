@@ -172,8 +172,13 @@ class SpecialIconObjectMigrationTests(unittest.TestCase):
         )
         self.assertIn("CNDIconServicesConsumerHookAuditSpringBoard", action)
 
-    def test_ui_and_launch_arguments_are_wired(self):
-        self.assertIn("case RootSectionProbes:         return 17;", SETTINGS)
+    def test_launch_arguments_remain_wired_while_old_rows_stay_hidden(self):
+        self.assertIn("case RootSectionProbes:         return 7;", SETTINGS)
+        self.assertIn(
+            "static const NSInteger rows[] = {17, 18, 28, 29, 30, 31, 32};",
+            SETTINGS,
+        )
+        self.assertIn("settings_root_probe_underlying_row", SETTINGS)
         self.assertIn("Rebuild Static Clock + Calendar Objects", SETTINGS)
         self.assertIn("Rebuild Live Clock + Calendar Objects", SETTINGS)
         for action in (

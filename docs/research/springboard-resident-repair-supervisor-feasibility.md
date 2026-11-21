@@ -103,7 +103,7 @@ thin compile wrapper and one explicit Settings button:
 - `scripts/lab/cnd_fileport_anchor_probe.c`
 - `scripts/lab/cnd_physical_cs_allow_invalid_probe.m`
 - `scripts/lab/cnd_physical_cs_allow_invalid_probe.py`
-- `Cyanide/CNDPhysicalCSAllowInvalidProbe.{h,m}`
+- `Cyanide/probes/CNDPhysicalCSAllowInvalidProbe.{h,m}`
 - the `Run SpringBoard RX Probe` row in `Cyanide/SettingsViewController.m`
 
 The resident VM probe does not perform KRW, RemoteCall repair, IconServices

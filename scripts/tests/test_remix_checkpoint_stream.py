@@ -135,6 +135,26 @@ int main(void) {
             compacted, @[@0, @0]));
         CHECK(!CNDRemixAppendIconServicesJournalCheckpoint(
             compacted, @[@0, @1, @0]));
+
+        /* A whole dispatchable descriptor matrix must fit one bounded record. */
+        NSString *matrixBundle = @"com.example.checkpoint.matrix";
+        NSMutableDictionary *matrix = [@{
+            @"schemaVersion": @2,
+            @"bundleIdentifier": matrixBundle,
+            @"state": @"dispatch-possible",
+            @"variants": @[
+                variant(@"a", @"dispatch-possible"),
+                variant(@"b", @"dispatch-possible"),
+                variant(@"c", @"dispatch-possible"),
+            ],
+            @"updatedAt": NSDate.date,
+        } mutableCopy];
+        CHECK(CNDRemixWriteIconServicesJournal(matrix));
+        CHECK(CNDRemixAppendIconServicesJournalCheckpoint(
+            matrix, @[@0, @1, @2]));
+        CHECK([matrix[@"checkpointSequence"] unsignedIntegerValue] == 1);
+        CHECK(CNDRemixRemoveIconServicesJournal(matrixBundle));
+
         CHECK(CNDRemixRemoveIconServicesJournal(bundle));
         CHECK(![NSFileManager.defaultManager fileExistsAtPath:
             CNDRemixIconServicesJournalURL(bundle).path]);
@@ -176,7 +196,7 @@ class RemixCheckpointStreamTests(unittest.TestCase):
                 "#import <Foundation/Foundation.h>\n#include <stdio.h>\n"
                 "static const NSUInteger CNDRemixIconServicesCheckpointSchemaVersion = 1;\n"
                 "static const NSUInteger CNDRemixIconServicesCheckpointMaximumRecords = 256;\n"
-                "static const NSUInteger CNDRemixIconServicesCheckpointMaximumVariantUpdates = 2;\n"
+                "static const NSUInteger CNDRemixIconServicesCheckpointMaximumVariantUpdates = 64;\n"
                 f'static NSString * const TestRoot = @"{root_literal}/store";\n'
                 "static NSURL *CNDRemixIconServicesRootURL(void) {\n"
                 "    return [NSURL fileURLWithPath:TestRoot isDirectory:YES];\n"
@@ -225,6 +245,13 @@ class RemixCheckpointStreamTests(unittest.TestCase):
         )
         self.assertIn(
             '@"journalCheckpointComplexity": @"linear-in-variants"',
+            self.source,
+        )
+
+    def test_checkpoint_fanout_covers_the_full_matrix_bound(self) -> None:
+        self.assertIn(
+            "static const NSUInteger "
+            "CNDRemixIconServicesCheckpointMaximumVariantUpdates = 64;",
             self.source,
         )
 

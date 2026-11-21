@@ -5,9 +5,9 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide" / "CNDHailMaryPatch.m"
-HEADER = ROOT / "Cyanide" / "CNDHailMaryPatch.h"
-PROBE = ROOT / "Cyanide" / "CNDHailMaryProbe.m"
+SOURCE = ROOT / "Cyanide" / "probes" / "CNDHailMaryPatch.m"
+HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryPatch.h"
+PROBE = ROOT / "Cyanide" / "probes" / "CNDHailMaryProbe.m"
 SETTINGS = ROOT / "Cyanide" / "SettingsViewController.m"
 SETTINGS_HEADER = ROOT / "Cyanide" / "SettingsViewController.h"
 APP_DELEGATE = ROOT / "Cyanide" / "AppDelegate.m"
@@ -223,7 +223,7 @@ class HailMaryPatchTests(unittest.TestCase):
     def test_settings_retains_hidden_launch_diagnostics(self):
         settings = SETTINGS.read_text()
         settings_header = SETTINGS_HEADER.read_text()
-        self.assertIn('#import "CNDHailMaryPatch.h"', settings)
+        self.assertIn('#import "probes/CNDHailMaryPatch.h"', settings)
         self.assertIn('#import "installer/CNDIconServicesConsumerHook.h"', settings)
         self.assertIn("CNDIconServicesConsumerHookPresentSpotlight()", settings)
         self.assertIn("settings_hail_mary_spotlight_identity", settings)

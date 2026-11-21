@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the in-app physical kcall1 probe.
 
-The probe (Cyanide/CNDPhysicalKCall1Probe.{h,m}) is the phone path: it runs
+The probe (Cyanide/probes/CNDPhysicalKCall1Probe.{h,m}) is the phone path: it runs
 the producer's chosen-PC/chosen-X0 canary in-process on the app's own
 kexploit KRW and must never fall back to the provider socket, root, SSH, the
 host-side harness or the VM syscall-439 backend.  These tests pin the
@@ -23,8 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "lab"))
 
-SOURCE = ROOT / "Cyanide/CNDPhysicalKCall1Probe.m"
-HEADER = ROOT / "Cyanide/CNDPhysicalKCall1Probe.h"
+SOURCE = ROOT / "Cyanide/probes/CNDPhysicalKCall1Probe.m"
+HEADER = ROOT / "Cyanide/probes/CNDPhysicalKCall1Probe.h"
 APP_DELEGATE = ROOT / "Cyanide/AppDelegate.m"
 SETTINGS = ROOT / "Cyanide/SettingsViewController.m"
 
@@ -309,7 +309,7 @@ class PhysicalKCall1ProbeTests(unittest.TestCase):
         source = APP_DELEGATE.read_text()
         self.assertIn('--kcall1-probe', source)
         self.assertIn("CNDPhysicalKCall1ProbeRun", source)
-        self.assertIn('"CNDPhysicalKCall1Probe.h"', source)
+        self.assertIn('"probes/CNDPhysicalKCall1Probe.h"', source)
 
     def test_probe_diagnoses_a_refused_label_write(self) -> None:
         source = SOURCE.read_text()
@@ -347,7 +347,7 @@ class PhysicalKCall1ProbeTests(unittest.TestCase):
         self.assertIn("CNDPhysicalKCall1ProbeIsSupported(&reason)", settings)
         self.assertIn("CNDPhysicalKCall1ProbeIsRunning()", settings)
         self.assertIn("CNDPhysicalKCall1ProbeRun(", settings)
-        self.assertIn('"CNDPhysicalKCall1Probe.h"', settings)
+        self.assertIn('"probes/CNDPhysicalKCall1Probe.h"', settings)
         self.assertIn("Run IOUserEthernet KCall1 Canary", settings)
 
     def test_finished_probe_does_not_read_as_still_running(self) -> None:

@@ -59,6 +59,16 @@ CNDIconServicesPublisherRestoreStockVariantInBatch(
     NSString *bundleIdentifier,
     NSDictionary<NSString *, NSNumber *> *descriptorSpecification);
 
+/// Regenerates an ordered descriptor matrix as one app-scoped transport
+/// operation. IconServices still generates and verifies every descriptor, but
+/// the caller crosses the transport boundary only once and can checkpoint the
+/// application once rather than around every rendition. The result's
+/// `variants` array preserves the requested order.
+NSDictionary<NSString *, id> *
+CNDIconServicesPublisherRestoreStockVariantsInBatch(
+    NSString *bundleIdentifier,
+    NSArray<NSDictionary<NSString *, NSNumber *> *> *descriptorSpecifications);
+
 /// Reads the existing canonical cache response, its exact ISStore unit, and
 /// the UUID's persistent LaunchServices source identifier for one
 /// already-journaled descriptor. It never generates, publishes, removes,

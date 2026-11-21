@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Offline Ghidra derivation of the App Library category-miniature flat-image dispatch redirect; no writer included",
+  "runtimeVerified": false,
+  "appearanceVerified": false,
+  "os": {
+    "productVersion": "26.0",
+    "productBuildVersion": "23A341",
+    "productType": "iPhone17,2",
+    "architecture": "arm64e",
+    "identitySource": "local exact shared-cache image; device not queried"
+  },
+  "analysis": {
+    "tool": "Ghidra 12.1.4",
+    "binary": "SpringBoardHome",
+    "binarySHA256": "5ffa43948f9deddc04466fd8334ca545cc3c7e61ec3fada84bc166d586dccca2",
+    "hopperUsed": false
+  },
+  "cache": {
+    "mainUUID": "DC5F2F67-1FC8-3905-873B-35D17D1A44E8",
+    "readOnlySubcache": {
+      "fileName": "dyld_shared_cache_arm64e.34.dyldreadonly",
+      "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58",
+      "mapping": "__LINKEDIT",
+      "initProt": 1,
+      "maxProt": 1
+    },
+    "implementationSubcache": {
+      "fileName": "dyld_shared_cache_arm64e.19",
+      "uuid": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+      "mapping": "signed executable code"
+    }
+  },
+  "encoding": {
+    "kind": "preopt_cache_entry_t packed 26-bit selector offset plus signed 38-bit class-relative IMP",
+    "semanticWriteWidth": 4,
+    "guardByteLength": 32,
+    "lowWordOnly": true,
+    "storesPointerOrPAC": false
+  },
+  "redirect": {
+    "label": "app-library-miniature-flat-image-policy",
+    "target": {
+      "class": "SBHIconManager",
+      "classUnslidVMAddress": "0x1eda025e0",
+      "classROUnslidVMAddress": "0x1f3fd0388",
+      "baseMethodsUnslidVMAddress": "0x1be1ebe30",
+      "preoptimizedCacheUnslidVMAddress": "0x1ffc23308",
+      "selector": "prefersFlatImageLayers",
+      "types": "B16@0:8",
+      "methodEntryIndex": 550,
+      "methodEntryUnslidVMAddress": "0x1be1ed800",
+      "selectorOffset": "0x7f8c80",
+      "impUnslidVMAddress": "0x1be0f1cd0",
+      "implementation": "load the manager's stored byte at +0x1e5; return"
+    },
+    "replacement": {
+      "class": "SBIconImageView",
+      "selector": "hasOpaqueImage",
+      "types": "B16@0:8",
+      "impUnslidVMAddress": "0x1be1052a0",
+      "implementation": "mov w0, #1; ret",
+      "bytesHex": "20008052c0035fd6"
+    },
+    "dispatch": {
+      "cacheFallbackClassOffset": "0xffffffffffc074b8",
+      "cacheShift": 8,
+      "cacheMask": 1023,
+      "cacheOccupied": 1000,
+      "slot": 908,
+      "entryUnslidVMAddress": "0x1ffc24f78",
+      "frameUnslidVMAddress": "0x1ffc24000",
+      "offsetWithin16KFrame": "0xf78",
+      "subcacheFileOffset": "0x78d0f78",
+      "originalPackedWord": "0x1fe320000be44244",
+      "redirectedPackedWord": "0x1fe320000be3f4d0",
+      "highWordUnchanged": true,
+      "originalGuardHex": "4442e40b0020e31f3562e40b0040e31e1385e40b0080e31c43d4e40b00c0e31e",
+      "originalGuardSHA256": "ee3413eacb599815d71ab200047215f960f17d464a4330795f98b0c6d79ed443",
+      "redirectedGuardHex": "d0f4e30b0020e31f3562e40b0040e31e1385e40b0080e31c43d4e40b00c0e31e",
+      "redirectedGuardSHA256": "30db01c48d3ddd18d94a6a34d53aa54628cda8cb8d434d60f1eb109c7bc5a29a"
+    }
+  },
+  "ghidraBehavioralRoute": {
+    "managerConfiguration": "-[SBHIconManager configureIconView:forIcon:] reads prefersFlatImageLayers and sends setPrefersFlatImageLayers: to the SBIconView",
+    "customControllerPropagation": "-[SBIconView configureCustomIconImageViewController:] copies prefersFlatImageLayers into a supporting custom image-view controller",
+    "libraryControllerPropagation": "-[SBHLibraryIconViewController setPrefersFlatImageLayers:] forwards the value to SBHLibraryCategoryStackView",
+    "miniatureDecision": "-[SBHLibraryCategoryStackView _innerIconImageOptions] returns 0x11 when prefersFlatImageLayers is true and 0x1 otherwise",
+    "rebuildBoundary": "-[SBHLibraryCategoryStackView setPrefersFlatImageLayers:] invokes _updateIconImageViewsAnimated: when the value changes"
+  },
+  "claim": {
+    "implemented": "bounded exact-entry dispatch redirect selecting the stock flat-image policy for future SpringBoard App Library category miniature construction",
+    "notYetProved": "rendered transparency of the four 27-point miniature app plates on the physical device",
+    "requires": "matching same-boot identical-write permission ticket and a normal SpringBoard restart before appearance testing",
+    "doesNotUse": [
+      "RemoteCall",
+      "process injection",
+      "folder or App Library visibility",
+      "icon object migration",
+      "new executable memory"
+    ]
+  }
+}

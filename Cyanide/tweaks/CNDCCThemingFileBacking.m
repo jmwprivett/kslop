@@ -1302,6 +1302,71 @@ BOOL CNDCCThemingFileBackingHasJournaledState(void)
     return NO;
 }
 
+// A bounded sample, not a full audit: the smallest journaled resources (the 29
+// CAML files and the two small CC catalogs) are hashed, while the 24 MB and
+// 150 MB glyph catalogs stay outside the bound so a UI query never reads them.
+static const NSUInteger CNDCCLiveProbeCount = 4;
+static const NSUInteger CNDCCLiveProbeLength = 2U << 20;
+
+CNDCCThemingFileBackingLiveState CNDCCThemingFileBackingLiveStateInDirectory(
+    NSURL *journalDirectory, NSURL *targetRoot)
+{
+    NSDictionary *journal = CNDCCFileLoadJSON([journalDirectory URLByAppendingPathComponent:@"journal.json"]);
+    NSArray *entries = [journal[@"entries"] isKindOfClass:NSArray.class] ? journal[@"entries"] : @[];
+    NSMutableArray *probes = [NSMutableArray array];
+    BOOL claimsApplied = NO;
+    for (NSDictionary *entry in entries) {
+        if (![entry isKindOfClass:NSDictionary.class]) continue;
+        // "restored"/"prepared" never left a modified target behind; every other
+        // state (applied, writing, catalog-retiring) claims one.
+        if ([@[@"restored", @"prepared"] containsObject:entry[@"state"]]) continue;
+        claimsApplied = YES;
+        NSNumber *length = entry[@"length"];
+        if (![entry[@"path"] isKindOfClass:NSString.class] || ![entry[@"path"] hasPrefix:@"/"] ||
+            ![length isKindOfClass:NSNumber.class] || length.unsignedIntegerValue == 0 ||
+            length.unsignedIntegerValue > CNDCCLiveProbeLength ||
+            !CNDCCFileDigestValid(entry[@"originalSHA256"]) ||
+            !CNDCCFileDigestValid(entry[@"payloadSHA256"])) continue;
+        [probes addObject:entry];
+    }
+    if (!claimsApplied) return CNDCCThemingFileBackingLiveStateStock;
+    [probes sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [a[@"length"] compare:b[@"length"]];
+    }];
+    BOOL applied = NO, reverted = NO, unknown = NO;
+    NSUInteger probed = 0;
+    for (NSDictionary *entry in probes) {
+        if (probed == CNDCCLiveProbeCount) break;
+        probed++;
+        // Never trust the journaled length for the read bound: a stale or
+        // tampered entry must not pull a huge file into a UI query.
+        NSString *target = CNDCCFileTarget(targetRoot, entry[@"path"]);
+        NSNumber *actual = [[NSFileManager defaultManager]
+            attributesOfItemAtPath:target error:nil][NSFileSize];
+        if (![actual isKindOfClass:NSNumber.class] ||
+            actual.unsignedLongLongValue > CNDCCLiveProbeLength) {
+            unknown = YES;
+            continue;
+        }
+        NSString *sha = CNDCCFileSHA(CNDCCFileRead(target));
+        if ([sha isEqualToString:entry[@"payloadSHA256"]]) applied = YES;
+        else if ([sha isEqualToString:entry[@"originalSHA256"]]) reverted = YES;
+        else unknown = YES;
+    }
+    // Nothing was probeable (only oversize or invalid entries): the journal's own
+    // claim is the only evidence left, and it must not be reported as Stock.
+    if (!probed) return CNDCCThemingFileBackingLiveStateApplied;
+    if (applied && !reverted && !unknown) return CNDCCThemingFileBackingLiveStateApplied;
+    if (reverted && !applied) return CNDCCThemingFileBackingLiveStateStock;
+    return CNDCCThemingFileBackingLiveStatePartial;
+}
+
+CNDCCThemingFileBackingLiveState CNDCCThemingFileBackingLiveStateNow(void)
+{
+    return CNDCCThemingFileBackingLiveStateInDirectory(CNDCCFileDataDirectory(),
+        [NSURL fileURLWithPath:@"/" isDirectory:YES]);
+}
+
 #if defined(CND_CC_FILE_BACKING_TESTING)
 NSDictionary *CNDCCThemingFileBackingRunFixture(BOOL apply, NSDictionary *manifest,
     NSURL *artworkDirectory, NSURL *targetRoot, NSURL *journalDirectory,

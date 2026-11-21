@@ -19,7 +19,7 @@ import cnd_thread_call_pac_inventory as inventory  # noqa: E402
 class ThreadCallPACInventoryTests(unittest.TestCase):
     def test_app_boundary_uses_rea_bound_allproc_without_kcall(self) -> None:
         source = (
-            ROOT / "Cyanide/CNDLabThreadCallPACBoundary.m"
+            ROOT / "Cyanide/probes/CNDLabThreadCallPACBoundary.m"
         ).read_text(encoding="utf-8")
         self.assertIn(
             "CNDStaticAllProc = UINT64_C(0xfffffe0009813020)", source,
@@ -38,10 +38,10 @@ class ThreadCallPACInventoryTests(unittest.TestCase):
 
     def test_vm_mutation_and_original_dispatch_are_bounded(self) -> None:
         source = (
-            ROOT / "Cyanide/CNDLabThreadCallPACBoundary.m"
+            ROOT / "Cyanide/probes/CNDLabThreadCallPACBoundary.m"
         ).read_text(encoding="utf-8")
         header = (
-            ROOT / "Cyanide/CNDLabThreadCallPACBoundary.h"
+            ROOT / "Cyanide/probes/CNDLabThreadCallPACBoundary.h"
         ).read_text(encoding="utf-8")
         settings = (
             ROOT / "Cyanide/SettingsViewController.m"
@@ -83,7 +83,7 @@ class ThreadCallPACInventoryTests(unittest.TestCase):
 
     def test_vm_pac_reuse_dispatch_is_exact_and_fail_closed(self) -> None:
         source = (
-            ROOT / "Cyanide/CNDLabThreadCallPACBoundary.m"
+            ROOT / "Cyanide/probes/CNDLabThreadCallPACBoundary.m"
         ).read_text(encoding="utf-8")
         settings = (
             ROOT / "Cyanide/SettingsViewController.m"
@@ -135,10 +135,10 @@ class ThreadCallPACInventoryTests(unittest.TestCase):
 
     def test_vm_pm_callout_harvest_is_exact_and_restoring(self) -> None:
         source = (
-            ROOT / "Cyanide/CNDLabThreadCallPACBoundary.m"
+            ROOT / "Cyanide/probes/CNDLabThreadCallPACBoundary.m"
         ).read_text(encoding="utf-8")
         header = (
-            ROOT / "Cyanide/CNDLabThreadCallPACBoundary.h"
+            ROOT / "Cyanide/probes/CNDLabThreadCallPACBoundary.h"
         ).read_text(encoding="utf-8")
         settings = (
             ROOT / "Cyanide/SettingsViewController.m"

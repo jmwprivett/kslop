@@ -5,10 +5,10 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide" / "CNDHailMaryDataPage.m"
-HEADER = ROOT / "Cyanide" / "CNDHailMaryDataPage.h"
-PROBE = ROOT / "Cyanide" / "CNDHailMaryProbe.m"
-PROBE_HEADER = ROOT / "Cyanide" / "CNDHailMaryProbe.h"
+SOURCE = ROOT / "Cyanide" / "probes" / "CNDHailMaryDataPage.m"
+HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryDataPage.h"
+PROBE = ROOT / "Cyanide" / "probes" / "CNDHailMaryProbe.m"
+PROBE_HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryProbe.h"
 SETTINGS = ROOT / "Cyanide" / "SettingsViewController.m"
 SETTINGS_HEADER = ROOT / "Cyanide" / "SettingsViewController.h"
 
@@ -122,7 +122,7 @@ class HailMaryDataPageTests(unittest.TestCase):
         settings = SETTINGS.read_text()
         header = SETTINGS_HEADER.read_text()
         self.assertIn("case RootSectionActions:        return 6;", settings)
-        self.assertIn('#import "CNDHailMaryDataPage.h"', settings)
+        self.assertIn('#import "probes/CNDHailMaryDataPage.h"', settings)
         self.assertIn("Hail Mary Data-Page Write Probe", settings)
         self.assertIn("Hail Mary Data-Page Write Probe?", settings)
         self.assertIn("settings_run_hail_mary_data_page_action", settings)

@@ -4,7 +4,9 @@
 #import "../kexploit/kexploit_opa334.h"
 #import "../LogTextView.h"
 
+#import <errno.h>
 #import <math.h>
+#import <signal.h>
 #import <sys/sysctl.h>
 
 NSString * const CNDTransientAppliedStateSnowBoardRemix =
@@ -200,6 +202,41 @@ static void CNDTransientAppliedStateRemoveProcessLocalStates(
     [states removeObjectForKey:CNDTransientAppliedStateSpotlightFixes];
 }
 
+static BOOL CNDTransientAppliedStateInvalidateProcessLocalStatesLocked(
+    NSMutableDictionary<NSString *, id> *state)
+{
+    if (!state) return NO;
+    NSMutableDictionary<NSString *, NSNumber *> *states =
+        [state[@"states"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSUInteger previousCount = states.count;
+    CNDTransientAppliedStateRemoveProcessLocalStates(states);
+    if (states.count == previousCount) return NO;
+
+    NSMutableDictionary<NSString *, id> *updated = [state mutableCopy];
+    updated[@"spotlightPID"] = @0;
+    updated[@"states"] = states;
+    updated[@"updatedAt"] = NSDate.date;
+    NSString *pending = [updated[@"pendingTransactionIdentifier"]
+        isKindOfClass:NSString.class]
+        ? updated[@"pendingTransactionIdentifier"] : @"";
+    return CNDTransientAppliedStateWriteLocked(
+        states.count > 0 || pending.length > 0 ? updated : nil);
+}
+
+BOOL CNDTransientAppliedStateInvalidateProcessLocalStatesForSpringBoardRestart(void)
+{
+    @synchronized (CNDTransientAppliedStateLock()) {
+        NSMutableDictionary<NSString *, id> *state =
+            CNDTransientAppliedStateReadLocked();
+        BOOL cleared =
+            CNDTransientAppliedStateInvalidateProcessLocalStatesLocked(state);
+        if (cleared) {
+            log_user("[ACTIVE_STATE] SpringBoard restart observed; cleared process-local SpringBoard/Spotlight/SBC state.\n");
+        }
+        return cleared;
+    }
+}
+
 BOOL CNDTransientAppliedStateReconcileCurrentEpoch(void)
 {
     @synchronized (CNDTransientAppliedStateLock()) {
@@ -345,15 +382,11 @@ BOOL CNDTransientAppliedStateIsActive(NSString *stateKey)
         NSDictionary *state = CNDTransientAppliedStateReadLocked();
         if (!state) return NO;
 
-        // Rendering a package badge must be a deterministic disk read. Never
-        // run KRW validation or a kernel process-list walk from this UI path:
-        // table configuration can query the same package several times and a
-        // transient readiness/read failure made identical rows disagree after
-        // an ordinary app relaunch. The boot epoch is available without KRW,
-        // so a real reboot can discard process-local markers immediately while
-        // retaining SnowBoard's durable state. Exact SpringBoard PID
-        // validation remains in ReconcileCurrentEpoch(), which the settings
-        // path invokes after KRW is successfully reused or recovered.
+        // Rendering a package badge must never recover KRW or walk the kernel
+        // process list. The boot epoch rejects a reboot. SBCustomizer has a
+        // stricter rule: a targeted kill(pid, 0) liveness check rejects its
+        // process-local marker as soon as the recorded SpringBoard exits after
+        // a same-boot respring. EPERM still proves that the PID exists.
         NSTimeInterval currentBoot =
             CNDTransientAppliedStateCurrentBootEpoch();
         if (!CNDTransientAppliedStateBootMatches(
@@ -373,6 +406,25 @@ BOOL CNDTransientAppliedStateIsActive(NSString *stateKey)
                 CNDTransientAppliedStateSnowBoardRemix] && snowBoardActive;
         }
         NSDictionary *states = state[@"states"];
+        if ([stateKey isEqualToString:CNDTransientAppliedStateSBCustomizer] &&
+            [states[stateKey] boolValue]) {
+            pid_t storedPID = [state[@"springBoardPID"] intValue];
+            errno = 0;
+            int probeResult = storedPID > 1 ? kill(storedPID, 0) : -1;
+            int probeError = errno;
+            BOOL recordedSpringBoardStillExists =
+                probeResult == 0 || probeError == EPERM;
+            if (!recordedSpringBoardStillExists) {
+                BOOL cleared =
+                    CNDTransientAppliedStateInvalidateProcessLocalStatesLocked(
+                        [state mutableCopy]);
+                if (cleared) {
+                    log_user("[ACTIVE_STATE] Recorded SpringBoard pid=%d exited (probe errno=%d); cleared stale SBC state.\n",
+                             storedPID, probeError);
+                }
+                return NO;
+            }
+        }
         return [states[stateKey] boolValue];
     }
 }

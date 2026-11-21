@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PROBE = ROOT / "Cyanide/CNDPhysicalCalculatorPACProbe.m"
+PROBE = ROOT / "Cyanide/probes/CNDPhysicalCalculatorPACProbe.m"
 REMOTE_CALL = ROOT / "Cyanide/TaskRop/RemoteCall.m"
 APP_DELEGATE = ROOT / "Cyanide/AppDelegate.m"
 

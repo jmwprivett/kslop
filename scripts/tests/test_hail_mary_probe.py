@@ -6,8 +6,8 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide" / "CNDHailMaryProbe.m"
-HEADER = ROOT / "Cyanide" / "CNDHailMaryProbe.h"
+SOURCE = ROOT / "Cyanide" / "probes" / "CNDHailMaryProbe.m"
+HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryProbe.h"
 SETTINGS = ROOT / "Cyanide" / "SettingsViewController.m"
 SETTINGS_HEADER = ROOT / "Cyanide" / "SettingsViewController.h"
 APP_DELEGATE = ROOT / "Cyanide" / "AppDelegate.m"
@@ -96,7 +96,7 @@ class HailMaryProbeTests(unittest.TestCase):
         settings_header = SETTINGS_HEADER.read_text()
         app_delegate = APP_DELEGATE.read_text()
         self.assertIn("CNDHailMaryProbeRun", header)
-        self.assertIn('#import "CNDHailMaryProbe.h"', settings)
+        self.assertIn('#import "probes/CNDHailMaryProbe.h"', settings)
         self.assertIn("Run Hail Mary Physical Proof", settings)
         self.assertIn("settings_run_hail_mary_probe_action", settings)
         self.assertIn("settings_run_hail_mary_probe_action", settings_header)

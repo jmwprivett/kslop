@@ -1,0 +1,7 @@
+== 23A341_com.apple.kernel.raw nstrings=15988
+  0xfffffff007050719 "mac_policy_init"
+  0xfffffff007050993 "mac_policy_initmach"
+  0xfffffff0070b2264 "IOUC %s failed MACF in process %s
+"
+  0xfffffff0070b2287 "IOUC %s failed sandbox in process %s
+"

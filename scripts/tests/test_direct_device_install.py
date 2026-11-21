@@ -99,13 +99,45 @@ class DirectDeviceScriptTests(unittest.TestCase):
     def test_install_is_graceful_direct_and_does_not_launch_or_uninstall(self) -> None:
         self.assertIn("828515D1-88C1-5CEB-A16F-5AD0AE3E3641", self.install_source)
         self.assertIn("iPinky Max", self.install_source)
-        self.assertIn("available (paired)", self.install_source)
+        self.assertIn("devicectl list devices --json-output", self.install_source)
+        self.assertIn("tunnelState: unavailable", self.install_source)
+        self.assertIn('"pairingState: paired"', self.install_source)
         self.assertIn("device process terminate", self.install_source)
         self.assertNotIn("--kill", self.install_source)
         self.assertNotIn("device process launch", self.install_source)
         self.assertNotIn("device uninstall", self.install_source)
         self.assertIn("device info apps", self.install_source)
-        self.assertIn('grep -F "$BUNDLE_ID" "$REGISTRATION_LOG"', self.install_source)
+        self.assertIn('payload.get("result", {}).get("apps", [])', self.install_source)
+        self.assertIn('app.get("bundleIdentifier") == sys.argv[2]', self.install_source)
+
+    def test_in_place_update_preserves_parked_krw_record(self) -> None:
+        self.assertIn(
+            "preserving app data and parked KRW record", self.install_source
+        )
+        self.assertIn(
+            "uninstalling deletes the app data container", self.install_source
+        )
+        self.assertIn(
+            'BUNDLE_ID="${CYANIDE_BUNDLE_ID:-com.zeroxjf.ios-cyanide1}"',
+            self.install_source,
+        )
+        self.assertNotIn("device uninstall", self.install_source)
+        self.assertIn("krw-update-handoff", self.install_source)
+        self.assertIn("device copy from", self.install_source)
+        self.assertIn("appDataContainer", self.install_source)
+        self.assertIn('"disposition": "recoverable-anchored"', self.install_source)
+        self.assertIn('"handoffRequestID": request_id', self.install_source)
+        self.assertIn('"generationID": generation_id', self.install_source)
+        self.assertIn('"handoffSerial": int(serial_text)', self.install_source)
+        handoff = self.install_source.index("prepare_cyanide_update_handoff")
+        terminate = self.install_source.index("terminate_cyanide_pid", handoff)
+        disposition = self.install_source.index(
+            "copy_and_validate_termination", terminate
+        )
+        install = self.install_source.index("device install app", disposition)
+        self.assertLess(handoff, terminate)
+        self.assertLess(terminate, disposition)
+        self.assertLess(disposition, install)
 
 
 if __name__ == "__main__":

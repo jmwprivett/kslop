@@ -27,9 +27,11 @@ static pthread_mutex_t log_mutex    = PTHREAD_MUTEX_INITIALIZER;
 
 // Session-log persistence. log_file is non-NULL while a chain run is active;
 // every completed line is also written here with a wall-clock timestamp.
-// Both fields are guarded by log_mutex.
+// All fields are guarded by log_mutex. Nested and overlapping sessions share
+// the file until the final matching log_session_end.
 static FILE *log_file                = NULL;
 static char  log_file_path_c[1024]   = {0};
+static int   log_session_nesting_depth = 0;
 
 void log_init(void) {
     pthread_mutex_lock(&log_mutex);
@@ -139,11 +141,13 @@ void log_user(const char *fmt, ...) {
 // ---------------------------------------------------------------------------
 // Session log persistence
 //
-// log_session_begin opens a timestamped file under <Documents>/logs/. While it
-// is open, log_write_raw (above) tees each completed line into it with an
-// [HH:MM:SS.mmm] prefix. log_session_end flushes + closes.
+// log_session_begin opens a timestamped file under <Documents>/logs/ on the
+// 0 -> 1 depth transition. While it is open, log_write_raw (above) tees each
+// completed line into it with an [HH:MM:SS.mmm] prefix. Nested begins retain
+// that file, and log_session_end flushes + closes only on the final release.
 // A capped retention policy keeps the newest N session logs and prunes older
-// ones each time a session begins, so the directory doesn't grow unbounded.
+// ones each time an outermost session begins, so the directory doesn't grow
+// unbounded.
 
 #define LOG_SESSIONS_KEEP 20
 
@@ -183,55 +187,93 @@ static void log_prune_old_sessions(NSInteger keep) {
 }
 
 void log_session_begin(void) {
-    NSURL *fileURL = nil;
-    @autoreleasepool {
-        NSURL *dir = log_session_dir_url();
-        if (!dir) return;
-        [[NSFileManager defaultManager] createDirectoryAtURL:dir
-                                 withIntermediateDirectories:YES
-                                                  attributes:nil
-                                                       error:nil];
-
-        NSDateFormatter *df = [[NSDateFormatter alloc] init];
-        df.dateFormat = @"yyyyMMdd-HHmmss";
-        df.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
-        df.timeZone = [NSTimeZone localTimeZone];
-        NSString *name = [NSString stringWithFormat:@"chain-%@.log",
-                          [df stringFromDate:[NSDate date]]];
-        fileURL = [dir URLByAppendingPathComponent:name];
-    }
-    if (!fileURL) return;
-
     pthread_mutex_lock(&log_mutex);
-    if (log_file) {
-        fclose(log_file);
-        log_file = NULL;
-    }
-    strlcpy(log_file_path_c, fileURL.path.fileSystemRepresentation, sizeof(log_file_path_c));
-    log_file = fopen(log_file_path_c, "w");
-    if (log_file) {
-        time_t t = time(NULL);
-        struct tm tm; localtime_r(&t, &tm);
-        fprintf(log_file,
-                "# kslop chain session %04d-%02d-%02d %02d:%02d:%02d\n",
-                tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                tm.tm_hour, tm.tm_min, tm.tm_sec);
-        fflush(log_file);
+    if (log_session_nesting_depth > 0) {
+        log_session_nesting_depth++;
+        pthread_mutex_unlock(&log_mutex);
+        return;
     }
     pthread_mutex_unlock(&log_mutex);
 
-    log_prune_old_sessions(LOG_SESSIONS_KEEP);
+    /* Build the destination path OUTSIDE log_mutex. The Foundation calls below
+     * take their own locks and can raise, and log_mutex is not recursive, so
+     * holding it across them would strand every later logging call: begin,
+     * end, depth, and log_write_raw would all block forever. The established
+     * discipline is that log_mutex only ever covers stdio. */
+    NSURL *fileURL = nil;
+    @autoreleasepool {
+        NSURL *dir = log_session_dir_url();
+        if (dir) {
+            [[NSFileManager defaultManager] createDirectoryAtURL:dir
+                                     withIntermediateDirectories:YES
+                                                      attributes:nil
+                                                           error:nil];
+
+            NSDateFormatter *df = [[NSDateFormatter alloc] init];
+            df.dateFormat = @"yyyyMMdd-HHmmss";
+            df.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+            df.timeZone = [NSTimeZone localTimeZone];
+            NSString *name = [NSString stringWithFormat:@"chain-%@.log",
+                              [df stringFromDate:[NSDate date]]];
+            fileURL = [dir URLByAppendingPathComponent:name];
+        }
+    }
+
+    pthread_mutex_lock(&log_mutex);
+    if (log_session_nesting_depth > 0) {
+        /* Another writer opened the session while we were building the path.
+         * Join it rather than truncating the file it just created. */
+        log_session_nesting_depth++;
+        pthread_mutex_unlock(&log_mutex);
+        return;
+    }
+    log_session_nesting_depth = 1;
+    if (fileURL) {
+        if (log_file) {
+            fclose(log_file);
+            log_file = NULL;
+        }
+        log_file_path_c[0] = '\0';
+        strlcpy(log_file_path_c, fileURL.path.fileSystemRepresentation, sizeof(log_file_path_c));
+        log_file = fopen(log_file_path_c, "w");
+        if (log_file) {
+            time_t t = time(NULL);
+            struct tm tm; localtime_r(&t, &tm);
+            fprintf(log_file,
+                    "# kslop chain session %04d-%02d-%02d %02d:%02d:%02d\n",
+                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                    tm.tm_hour, tm.tm_min, tm.tm_sec);
+            fflush(log_file);
+        }
+    }
+    pthread_mutex_unlock(&log_mutex);
+
+    if (fileURL) log_prune_old_sessions(LOG_SESSIONS_KEEP);
 }
 
 void log_session_end(void) {
     pthread_mutex_lock(&log_mutex);
-    if (log_file) {
-        fflush(log_file);
-        fclose(log_file);
-        log_file = NULL;
+    if (log_session_nesting_depth == 0) {
+        pthread_mutex_unlock(&log_mutex);
+        return;
+    }
+    log_session_nesting_depth--;
+    if (log_session_nesting_depth == 0) {
+        if (log_file) {
+            fflush(log_file);
+            fclose(log_file);
+            log_file = NULL;
+        }
         log_file_path_c[0] = '\0';
     }
     pthread_mutex_unlock(&log_mutex);
+}
+
+int log_session_depth(void) {
+    pthread_mutex_lock(&log_mutex);
+    int depth = log_session_nesting_depth;
+    pthread_mutex_unlock(&log_mutex);
+    return depth;
 }
 
 NSString *log_inapp_buffer_snapshot(void) {

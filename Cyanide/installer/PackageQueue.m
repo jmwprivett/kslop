@@ -14,7 +14,9 @@
 #import "../tweaks/snowboardlite.h"
 
 #import <UIKit/UIKit.h>
+#import <errno.h>
 #import <math.h>
+#import <signal.h>
 #import <unistd.h>
 
 NSString * const PackageQueueDidChangeNotification = @"PackageQueueDidChangeNotification";
@@ -27,6 +29,8 @@ static NSString * const kQueuedTransactionDirectory = @"Cyanide/Queue";
 static NSString * const kQueuedTransactionFilename = @"QueuedChanges.v1.plist";
 static NSString * const kSBCustomizerPackageIdentifier =
     @"com.darksword.sbcustomizer";
+static NSString * const kLegacySBCustomizerMarkerFailure =
+    @"SBCustomizer completed, but its current SpringBoard state could not be recorded.";
 
 @interface PackageQueue ()
 @property (nonatomic, strong) NSMutableArray<Package *> *installs;
@@ -86,6 +90,27 @@ static BOOL CNDQueuedBootEpochMatches(NSTimeInterval stored,
 {
     return stored > 0.0 && current > 0.0 &&
         fabs(stored - current) <= 5.0;
+}
+
+/// Cheaply determines whether it is useful to offer the saved continuation.
+/// This never authorizes execution: resumeCoordinatorAfterVerifiedRespring
+/// recovers KRW and verifies the current SpringBoard PID again before work runs.
+static BOOL CNDQueuedRestartBoundaryAppearsObserved(
+    CNDQueuedTransaction *transaction)
+{
+    if (!transaction ||
+        transaction.state != CNDQueuedTransactionStateAwaitingRespring ||
+        transaction.preRespringSpringBoardPID <= 1) return NO;
+
+    NSTimeInterval currentBoot = settings_current_boot_epoch();
+    if (transaction.bootEpoch > 0.0 && currentBoot > 0.0 &&
+        !CNDQueuedBootEpochMatches(transaction.bootEpoch, currentBoot)) {
+        return YES;
+    }
+
+    errno = 0;
+    int result = kill(transaction.preRespringSpringBoardPID, 0);
+    return result != 0 && errno == ESRCH;
 }
 
 static CNDQueuedAction *CNDQueuedActionByCopyingExecutionState(
@@ -247,6 +272,51 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         NSLog(@"[QUEUE] Durable queue is invalid or uses an unsupported schema; leaving it untouched: %@",
               decodeError.localizedDescription);
         return;
+    }
+
+    // Older builds converted a successful SBCustomizer apply into a failed,
+    // retryable transaction when only its process-local ACTIVE marker failed
+    // to save. The exact terminal error proves the settings runner succeeded;
+    // retire that stale transaction instead of replaying the one-shot mutation
+    // after a respring/reboot and leaving the queue apparently stuck.
+    BOOL legacySBCustomizerMarkerFailure =
+        loaded.state == CNDQueuedTransactionStateFailed &&
+        [loaded.lastError isEqualToString:kLegacySBCustomizerMarkerFailure];
+    if (legacySBCustomizerMarkerFailure) {
+        BOOL hasFailedSBCustomizerAction = NO;
+        BOOL allActionsTerminal = loaded.actions.count > 0;
+        NSMutableArray<CNDQueuedAction *> *completedActions =
+            [NSMutableArray arrayWithCapacity:loaded.actions.count];
+        for (CNDQueuedAction *action in loaded.actions) {
+            if (action.state == CNDQueuedActionStatePending ||
+                action.state == CNDQueuedActionStateRunning) {
+                allActionsTerminal = NO;
+            }
+            if ([action.kind isEqualToString:CNDQueuedActionKindPackage] &&
+                [action.subjectIdentifier isEqualToString:
+                    kSBCustomizerPackageIdentifier] &&
+                action.state == CNDQueuedActionStateFailed) {
+                hasFailedSBCustomizerAction = YES;
+            }
+            [completedActions addObject:
+                [action actionByUpdatingState:CNDQueuedActionStateSucceeded
+                                     lastError:nil]];
+        }
+        if (hasFailedSBCustomizerAction && allActionsTerminal) {
+            self.transaction = [loaded
+                transactionByUpdatingState:CNDQueuedTransactionStateCompleted
+                                     actions:completedActions
+                                   lastError:nil];
+            if ([self persistDurableTransaction]) {
+                CNDQueuedTransaction *completed = self.transaction;
+                self.transaction = nil;
+                if (![self persistDurableTransaction]) {
+                    self.transaction = completed;
+                }
+            }
+            NSLog(@"[QUEUE] Retired a legacy completed SBCustomizer marker failure without replaying it.");
+            return;
+        }
     }
 
     if (loaded.state == CNDQueuedTransactionStateCompleted) {
@@ -456,6 +526,37 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
     @synchronized (self) {
         return self.transaction != nil || self.durableStoreUnavailable;
     }
+}
+
+- (CNDQueueExecutionSnapshot *)executionSnapshot
+{
+    CNDQueuedTransaction *transaction = nil;
+    BOOL commitInFlight = NO;
+    BOOL waitingForSettingsCompletion = NO;
+    BOOL waitingForCoordinatedSettingsCompletion = NO;
+    BOOL resumeBeforeRespring = NO;
+    BOOL durableStoreUnavailable = NO;
+    @synchronized (self) {
+        transaction = self.transaction;
+        commitInFlight = self.commitInFlight;
+        waitingForSettingsCompletion = self.waitingForSettingsCompletion;
+        waitingForCoordinatedSettingsCompletion =
+            self.waitingForCoordinatedSettingsCompletion;
+        resumeBeforeRespring =
+            self.resumeCoordinatorBeforeRespringAfterSettings;
+        durableStoreUnavailable = self.durableStoreUnavailable;
+    }
+    BOOL restartBoundaryObserved =
+        CNDQueuedRestartBoundaryAppearsObserved(transaction);
+    return [[CNDQueueExecutionSnapshot alloc]
+        initWithTransaction:transaction
+        commitInFlight:commitInFlight
+        waitingForSettingsCompletion:waitingForSettingsCompletion
+        waitingForCoordinatedSettingsCompletion:
+            waitingForCoordinatedSettingsCompletion
+        resumeCoordinatorBeforeRespringAfterSettings:resumeBeforeRespring
+        restartBoundaryObserved:restartBoundaryObserved
+        durableStoreUnavailable:durableStoreUnavailable];
 }
 
 - (BOOL)transactionExecutionHasStarted
@@ -669,11 +770,20 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         }
         NSArray<CNDQueuedAction *> *actions =
             [self actionsForInstalls:self.installs uninstalls:self.uninstalls];
+        // An executing plan keeps its state and process-boundary metadata; its
+        // new items are Pending and the next apply pass picks them up. Only an
+        // editable plan is rewritten as Collecting.
+        BOOL executing = self.commitInFlight ||
+            (self.transaction &&
+             self.transaction.state != CNDQueuedTransactionStateCollecting);
         if (self.transaction) {
             self.transaction = [self.transaction
-                transactionByUpdatingState:CNDQueuedTransactionStateCollecting
+                transactionByUpdatingState:executing
+                    ? self.transaction.state
+                    : CNDQueuedTransactionStateCollecting
                                      actions:actions
-                                   lastError:nil];
+                                   lastError:executing
+                    ? self.transaction.lastError : nil];
         } else {
             self.transaction =
                 [CNDQueuedTransaction collectingTransactionWithActions:actions];
@@ -737,6 +847,39 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         CNDQueuedAction *action = [self existingActionWithRecordIdentifier:
             CNDQueuedRecordIdentifier(package, installed)];
         return action.state == CNDQueuedActionStateSucceeded;
+    }
+}
+
+/// Splits a finished pass. An action that is still Pending was queued while the
+/// pass was running, so it never ran: it must stay durable for the next pass
+/// rather than being marked succeeded or failing the pass that just finished.
+/// A still-Running or Failed action is reported through `unfinished`.
+- (NSArray<CNDQueuedAction *> *)unstartedActionsInTransaction:
+    (CNDQueuedTransaction *)transaction
+                                                   unfinished:(CNDQueuedAction **)unfinished
+{
+    if (unfinished) *unfinished = nil;
+    NSMutableArray<CNDQueuedAction *> *unstarted = [NSMutableArray array];
+    for (CNDQueuedAction *action in transaction.actions) {
+        if (action.state == CNDQueuedActionStatePending) {
+            [unstarted addObject:action];
+        } else if (action.state != CNDQueuedActionStateSucceeded) {
+            if (unfinished) *unfinished = action;
+            return @[];
+        }
+    }
+    return unstarted;
+}
+
+/// Keeps the actions that were queued during a pass as a fresh editable plan so
+/// the next apply pass runs them. Returns NO when that plan could not be saved.
+- (BOOL)retainUnstartedActions:(NSArray<CNDQueuedAction *> *)unstarted
+{
+    @synchronized (self) {
+        self.transaction =
+            [CNDQueuedTransaction collectingTransactionWithActions:unstarted];
+        [self rebuildPackageCollectionsFromActions:unstarted];
+        return [self persistDurableTransaction];
     }
 }
 
@@ -841,8 +984,28 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         if (reason) *reason = @"Use the Lockscreen Glyphs Apply or Restore control.";
         return NO;
     }
+    // A saved or executing plan never refuses a new item: the conflict is
+    // resolved at execution time, and the action is appended to the same
+    // durable transaction. Only a store that cannot be written may refuse.
+    @synchronized (self) {
+        if (!self.durableStoreUnavailable) return YES;
+    }
+    if (reason) {
+        *reason = @"The saved queue could not be read safely. Preserve the queue file for diagnosis before trying another change.";
+    }
+    return NO;
+}
 
-    return [self prepareTransactionForQueueEditing:reason];
+/// YES when the durable plan is executing right now or has stopped partway
+/// through. Those plans must never be reopened for editing: a new item is
+/// appended in place and stays Pending for the next apply pass.
+- (BOOL)hasExecutingTransaction
+{
+    @synchronized (self) {
+        return self.commitInFlight ||
+            (self.transaction &&
+             self.transaction.state != CNDQueuedTransactionStateCollecting);
+    }
 }
 
 - (void)toggleForPackage:(Package *)package
@@ -859,36 +1022,70 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
     [self queueIntent:next forPackage:package];
 }
 
-- (void)queueIntent:(PackageQueueIntent)intent forPackage:(Package *)package
+- (BOOL)queueIntent:(PackageQueueIntent)intent
+         forPackage:(Package *)package
+             reason:(NSString * _Nullable * _Nullable)reason
 {
-    if (![self canQueueIntent:intent forPackage:package reason:nil]) return;
-
-    NSArray<Package *> *oldInstalls = nil;
-    NSArray<Package *> *oldUninstalls = nil;
-    CNDQueuedTransaction *oldTransaction = nil;
-    @synchronized (self) {
-        oldInstalls = [self.installs copy];
-        oldUninstalls = [self.uninstalls copy];
-        oldTransaction = self.transaction;
-        Package *match = [self packageInArray:self.installs matching:package];
-        if (match) [self.installs removeObject:match];
-        match = [self packageInArray:self.uninstalls matching:package];
-        if (match) [self.uninstalls removeObject:match];
-
-        if (intent == PackageQueueIntentInstall) {
-            if (!PackageCanQueueInstall(package)) return;
-            [self.installs addObject:package];
-        } else if (intent == PackageQueueIntentUninstall) {
-            [self.uninstalls addObject:package];
+    if (reason) *reason = nil;
+    if (intent == PackageQueueIntentNone) return YES;
+    if (![self canQueueIntent:intent forPackage:package reason:reason]) return NO;
+    if (intent == PackageQueueIntentInstall && !PackageCanQueueInstall(package)) {
+        if (reason) {
+            *reason = PackageRequiresThemerTheme(package)
+                ? @"Choose a theme in Settings before queueing Themer."
+                : (PackageRequiresFontFamily(package)
+                    ? @"Choose a regular font in Settings before queueing Font Changer."
+                    : @"This package needs a Settings choice before it can be queued.");
         }
-        if (![self saveCollectingTransaction]) {
-            self.installs = [oldInstalls mutableCopy];
-            self.uninstalls = [oldUninstalls mutableCopy];
-            self.transaction = oldTransaction;
-            return;
+        return NO;
+    }
+    // A stopped plan is reopened so the new item joins it instead of replacing
+    // it. An executing plan is left untouched and takes the item in place.
+    if (![self hasExecutingTransaction]) {
+        (void)[self prepareTransactionForQueueEditing:nil];
+    }
+
+    BOOL saved = NO;
+    BOOL refused = NO;
+    @synchronized (self) {
+        if (self.durableStoreUnavailable) {
+            refused = YES;
+        } else {
+            NSArray<Package *> *oldInstalls = [self.installs copy];
+            NSArray<Package *> *oldUninstalls = [self.uninstalls copy];
+            CNDQueuedTransaction *oldTransaction = self.transaction;
+            Package *match = [self packageInArray:self.installs matching:package];
+            if (match) [self.installs removeObject:match];
+            match = [self packageInArray:self.uninstalls matching:package];
+            if (match) [self.uninstalls removeObject:match];
+            if (intent == PackageQueueIntentInstall) {
+                [self.installs addObject:package];
+            } else {
+                [self.uninstalls addObject:package];
+            }
+            saved = [self saveCollectingTransaction];
+            if (!saved) {
+                self.installs = [oldInstalls mutableCopy];
+                self.uninstalls = [oldUninstalls mutableCopy];
+                self.transaction = oldTransaction;
+            }
         }
     }
+    if (!saved) {
+        if (reason) {
+            *reason = refused
+                ? @"The saved queue could not be read safely. Preserve the queue file for diagnosis before trying another change."
+                : @"The queued change could not be saved.";
+        }
+        return NO;
+    }
     [self notifyChange];
+    return YES;
+}
+
+- (void)queueIntent:(PackageQueueIntent)intent forPackage:(Package *)package
+{
+    (void)[self queueIntent:intent forPackage:package reason:nil];
 }
 
 - (void)removePackage:(Package *)package
@@ -960,7 +1157,15 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         if (reason) *reason = @"A newly queued action must be pending.";
         return NO;
     }
-    if (![self prepareTransactionForQueueEditing:reason]) return NO;
+    // Same model as package admission: a stopped plan is reopened for editing
+    // first, while a plan that is executing (or whose boundary cannot be
+    // finalized yet) takes the action in place as Pending and the next apply
+    // pass runs it. Only an unwritable durable store refuses.
+    BOOL executing = [self hasExecutingTransaction];
+    if (!executing) {
+        (void)[self prepareTransactionForQueueEditing:nil];
+        executing = [self hasExecutingTransaction];
+    }
 
     CNDQueuedTransaction *oldTransaction = nil;
     @synchronized (self) {
@@ -989,9 +1194,12 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         [actions addObject:action];
         if (self.transaction) {
             self.transaction = [self.transaction
-                transactionByUpdatingState:CNDQueuedTransactionStateCollecting
+                transactionByUpdatingState:executing
+                    ? self.transaction.state
+                    : CNDQueuedTransactionStateCollecting
                                      actions:actions
-                                   lastError:nil];
+                                   lastError:executing
+                    ? self.transaction.lastError : nil];
         } else {
             self.transaction =
                 [CNDQueuedTransaction collectingTransactionWithActions:actions];
@@ -1259,7 +1467,11 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
     settings_begin_snowboard_mutation(YES);
     @try {
         NSDictionary<NSString *, id> *result = nil;
-        if ([action.operation isEqualToString:CNDQueuedActionOperationApplyTheme]) {
+        BOOL applyingTheme = [action.operation isEqualToString:
+            CNDQueuedActionOperationApplyTheme];
+        BOOL restoringTheme = [action.operation isEqualToString:
+            CNDQueuedActionOperationRestoreTheme];
+        if (applyingTheme) {
             NSString *queuedTheme =
                 action.parameters[CNDQueuedActionParameterThemeIdentifier];
             NSString *selectedTheme = [[NSUserDefaults standardUserDefaults]
@@ -1271,14 +1483,43 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
                 return NO;
             }
             result = settings_apply_snowboard_remix();
-        } else if ([action.operation isEqualToString:
-                       CNDQueuedActionOperationRestoreTheme]) {
+        } else if (restoringTheme) {
             result = settings_restore_all_snowboard_remix();
         }
         BOOL ok = [result[@"ok"] boolValue];
+        if (ok && applyingTheme &&
+            [NSUserDefaults.standardUserDefaults boolForKey:
+                kSettingsSnowBoardRemixInstallConsumerMappings]) {
+            NSDictionary<NSString *, id> *iconFixes =
+                [CNDSnowBoardRemix applyIconFixes];
+            ok = [iconFixes[@"ok"] boolValue];
+            log_user("[ICON_FIXES] base SnowBoard Apply result ok=%s stage=%s\n",
+                     ok ? "yes" : "no",
+                     [iconFixes[@"stage"] UTF8String] ?: "unknown");
+            if (!ok && reason) {
+                *reason = [iconFixes[@"message"] isKindOfClass:NSString.class]
+                    ? iconFixes[@"message"]
+                    : @"Icon Fixes did not complete after the persistent SnowBoard theme was applied.";
+            }
+        }
+        if (ok && restoringTheme) {
+            NSDictionary<NSString *, id> *iconFixes =
+                [CNDSnowBoardRemix restoreIconFixes];
+            ok = [iconFixes[@"ok"] boolValue];
+            log_user("[ICON_FIXES] base SnowBoard Restore All result ok=%s stage=%s\n",
+                     ok ? "yes" : "no",
+                     [iconFixes[@"stage"] UTF8String] ?: "unknown");
+            if (!ok && reason) {
+                *reason = [iconFixes[@"message"] isKindOfClass:NSString.class]
+                    ? iconFixes[@"message"]
+                    : @"Restore All could not return every Icon Fix to its original dispatch state.";
+            }
+        }
         if (!ok && reason) {
-            *reason = [result[@"message"] isKindOfClass:NSString.class]
-                ? result[@"message"] : @"SnowBoard Remix did not complete.";
+            if (!*reason) {
+                *reason = [result[@"message"] isKindOfClass:NSString.class]
+                    ? result[@"message"] : @"SnowBoard Remix did not complete.";
+            }
         }
         if (result) settings_invalidate_snowboard_remix_status_cache();
         return ok;
@@ -1349,167 +1590,173 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
             self.transaction.actions, CNDQueuedActionPhaseBeforeRespring,
             transactionRequiresRespring);
     }
-    for (CNDQueuedAction *action in actions) {
-        if ([action.kind isEqualToString:CNDQueuedActionKindPackage]) {
-            Package *package = [self packageForQueuedAction:action];
-            if (!package) {
+    log_session_begin();
+    @try {
+        for (CNDQueuedAction *action in actions) {
+            if ([action.kind isEqualToString:CNDQueuedActionKindPackage]) {
+                Package *package = [self packageForQueuedAction:action];
+                if (!package) {
+                    [self finishCoordinatorWithFailure:
+                        @"A queued package no longer matches the installed catalog."];
+                    return;
+                }
+                if (package.kind == PackageInstallKindToggle) {
+                    NSMutableArray<NSString *> *toggleIdentifiers =
+                        [NSMutableArray array];
+                    for (CNDQueuedAction *candidate in actions) {
+                        if (![candidate.kind isEqualToString:
+                                CNDQueuedActionKindPackage] ||
+                            candidate.state == CNDQueuedActionStateSucceeded) {
+                            continue;
+                        }
+                        Package *candidatePackage =
+                            [self packageForQueuedAction:candidate];
+                        if (candidatePackage.kind != PackageInstallKindToggle) {
+                            continue;
+                        }
+                        if (![self checkpointActionIdentifier:
+                                candidate.recordIdentifier
+                                                        state:CNDQueuedActionStateRunning
+                                                    lastError:nil] ||
+                            ![candidatePackage applyCommittedState:
+                                [self queuedActionRequestsInstalledState:candidate]]) {
+                            [self finishCoordinatorWithFailure:
+                                [NSString stringWithFormat:@"Could not stage %@.",
+                                    candidatePackage.name ?:
+                                        candidatePackage.identifier]];
+                            return;
+                        }
+                        [toggleIdentifiers addObject:candidate.recordIdentifier];
+                    }
+                    @synchronized (self) {
+                        self.coordinatedToggleActionIdentifiers =
+                            [toggleIdentifiers copy];
+                        self.resumeCoordinatorBeforeRespringAfterSettings = YES;
+                    }
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [self beginPendingSettingsRunForCoordinator:YES];
+                    });
+                    return;
+                }
+            }
+            if (![self checkpointActionIdentifier:action.recordIdentifier
+                                            state:CNDQueuedActionStateRunning
+                                        lastError:nil]) {
                 [self finishCoordinatorWithFailure:
-                    @"A queued package no longer matches the installed catalog."];
+                    @"A queue checkpoint could not be saved before a system edit."];
                 return;
             }
-            if (package.kind == PackageInstallKindToggle) {
-                NSMutableArray<NSString *> *toggleIdentifiers =
-                    [NSMutableArray array];
-                for (CNDQueuedAction *candidate in actions) {
-                    if (![candidate.kind isEqualToString:
-                            CNDQueuedActionKindPackage] ||
-                        candidate.state == CNDQueuedActionStateSucceeded) {
-                        continue;
-                    }
-                    Package *candidatePackage =
-                        [self packageForQueuedAction:candidate];
-                    if (candidatePackage.kind != PackageInstallKindToggle) {
-                        continue;
-                    }
-                    if (![self checkpointActionIdentifier:
-                            candidate.recordIdentifier
-                                                    state:CNDQueuedActionStateRunning
-                                                lastError:nil] ||
-                        ![candidatePackage applyCommittedState:
-                            [self queuedActionRequestsInstalledState:candidate]]) {
-                        [self finishCoordinatorWithFailure:
-                            [NSString stringWithFormat:@"Could not stage %@.",
-                                candidatePackage.name ?:
-                                    candidatePackage.identifier]];
-                        return;
-                    }
-                    [toggleIdentifiers addObject:candidate.recordIdentifier];
-                }
-                @synchronized (self) {
-                    self.coordinatedToggleActionIdentifiers =
-                        [toggleIdentifiers copy];
-                    self.resumeCoordinatorBeforeRespringAfterSettings = YES;
-                }
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [self beginPendingSettingsRunForCoordinator:YES];
-                });
+            NSString *failure = nil;
+            BOOL success = CNDQueuedActionIsPresentationFix(action)
+                ? [self executePresentationFixesAction:action reason:&failure]
+                : [self executeSynchronousQueuedAction:action reason:&failure];
+            if (![self checkpointActionIdentifier:action.recordIdentifier
+                                            state:success
+                                                ? CNDQueuedActionStateSucceeded
+                                                : CNDQueuedActionStateFailed
+                                        lastError:failure]) {
+                [self finishCoordinatorWithFailure:
+                    @"A completed pre-respring action could not be checkpointed."];
                 return;
             }
+            if (!success) {
+                [self finishCoordinatorWithFailure:failure];
+                return;
+            }
+            if ([action.kind isEqualToString:CNDQueuedActionKindPackage]) {
+                [self removePackageFromMemoryForAction:action];
+            }
         }
-        if (![self checkpointActionIdentifier:action.recordIdentifier
-                                        state:CNDQueuedActionStateRunning
-                                    lastError:nil]) {
-            [self finishCoordinatorWithFailure:
-                @"A queue checkpoint could not be saved before a system edit."];
-            return;
-        }
-        NSString *failure = nil;
-        BOOL success = CNDQueuedActionIsPresentationFix(action)
-            ? [self executePresentationFixesAction:action reason:&failure]
-            : [self executeSynchronousQueuedAction:action reason:&failure];
-        if (![self checkpointActionIdentifier:action.recordIdentifier
-                                        state:success
-                                            ? CNDQueuedActionStateSucceeded
-                                            : CNDQueuedActionStateFailed
-                                    lastError:failure]) {
-            [self finishCoordinatorWithFailure:
-                @"A completed pre-respring action could not be checkpointed."];
-            return;
-        }
-        if (!success) {
-            [self finishCoordinatorWithFailure:failure];
-            return;
-        }
-        if ([action.kind isEqualToString:CNDQueuedActionKindPackage]) {
-            [self removePackageFromMemoryForAction:action];
-        }
-    }
 
-    if (!transactionRequiresRespring) {
-        // Adaptive standalone work uses the durable coordinator but must not
-        // manufacture a process boundary when no queued change needs one.
-        [self completeCoordinator];
-        return;
-    }
+        if (!transactionRequiresRespring) {
+            // Adaptive standalone work uses the durable coordinator but must not
+            // manufacture a process boundary when no queued change needs one.
+            [self completeCoordinator];
+            return;
+        }
 
-    pid_t springBoardPID = settings_current_springboard_pid();
-    if (springBoardPID <= 1) {
-        [self finishCoordinatorWithFailure:
-            @"The pre-respring actions completed, but SpringBoard's process identity could not be recorded safely."];
-        return;
+        pid_t springBoardPID = settings_current_springboard_pid();
+        if (springBoardPID <= 1) {
+            [self finishCoordinatorWithFailure:
+                @"The pre-respring actions completed, but SpringBoard's process identity could not be recorded safely."];
+            return;
+        }
+        NSTimeInterval bootEpoch = settings_current_boot_epoch();
+        NSString *generation = [NSUUID UUID].UUIDString;
+        NSString *transactionIdentifier = nil;
+        @synchronized (self) {
+            transactionIdentifier = self.transaction.transactionIdentifier;
+        }
+        CNDQueuedTransaction *boundarySnapshot = nil;
+        NSArray<CNDQueuedAction *> *postRespringActions = nil;
+        @synchronized (self) {
+            boundarySnapshot = self.transaction;
+            postRespringActions = CNDQueuedActionsForExecutionPhase(
+                boundarySnapshot.actions, CNDQueuedActionPhaseAfterRespring, YES);
+        }
+        BOOL boundaryOnly = postRespringActions.count == 0;
+        BOOL preparedTransition = boundaryOnly
+            ? [self prepareBoundaryOnlyTransientAppliedStateForTransaction:
+                  boundarySnapshot
+                  springBoardPID:springBoardPID
+                  bootEpoch:bootEpoch
+                  generation:generation]
+            : CNDTransientAppliedStatePrepareTransition(
+                  transactionIdentifier, springBoardPID, bootEpoch);
+        if (!preparedTransition) {
+            [self finishCoordinatorWithFailure:
+                @"The transient applied-state boundary could not be saved, so Cyanide will not respring."];
+            return;
+        }
+        BOOL savedBoundary = NO;
+        @synchronized (self) {
+            CNDQueuedTransaction *previous = self.transaction;
+            self.transaction = [previous
+                transactionByUpdatingState:boundaryOnly
+                    ? CNDQueuedTransactionStateCompleted
+                    : CNDQueuedTransactionStateAwaitingRespring
+                                     actions:previous.actions
+                  preRespringSpringBoardPID:springBoardPID
+                                   bootEpoch:bootEpoch
+                     krwGenerationIdentifier:generation
+                                   lastError:nil];
+            savedBoundary = [self persistDurableTransaction];
+            if (!savedBoundary) self.transaction = previous;
+            if (savedBoundary) self.commitInFlight = NO;
+        }
+        if (!savedBoundary) {
+            CNDTransientAppliedStateCancelPreparedTransition(
+                transactionIdentifier);
+            [self finishCoordinatorWithFailure:
+                @"The restart boundary could not be saved, so Cyanide will not respring."];
+            return;
+        }
+        log_user("[QUEUE] Pre-respring phase complete; boundary sb-pid=%d boot=%.0f generation=%s.\n",
+                 springBoardPID, bootEpoch, generation.UTF8String ?: "");
+        if (boundaryOnly) {
+            log_user("[QUEUE] No post-respring actions remain; the completed transaction will not create an empty continuation.\n");
+        } else {
+            // The durable AwaitingRespring checkpoint is the sole continuation
+            // authority. Cyanide does not foreground itself after the respring and
+            // does not reopen the parked KRW generation on its own; the remaining
+            // work resumes only when the user reopens the app and continues the
+            // saved queue deliberately.
+            log_user("[QUEUE] Post-respring work remains queued; reopen Cyanide and continue the saved queue to finish it.\n");
+        }
+        [self notifyChange];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:PackageQueueReadyForRespringNotification
+                              object:self
+                            userInfo:@{
+                                @"springBoardPID": @(springBoardPID),
+                                @"transactionIdentifier":
+                                    transactionIdentifier ?: @"",
+                            }];
+        });
+    } @finally {
+        log_session_end();
     }
-    NSTimeInterval bootEpoch = settings_current_boot_epoch();
-    NSString *generation = [NSUUID UUID].UUIDString;
-    NSString *transactionIdentifier = nil;
-    @synchronized (self) {
-        transactionIdentifier = self.transaction.transactionIdentifier;
-    }
-    CNDQueuedTransaction *boundarySnapshot = nil;
-    NSArray<CNDQueuedAction *> *postRespringActions = nil;
-    @synchronized (self) {
-        boundarySnapshot = self.transaction;
-        postRespringActions = CNDQueuedActionsForExecutionPhase(
-            boundarySnapshot.actions, CNDQueuedActionPhaseAfterRespring, YES);
-    }
-    BOOL boundaryOnly = postRespringActions.count == 0;
-    BOOL preparedTransition = boundaryOnly
-        ? [self prepareBoundaryOnlyTransientAppliedStateForTransaction:
-              boundarySnapshot
-              springBoardPID:springBoardPID
-              bootEpoch:bootEpoch
-              generation:generation]
-        : CNDTransientAppliedStatePrepareTransition(
-              transactionIdentifier, springBoardPID, bootEpoch);
-    if (!preparedTransition) {
-        [self finishCoordinatorWithFailure:
-            @"The transient applied-state boundary could not be saved, so Cyanide will not respring."];
-        return;
-    }
-    BOOL savedBoundary = NO;
-    @synchronized (self) {
-        CNDQueuedTransaction *previous = self.transaction;
-        self.transaction = [previous
-            transactionByUpdatingState:boundaryOnly
-                ? CNDQueuedTransactionStateCompleted
-                : CNDQueuedTransactionStateAwaitingRespring
-                                 actions:previous.actions
-              preRespringSpringBoardPID:springBoardPID
-                               bootEpoch:bootEpoch
-                 krwGenerationIdentifier:generation
-                               lastError:nil];
-        savedBoundary = [self persistDurableTransaction];
-        if (!savedBoundary) self.transaction = previous;
-        if (savedBoundary) self.commitInFlight = NO;
-    }
-    if (!savedBoundary) {
-        CNDTransientAppliedStateCancelPreparedTransition(
-            transactionIdentifier);
-        [self finishCoordinatorWithFailure:
-            @"The restart boundary could not be saved, so Cyanide will not respring."];
-        return;
-    }
-    log_user("[QUEUE] Pre-respring phase complete; boundary sb-pid=%d boot=%.0f generation=%s.\n",
-             springBoardPID, bootEpoch, generation.UTF8String ?: "");
-    if (boundaryOnly) {
-        log_user("[QUEUE] No post-respring actions remain; the completed transaction will not create an empty continuation.\n");
-    } else {
-        // The durable AwaitingRespring checkpoint is the sole continuation
-        // authority. Arm the bounded process-lifetime/foreground bridge only
-        // after that checkpoint exists and only when real phase-two work
-        // remains; its main-queue block is enqueued before the UI notification.
-        settings_arm_queued_post_respring_foreground_handoff();
-    }
-    [self notifyChange];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [[NSNotificationCenter defaultCenter]
-            postNotificationName:PackageQueueReadyForRespringNotification
-                          object:self
-                        userInfo:@{
-                            @"springBoardPID": @(springBoardPID),
-                            @"transactionIdentifier":
-                                transactionIdentifier ?: @"",
-                        }];
-    });
 }
 
 - (BOOL)executeSpringBoardFixesAction:(CNDQueuedAction *)action
@@ -1520,7 +1767,7 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         CNDQueuedActionParameterTransparencyEnabled] boolValue];
     if (!transparency) {
         if (reason) {
-            *reason = @"Enable Transparent Icon Presentation before queuing SpringBoard Fixes.";
+            *reason = @"Enable Icon Fixes before queuing SpringBoard Fixes.";
         }
         return NO;
     }
@@ -1830,25 +2077,33 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
 {
     CNDQueuedTransaction *snapshot = nil;
     @synchronized (self) { snapshot = self.transaction; }
-    for (CNDQueuedAction *action in snapshot.actions) {
-        if (action.state != CNDQueuedActionStateSucceeded) {
-            [self finishCoordinatorWithFailure:
-                @"The queue still contains an unfinished action and was not cleared."];
-            return;
-        }
+    CNDQueuedAction *unfinished = nil;
+    (void)[self unstartedActionsInTransaction:snapshot unfinished:&unfinished];
+    if (unfinished) {
+        [self finishCoordinatorWithFailure:
+            @"The queue still contains an unfinished action and was not cleared."];
+        return;
     }
     BOOL recordedState = snapshot.preRespringSpringBoardPID > 1
         ? [self finalizeTransientAppliedStateForTransaction:snapshot]
         : [self recordOrdinaryCurrentEpochStateForTransaction:snapshot];
     if (!recordedState) {
-        [self finishCoordinatorWithFailure:
-            @"The SnowBoard/Font/SBCustomizer applied-state marker could not be finalized; the queue remains retryable."];
-        return;
+        // The in-session marker is a report, not a reason to re-queue work that
+        // already succeeded. An outstanding prepared transition refuses every
+        // later marker write, so release it here or the queue can never finish.
+        CNDTransientAppliedStateCancelPreparedTransition(
+            snapshot.transactionIdentifier);
+        log_user("[QUEUE] The applied-state marker could not be recorded; the completed actions stay succeeded and the queue was still cleared.\n");
     }
-
     BOOL finalized = NO;
+    BOOL retained = NO;
     @synchronized (self) {
+        NSMutableArray<CNDQueuedAction *> *stillPending = [NSMutableArray array];
         for (CNDQueuedAction *action in self.transaction.actions) {
+            if (action.state == CNDQueuedActionStatePending) {
+                [stillPending addObject:action];
+                continue;
+            }
             if (action.state != CNDQueuedActionStateSucceeded) {
                 self.commitInFlight = NO;
                 [self postCompletionWithSuccess:NO
@@ -1856,25 +2111,31 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
                 return;
             }
         }
-        CNDQueuedTransaction *previous = self.transaction;
-        self.transaction = [previous
-            transactionByUpdatingState:CNDQueuedTransactionStateCompleted
-                                 actions:previous.actions
-                               lastError:nil];
-        finalized = [self persistDurableTransaction];
-        if (finalized) {
-            [self.installs removeAllObjects];
-            [self.uninstalls removeAllObjects];
-            CNDQueuedTransaction *completed = self.transaction;
-            self.transaction = nil;
-            if (![self persistDurableTransaction]) {
-                self.transaction = completed;
-                finalized = NO;
-            }
-        } else {
-            self.transaction = previous;
-        }
         self.commitInFlight = NO;
+        if (stillPending.count > 0) {
+            // Queued while this pass was running, so it never ran: keep it as a
+            // fresh plan for the next pass instead of clearing it away.
+            retained = [self retainUnstartedActions:stillPending];
+        } else {
+            CNDQueuedTransaction *previous = self.transaction;
+            self.transaction = [previous
+                transactionByUpdatingState:CNDQueuedTransactionStateCompleted
+                                     actions:previous.actions
+                                   lastError:nil];
+            finalized = [self persistDurableTransaction];
+            if (finalized) {
+                [self.installs removeAllObjects];
+                [self.uninstalls removeAllObjects];
+                CNDQueuedTransaction *completed = self.transaction;
+                self.transaction = nil;
+                if (![self persistDurableTransaction]) {
+                    self.transaction = completed;
+                    finalized = NO;
+                }
+            } else {
+                self.transaction = previous;
+            }
+        }
     }
     BOOL completedSnowBoardAction = NO;
     for (CNDQueuedAction *action in snapshot.actions) {
@@ -1888,12 +2149,22 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         settings_request_snowboard_automatic_repair(
             @"queued SnowBoard transaction completed");
     }
-    [self postCompletionWithSuccess:finalized
-        message:finalized
-            ? (snapshot.preRespringSpringBoardPID > 1
-                ? @"Saved changes completed after respring."
-                : @"Saved changes completed.")
-            : @"All changes ran, but the completed queue checkpoint could not be cleared."];
+    NSString *message = nil;
+    if (retained) {
+        message = @"Changes applied. Items queued during this run are saved and apply next.";
+    } else if (!finalized) {
+        message = @"All changes ran, but the completed queue checkpoint could not be cleared.";
+    } else if (!recordedState) {
+        message = @"Changes applied, but the applied-state marker could not be recorded.";
+    } else {
+        message = snapshot.preRespringSpringBoardPID > 1
+            ? @"Saved changes completed after respring."
+            : @"Saved changes completed.";
+    }
+    // A marker that could not be recorded is reported as a failure even though
+    // the queue itself reached its terminal, non-retryable state.
+    [self postCompletionWithSuccess:(finalized || retained) && recordedState
+                            message:message];
 }
 
 - (void)continueCoordinatorAfterRespring
@@ -1904,95 +2175,100 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
             self.transaction.actions, CNDQueuedActionPhaseAfterRespring,
             YES);
     }
-    for (CNDQueuedAction *action in actions) {
-        if (CNDQueuedActionIsPresentationFix(action)) {
-            CNDQueuedTransaction *snapshot = nil;
-            @synchronized (self) { snapshot = self.transaction; }
-            // Presentation repair is optional and independently retryable.
-            // Commit successful theme/font/layout state before running it so
-            // a later Spotlight failure cannot suppress ACTIVE.
-            if (![self finalizeTransientAppliedStateForTransaction:snapshot]) {
-                [self finishCoordinatorWithFailure:
-                    @"Completed tweak state could not be checkpointed before the optional presentation repair."];
-                return;
-            }
-        }
-        if ([action.kind isEqualToString:CNDQueuedActionKindPackage]) {
-            Package *package = [self packageForQueuedAction:action];
-            if (!package) {
-                [self finishCoordinatorWithFailure:
-                    @"A queued package no longer matches the installed catalog."];
-                return;
-            }
-            if (package.kind == PackageInstallKindToggle) {
-                NSMutableArray<NSString *> *toggleIdentifiers =
-                    [NSMutableArray array];
-                for (CNDQueuedAction *candidate in actions) {
-                    if (![candidate.kind isEqualToString:
-                            CNDQueuedActionKindPackage] ||
-                        candidate.state == CNDQueuedActionStateSucceeded) {
-                        continue;
-                    }
-                    Package *candidatePackage =
-                        [self packageForQueuedAction:candidate];
-                    if (candidatePackage.kind != PackageInstallKindToggle) {
-                        continue;
-                    }
-                    if (![self checkpointActionIdentifier:
-                            candidate.recordIdentifier
-                                                    state:CNDQueuedActionStateRunning
-                                                lastError:nil] ||
-                        ![candidatePackage applyCommittedState:
-                            [self queuedActionRequestsInstalledState:candidate]]) {
-                        [self finishCoordinatorWithFailure:
-                            [NSString stringWithFormat:@"Could not stage %@.",
-                                candidatePackage.name ?:
-                                    candidatePackage.identifier]];
-                        return;
-                    }
-                    [toggleIdentifiers addObject:candidate.recordIdentifier];
+    log_session_begin();
+    @try {
+        for (CNDQueuedAction *action in actions) {
+            if (CNDQueuedActionIsPresentationFix(action)) {
+                CNDQueuedTransaction *snapshot = nil;
+                @synchronized (self) { snapshot = self.transaction; }
+                // Presentation repair is optional and independently retryable.
+                // Commit successful theme/font/layout state before running it so
+                // a later Spotlight failure cannot suppress ACTIVE.
+                if (![self finalizeTransientAppliedStateForTransaction:snapshot]) {
+                    [self finishCoordinatorWithFailure:
+                        @"Completed tweak state could not be checkpointed before the optional presentation repair."];
+                    return;
                 }
-                @synchronized (self) {
-                    self.coordinatedToggleActionIdentifiers =
-                        [toggleIdentifiers copy];
-                    self.resumeCoordinatorBeforeRespringAfterSettings = NO;
-                }
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [self beginPendingSettingsRunForCoordinator:YES];
-                });
-                return;
             }
-        }
+            if ([action.kind isEqualToString:CNDQueuedActionKindPackage]) {
+                Package *package = [self packageForQueuedAction:action];
+                if (!package) {
+                    [self finishCoordinatorWithFailure:
+                        @"A queued package no longer matches the installed catalog."];
+                    return;
+                }
+                if (package.kind == PackageInstallKindToggle) {
+                    NSMutableArray<NSString *> *toggleIdentifiers =
+                        [NSMutableArray array];
+                    for (CNDQueuedAction *candidate in actions) {
+                        if (![candidate.kind isEqualToString:
+                                CNDQueuedActionKindPackage] ||
+                            candidate.state == CNDQueuedActionStateSucceeded) {
+                            continue;
+                        }
+                        Package *candidatePackage =
+                            [self packageForQueuedAction:candidate];
+                        if (candidatePackage.kind != PackageInstallKindToggle) {
+                            continue;
+                        }
+                        if (![self checkpointActionIdentifier:
+                                candidate.recordIdentifier
+                                                        state:CNDQueuedActionStateRunning
+                                                    lastError:nil] ||
+                            ![candidatePackage applyCommittedState:
+                                [self queuedActionRequestsInstalledState:candidate]]) {
+                            [self finishCoordinatorWithFailure:
+                                [NSString stringWithFormat:@"Could not stage %@.",
+                                    candidatePackage.name ?:
+                                        candidatePackage.identifier]];
+                            return;
+                        }
+                        [toggleIdentifiers addObject:candidate.recordIdentifier];
+                    }
+                    @synchronized (self) {
+                        self.coordinatedToggleActionIdentifiers =
+                            [toggleIdentifiers copy];
+                        self.resumeCoordinatorBeforeRespringAfterSettings = NO;
+                    }
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [self beginPendingSettingsRunForCoordinator:YES];
+                    });
+                    return;
+                }
+            }
 
-        if (![self checkpointActionIdentifier:action.recordIdentifier
-                                        state:CNDQueuedActionStateRunning
-                                    lastError:nil]) {
-            [self finishCoordinatorWithFailure:
-                @"A post-respring checkpoint could not be saved before execution."];
-            return;
+            if (![self checkpointActionIdentifier:action.recordIdentifier
+                                            state:CNDQueuedActionStateRunning
+                                        lastError:nil]) {
+                [self finishCoordinatorWithFailure:
+                    @"A post-respring checkpoint could not be saved before execution."];
+                return;
+            }
+            NSString *failure = nil;
+            BOOL success = CNDQueuedActionIsPresentationFix(action)
+                ? [self executePresentationFixesAction:action reason:&failure]
+                : [self executeSynchronousQueuedAction:action reason:&failure];
+            if (![self checkpointActionIdentifier:action.recordIdentifier
+                                            state:success
+                                                ? CNDQueuedActionStateSucceeded
+                                                : CNDQueuedActionStateFailed
+                                        lastError:failure]) {
+                [self finishCoordinatorWithFailure:
+                    @"A completed post-respring action could not be checkpointed."];
+                return;
+            }
+            if (!success) {
+                [self finishCoordinatorWithFailure:failure];
+                return;
+            }
+            if ([action.kind isEqualToString:CNDQueuedActionKindPackage]) {
+                [self removePackageFromMemoryForAction:action];
+            }
         }
-        NSString *failure = nil;
-        BOOL success = CNDQueuedActionIsPresentationFix(action)
-            ? [self executePresentationFixesAction:action reason:&failure]
-            : [self executeSynchronousQueuedAction:action reason:&failure];
-        if (![self checkpointActionIdentifier:action.recordIdentifier
-                                        state:success
-                                            ? CNDQueuedActionStateSucceeded
-                                            : CNDQueuedActionStateFailed
-                                    lastError:failure]) {
-            [self finishCoordinatorWithFailure:
-                @"A completed post-respring action could not be checkpointed."];
-            return;
-        }
-        if (!success) {
-            [self finishCoordinatorWithFailure:failure];
-            return;
-        }
-        if ([action.kind isEqualToString:CNDQueuedActionKindPackage]) {
-            [self removePackageFromMemoryForAction:action];
-        }
+        [self completeCoordinator];
+    } @finally {
+        log_session_end();
     }
-    [self completeCoordinator];
 }
 
 - (void)resumeCoordinatorAfterVerifiedRespring
@@ -2302,9 +2578,16 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
         CNDQueuedTransaction *snapshot = nil;
         @synchronized (self) { snapshot = self.transaction; }
         if (![self recordOrdinaryCurrentEpochStateForTransaction:snapshot]) {
-            [self finishWithFailure:
-                @"SBCustomizer completed, but its current SpringBoard state could not be recorded."
-                 postCompletion:YES];
+            // The SBCustomizer action already applied. Re-queueing it because a
+            // process-local marker could not be written is what leaves a
+            // successful apply stuck in the queue forever, so the queue still
+            // clears and the marker is reported instead.
+            CNDTransientAppliedStateCancelPreparedTransition(
+                snapshot.transactionIdentifier);
+            log_user("[QUEUE] SBCustomizer's current SpringBoard state could not be recorded; the completed actions stay succeeded and the queue was still cleared.\n");
+            [self finishSuccessfullyPostingCompletion:NO];
+            [self postCompletionWithSuccess:NO
+                message:@"SBCustomizer applied, but its current SpringBoard state could not be recorded. Nothing was re-queued."];
         } else {
             [self finishSuccessfullyPostingCompletion:YES];
         }
@@ -2344,37 +2627,54 @@ static void CNDPackageQueueRunOnMainThreadSynchronously(
 - (void)finishSuccessfullyPostingCompletion:(BOOL)postCompletion
 {
     BOOL finalized = NO;
+    BOOL retained = NO;
     @synchronized (self) {
         NSMutableArray<CNDQueuedAction *> *actions =
             [NSMutableArray arrayWithCapacity:self.transaction.actions.count];
+        NSMutableArray<CNDQueuedAction *> *stillPending = [NSMutableArray array];
         for (CNDQueuedAction *action in self.transaction.actions) {
+            if (action.state == CNDQueuedActionStatePending) {
+                // Queued while this pass was running, so it never ran: it must
+                // stay durable for the next pass.
+                [stillPending addObject:action];
+                continue;
+            }
             [actions addObject:action.state == CNDQueuedActionStateSucceeded
                 ? action
                 : [action actionByUpdatingState:CNDQueuedActionStateSucceeded
                                       lastError:nil]];
-        }
-        self.transaction = [self.transaction
-            transactionByUpdatingState:CNDQueuedTransactionStateCompleted
-                                 actions:actions
-                               lastError:nil];
-        finalized = [self persistDurableTransaction];
-        if (finalized) {
-            [self.installs removeAllObjects];
-            [self.uninstalls removeAllObjects];
-            CNDQueuedTransaction *completed = self.transaction;
-            self.transaction = nil;
-            if (![self persistDurableTransaction]) {
-                self.transaction = completed;
-            }
         }
         self.waitingForSettingsCompletion = NO;
         self.waitingForCoordinatedSettingsCompletion = NO;
         self.resumeCoordinatorBeforeRespringAfterSettings = NO;
         self.settingsCompletionToken = nil;
         self.commitInFlight = NO;
+        if (stillPending.count > 0) {
+            retained = [self retainUnstartedActions:stillPending];
+        } else {
+            self.transaction = [self.transaction
+                transactionByUpdatingState:CNDQueuedTransactionStateCompleted
+                                     actions:actions
+                                   lastError:nil];
+            finalized = [self persistDurableTransaction];
+            if (finalized) {
+                [self.installs removeAllObjects];
+                [self.uninstalls removeAllObjects];
+                CNDQueuedTransaction *completed = self.transaction;
+                self.transaction = nil;
+                if (![self persistDurableTransaction]) {
+                    self.transaction = completed;
+                }
+            }
+        }
     }
     [self notifyChange];
     if (postCompletion) {
+        if (retained) {
+            [self postCompletionWithSuccess:YES
+                message:@"Changes applied. Items queued during this run are saved and apply next."];
+            return;
+        }
         [self postCompletionWithSuccess:finalized
             message:finalized ? @"Queued changes completed."
                               : @"Changes ran, but the completed queue checkpoint could not be saved."];

@@ -5,9 +5,9 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide" / "CNDHailMarySpecialIconClassRedirect.m"
+SOURCE = ROOT / "Cyanide" / "probes" / "CNDHailMarySpecialIconClassRedirect.m"
 HEADER = (
-    ROOT / "Cyanide" /
+    ROOT / "Cyanide" / "probes" /
     "CNDHailMarySpecialIconClassDispatchRedirect.h"
 )
 SETTINGS = ROOT / "Cyanide" / "SettingsViewController.m"
@@ -155,7 +155,7 @@ class HailMarySpecialIconClassDispatchRedirectTests(unittest.TestCase):
             self.dispatch_source,
         )
 
-    def test_public_api_and_ui_are_wired(self):
+    def test_public_api_is_retained_while_old_root_rows_stay_hidden(self):
         for token in (
             "CNDHailMarySpecialIconClassDispatchPermissionRun",
             "CNDHailMarySpecialIconClassDispatchRedirectRun",
@@ -166,9 +166,14 @@ class HailMarySpecialIconClassDispatchRedirectTests(unittest.TestCase):
         ):
             self.assertIn(token, self.header, token)
         self.assertIn(
-            "case RootSectionProbes:         return 17;",
+            "case RootSectionProbes:         return 7;",
             self.settings,
         )
+        self.assertIn(
+            "static const NSInteger rows[] = {17, 18, 28, 29, 30, 31, 32};",
+            self.settings,
+        )
+        self.assertIn("settings_root_probe_underlying_row", self.settings)
         for title in (
             "Run Per-Boot Static-Icon Dispatch Probe",
             "Apply Per-Boot Static Clock + Calendar",

@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide/CNDPhysicalIOUserEthernetSignerProbe.m"
+SOURCE = ROOT / "Cyanide/probes/CNDPhysicalIOUserEthernetSignerProbe.m"
 APP_DELEGATE = ROOT / "Cyanide/AppDelegate.m"
 SETTINGS = ROOT / "Cyanide/SettingsViewController.m"
 
@@ -45,7 +45,7 @@ class PhysicalIOUserEthernetSignerProbeTests(unittest.TestCase):
 
     def test_settings_exposes_the_probe_row(self) -> None:
         settings = SETTINGS.read_text()
-        self.assertIn('"CNDPhysicalIOUserEthernetSignerProbe.h"', settings)
+        self.assertIn('"probes/CNDPhysicalIOUserEthernetSignerProbe.h"', settings)
         self.assertIn(
             "CNDPhysicalIOUserEthernetSignerProbeIsSupported(&reason)", settings
         )

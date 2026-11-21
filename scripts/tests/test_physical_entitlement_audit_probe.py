@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the in-app read-only entitlement audit probe.
 
-The probe (Cyanide/CNDPhysicalEntitlementAuditProbe.{h,m}) exists to answer one
+The probe (Cyanide/probes/CNDPhysicalEntitlementAuditProbe.{h,m}) exists to answer one
 question the kernelcache cannot: whether the IOUserEthernet donor actually
 carries `com.apple.networking.ethernet.user-access`, which is code-signature
 data in userspace.  It is the read-only counterpart to the kcall1 / signer
@@ -25,8 +25,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-SOURCE = ROOT / "Cyanide/CNDPhysicalEntitlementAuditProbe.m"
-HEADER = ROOT / "Cyanide/CNDPhysicalEntitlementAuditProbe.h"
+SOURCE = ROOT / "Cyanide/probes/CNDPhysicalEntitlementAuditProbe.m"
+HEADER = ROOT / "Cyanide/probes/CNDPhysicalEntitlementAuditProbe.h"
 APP_DELEGATE = ROOT / "Cyanide/AppDelegate.m"
 SETTINGS = ROOT / "Cyanide/SettingsViewController.m"
 
@@ -309,7 +309,7 @@ class EntitlementAuditProbeTests(unittest.TestCase):
         source = APP_DELEGATE.read_text()
         self.assertIn('--entitlement-audit-probe', source)
         self.assertIn("CNDPhysicalEntitlementAuditProbeRun", source)
-        self.assertIn('"CNDPhysicalEntitlementAuditProbe.h"', source)
+        self.assertIn('"probes/CNDPhysicalEntitlementAuditProbe.h"', source)
 
     def test_settings_exposes_the_audit_row_in_the_probes_section(self) -> None:
         settings = SETTINGS.read_text()

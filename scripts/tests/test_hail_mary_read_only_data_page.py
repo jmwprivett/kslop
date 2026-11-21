@@ -4,8 +4,8 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide" / "CNDHailMaryReadOnlyDataPage.m"
-HEADER = ROOT / "Cyanide" / "CNDHailMaryReadOnlyDataPage.h"
+SOURCE = ROOT / "Cyanide" / "probes" / "CNDHailMaryReadOnlyDataPage.m"
+HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryReadOnlyDataPage.h"
 SETTINGS = ROOT / "Cyanide" / "SettingsViewController.m"
 SETTINGS_HEADER = ROOT / "Cyanide" / "SettingsViewController.h"
 
@@ -117,7 +117,7 @@ class HailMaryReadOnlyDataPageTests(unittest.TestCase):
         header = SETTINGS_HEADER.read_text()
         for token in (
             'case RootSectionActions:        return 6;',
-            '#import "CNDHailMaryReadOnlyDataPage.h"',
+            '#import "probes/CNDHailMaryReadOnlyDataPage.h"',
             'Hail Mary .34 RO-Data Write Probe',
             'settings_run_hail_mary_read_only_data_page_action',
             'CNDHailMaryReadOnlyDataPageIsRunning()',

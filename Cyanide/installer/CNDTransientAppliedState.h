@@ -11,9 +11,16 @@ FOUNDATION_EXPORT NSString * const CNDTransientAppliedStateSpotlightFixes;
 
 /// Returns the disk-cached state for the current boot so it survives an
 /// ordinary Cyanide exit. This UI query never performs KRW work. A full boot
-/// mismatch is rejected immediately; exact SpringBoard identity is reconciled
-/// separately whenever KRW is successfully established.
+/// mismatch is rejected immediately. SBCustomizer additionally requires its
+/// recorded SpringBoard PID to still exist because its mutation cannot survive
+/// a SpringBoard restart.
 FOUNDATION_EXPORT BOOL CNDTransientAppliedStateIsActive(NSString *stateKey);
+
+/// Clears every SpringBoard/Spotlight-process-local marker after the Darwin
+/// SpringBoard-startup notification proves that the host process restarted.
+/// Persistent SnowBoard/Font state and any coordinator transition are retained.
+FOUNDATION_EXPORT BOOL
+CNDTransientAppliedStateInvalidateProcessLocalStatesForSpringBoardRestart(void);
 
 /// Records a one-shot tweak against the currently verified SpringBoard when
 /// no coordinator-owned respring is involved. Existing current-epoch state is

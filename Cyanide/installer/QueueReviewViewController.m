@@ -50,6 +50,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
     self.emptyLabel.textColor = UIColor.tertiaryLabelColor;
     self.emptyLabel.textAlignment = NSTextAlignmentCenter;
     self.emptyLabel.numberOfLines = 0;
+    self.emptyLabel.accessibilityIdentifier = @"queue.empty";
     [self.view addSubview:self.emptyLabel];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -102,6 +103,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
         [self didTapConfirm];
     }]];
     self.confirmButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.confirmButton.accessibilityIdentifier = @"queue.confirm";
     [container addSubview:self.confirmButton];
 
     UIButtonConfiguration *clearCfg = [UIButtonConfiguration plainButtonConfiguration];
@@ -116,6 +118,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
         [self didTapClear];
     }]];
     self.clearButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.clearButton.accessibilityIdentifier = @"queue.clear";
     [container addSubview:self.clearButton];
 
     [NSLayoutConstraint activateConstraints:@[
@@ -134,41 +137,25 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 - (void)refreshUI
 {
     [self.tableView reloadData];
-    NSInteger count = [PackageQueue sharedQueue].pendingCount;
-    self.emptyLabel.hidden = (count > 0);
-    self.tableView.hidden = (count == 0);
-    self.confirmButton.enabled = (count > 0);
-    CNDQueuedTransaction *transaction =
-        [PackageQueue sharedQueue].durableTransaction;
-    self.clearButton.enabled = [PackageQueue sharedQueue].canClear;
+    CNDQueueExecutionSnapshot *snapshot =
+        [PackageQueue sharedQueue].executionSnapshot;
+    self.emptyLabel.hidden = (snapshot.legacyPendingCount > 0);
+    self.tableView.hidden = (snapshot.legacyPendingCount == 0);
+    self.emptyLabel.text = [NSString stringWithFormat:@"%@\n%@",
+        snapshot.title, snapshot.detail];
+    self.confirmButton.enabled = snapshot.canCommit;
+    self.clearButton.enabled = snapshot.canClear;
 
-    NSString *confirmTitle;
-    if (transaction.preRespringSpringBoardPID > 1) {
-        confirmTitle = @"Continue After Respring";
-    } else if (count == 1) {
-        confirmTitle = @"Confirm 1 Change";
-    } else if (count > 1) {
-        confirmTitle = [NSString stringWithFormat:@"Confirm %ld Changes", (long)count];
-    } else {
-        confirmTitle = @"Confirm";
-    }
     UIButtonConfiguration *cfg = self.confirmButton.configuration;
-    cfg.title = confirmTitle;
+    cfg.title = snapshot.commitTitle;
     self.confirmButton.configuration = cfg;
+    self.confirmButton.accessibilityHint = snapshot.recoveryGuidance;
+    self.view.accessibilityLabel = snapshot.accessibilitySummary;
 }
 
 - (BOOL)queueRequiresRespring
 {
-    CNDQueuedTransaction *transaction =
-        [PackageQueue sharedQueue].durableTransaction;
-    if (!transaction) return NO;
-    if (transaction.preRespringSpringBoardPID > 1 ||
-        transaction.state == CNDQueuedTransactionStateAwaitingRespring ||
-        CNDQueuedActionsRequireRespring(transaction.actions)) return YES;
-    for (CNDQueuedAction *action in transaction.actions) {
-        if (action.phase != CNDQueuedActionPhaseAutomatic) return YES;
-    }
-    return NO;
+    return [PackageQueue sharedQueue].executionSnapshot.requiresRespring;
 }
 
 - (void)queueChanged:(NSNotification *)note
@@ -479,10 +466,7 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView
     trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath
 {
-    CNDQueuedTransaction *transaction =
-        [PackageQueue sharedQueue].durableTransaction;
-    if (transaction &&
-        transaction.state != CNDQueuedTransactionStateCollecting) return nil;
+    if (![PackageQueue sharedQueue].executionSnapshot.canEdit) return nil;
     // Swipe-to-remove only applies to the pending queue rows. "Will Re-Apply"
     // is informational — to drop one, the user uninstalls it from the
     // Installer tab or runs Reset All Packages.
@@ -525,26 +509,36 @@ typedef NS_ENUM(NSInteger, QueueReviewSection) {
 
 - (void)didTapConfirm
 {
-    if ([PackageQueue sharedQueue].pendingCount == 0) return;
-    NSInteger count = [PackageQueue sharedQueue].pendingCount;
+    CNDQueueExecutionSnapshot *snapshot =
+        [PackageQueue sharedQueue].executionSnapshot;
+    if (!snapshot.canCommit) return;
+    NSInteger count = snapshot.legacyPendingCount;
 
     InstallProgressViewController *vc = [[InstallProgressViewController alloc] init];
     vc.expectsPackageQueueCompletion = YES;
+    if (snapshot.primaryAction == CNDQueuePrimaryActionRespring) {
+        // An already-checkpointed boundary belongs to the existing Activity
+        // countdown, not to a second commit that would only report that
+        // SpringBoard has not restarted yet.
+        [vc beginSavedQueueRespringCountdown];
+    }
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
     nav.modalPresentationStyle = UIModalPresentationAutomatic;
     [self presentViewController:nav animated:YES completion:^{
         log_user("[INSTALLER] ── Applying %ld pending change(s) ──\n", (long)count);
-        [[PackageQueue sharedQueue] commit];
+        CNDQueueExecutionSnapshot *current =
+            [PackageQueue sharedQueue].executionSnapshot;
+        if (current.primaryAction != CNDQueuePrimaryActionRespring) {
+            [[PackageQueue sharedQueue] commit];
+        }
     }];
 }
 
 - (void)didTapClear
 {
-    if ([PackageQueue sharedQueue].pendingCount == 0) return;
-    CNDQueuedTransaction *transaction =
-        [PackageQueue sharedQueue].durableTransaction;
-    BOOL executionStarted = transaction &&
-        transaction.state != CNDQueuedTransactionStateCollecting;
+    if (![PackageQueue sharedQueue].executionSnapshot.canClear) return;
+    BOOL executionStarted =
+        [PackageQueue sharedQueue].executionSnapshot.executionStarted;
     NSString *message = executionStarted
         ? @"Discard the remaining saved plan? Changes that already completed will not be undone."
         : @"Discard all pending package and system changes.";

@@ -123,7 +123,7 @@ the two fault classes are exactly the ones the walk can produce.
 
 What is not: that the *audit* was the running probe. `CNDPhysicalEntitlementAuditRunOnce`
 persists `CNDPhysicalEntitlementAuditProbe.json` as its **first** action
-(`Cyanide/CNDPhysicalEntitlementAuditProbe.m:484`), so a faulting audit run
+(`Cyanide/probes/CNDPhysicalEntitlementAuditProbe.m:484`), so a faulting audit run
 should have re-stamped that file at its own start time. The pulled file is an
 earlier run (`state: starting`, candidates at `nodes 234 / reads 29952`), and its
 mtime predates both panics. Either the faulting runs were a different Cyanide
@@ -164,7 +164,7 @@ panics are consistent with it.
 
 ## Status update (2026-10-18, later the same day)
 
-- **The walk is gone in code.** `Cyanide/CNDPhysicalEntitlementAuditProbe.m` now
+- **The walk is gone in code.** `Cyanide/probes/CNDPhysicalEntitlementAuditProbe.m` now
   does the typed, windowless read described in
   `docs/research/entitlement-audit-typed-read-design-20261018.md`; the 0x400/0x80
   window reads, the depth cap, the visited set and the recursion no longer exist

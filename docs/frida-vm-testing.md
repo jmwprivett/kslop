@@ -131,7 +131,7 @@ before and after snapshots. These probes do not pass through the read-only
 relay, and the evidence says so explicitly.
 
 ```sh
-# Verified safe-return-stub VM kcall. No kernel write.
+# VM-only probe test: safe-return stub. No kernel write, no general kcall.
 build/frida-vm/venv/bin/python \
   scripts/lab/cnd_frida_krw_bridge.py kcall-smoke \
   --host 192.168.64.116 --confirm-vm-boundary 23A341 \
@@ -160,7 +160,7 @@ Live `23A341` results on October 14, 2026:
 | Evidence | Result | Important boundary |
 | --- | --- | --- |
 | `frida-krw-bridge-23A341.json` | SpringBoard PID 39 checkpoint plus exact KRW identity proved | Read-only negative control; 0 changed header bytes |
-| `frida-krw-kcall-23A341.json` | Safe stub at `0xfffffe00454c4e24` returned normally | VM kcall proved; no kernel write |
+| `frida-krw-kcall-23A341.json` | Safe stub at `0xfffffe00454c4e24` returned normally | VM-only probe test; no kernel write; not a kernel-call capability |
 | `frida-krw-pac-signer-23A341.json` | Signer hash was deterministic and bound to state address and control tuple | Signer invoked; validator was **not** invoked; temporary scratch writes only |
 | `frida-krw-validator-resume-23A341.json` | Exact converter call site, validator entry, and return carried one saved state/JOP hash; child resumed with marked x16 | VM-proved consumption path; read-only KRW, no kcall or kernel write |
 

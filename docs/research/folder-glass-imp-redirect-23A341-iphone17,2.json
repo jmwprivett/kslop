@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Offline derivation of the folder-icon glass Boolean dispatch redirect; no writer included",
+  "runtimeVerified": false,
+  "appearanceVerified": false,
+  "os": {
+    "productVersion": "26.0",
+    "productBuildVersion": "23A341",
+    "productType": "iPhone17,2",
+    "architecture": "arm64e",
+    "identitySource": "local IPSW; device not queried"
+  },
+  "cache": {
+    "mainUUID": "DC5F2F67-1FC8-3905-873B-35D17D1A44E8",
+    "readOnlySubcache": {
+      "fileName": "dyld_shared_cache_arm64e.34.dyldreadonly",
+      "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58",
+      "mapping": "__LINKEDIT",
+      "initProt": 1,
+      "maxProt": 1
+    },
+    "implementationSubcache": {
+      "fileName": "dyld_shared_cache_arm64e.19",
+      "uuid": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+      "mapping": "signed executable code"
+    }
+  },
+  "encoding": {
+    "kind": "preopt_cache_entry_t packed 26-bit selector offset plus signed 38-bit class-relative IMP",
+    "semanticWriteWidth": 4,
+    "guardByteLength": 32,
+    "lowWordOnly": true,
+    "storesPointerOrPAC": false
+  },
+  "redirect": {
+    "label": "folder-icon-should-have-glass",
+    "target": {
+      "class": "SBFolderIconImageView",
+      "selector": "shouldHaveGlass",
+      "types": "B16@0:8",
+      "classUnslidVMAddress": "0x1eda00d08",
+      "preoptimizedCacheUnslidVMAddress": "0x1ffc0af00",
+      "impUnslidVMAddress": "0x1bdee7f90",
+      "implementation": "mov w0, #1; ret"
+    },
+    "replacement": {
+      "class": "SBIconImageView",
+      "selector": "shouldHaveGlass",
+      "types": "B16@0:8",
+      "impUnslidVMAddress": "0x1bdec01a0",
+      "implementation": "mov w0, #0; ret"
+    },
+    "dispatch": {
+      "entryUnslidVMAddress": "0x1ffc0b388",
+      "frameUnslidVMAddress": "0x1ffc08000",
+      "offsetWithin16KFrame": "0x3388",
+      "subcacheFileOffset": "0x78b7388",
+      "originalPackedWord": "0x11f015800bec635e",
+      "redirectedPackedWord": "0x11f015800bed02da",
+      "highWordUnchanged": true,
+      "originalGuardHex": "5e63ec0b8015f0113506ed0b00401732c4b6e90b002024323a5bec0bc0024012",
+      "originalGuardSHA256": "92419545662f74d7a2f8ecacd455cf2baa490e106f295e47933678020d932a1c",
+      "redirectedGuardHex": "da02ed0b8015f0113506ed0b00401732c4b6e90b002024323a5bec0bc0024012",
+      "redirectedGuardSHA256": "9eb0281715f3c51aa25665cede600e5040ce38a0f1cfef82c9006086dc3f96ac"
+    }
+  },
+  "behavioralRoute": {
+    "caller": "SBIconImageView applyOrRemoveGlassIfNecessary",
+    "decisionSelector": "shouldHaveGlass",
+    "trueBranch": "applyGlass",
+    "falseBranch": "sbh_removeGlass",
+    "folderTrueBranch": "sbh_applyFolderGlassWithGrouping:userInterfaceStyle:"
+  },
+  "claim": {
+    "implemented": "bounded exact-entry dispatch redirect",
+    "notYetProved": "rendered folder-icon transparency on physical device"
+  }
+}

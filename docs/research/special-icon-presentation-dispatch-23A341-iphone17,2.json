@@ -1,0 +1,461 @@
+{
+  "build": "23A341",
+  "cache": {
+    "main": {
+      "fileName": "dyld_shared_cache_arm64e",
+      "runtimeIdentity": {
+        "headerByteLength": 472,
+        "osVersion": "0x1a0000",
+        "readonlySubcacheHeaderUnslid": "0x1f8354000",
+        "readonlySubcacheIndex": 33,
+        "readonlySubcacheSuffix": ".34.dyldreadonly",
+        "readonlySubcacheVMOffset": "0x78354000",
+        "sharedRegionBaseUnslid": "0x180000000",
+        "subcacheArrayOffset": "0x41818",
+        "subcacheEntryCount": 77,
+        "subcacheEntrySize": 56,
+        "uuidOffset": "0x58"
+      },
+      "uuid": "DC5F2F67-1FC8-3905-873B-35D17D1A44E8"
+    },
+    "readonlySubcache": {
+      "fileName": "dyld_shared_cache_arm64e.34.dyldreadonly",
+      "sha256": "932d004fd1b7c92aaeb4d9d4fc32188b0df17eadb8155888180ba84e088b87b2",
+      "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58"
+    },
+    "relativeMethodSelectorBaseUnslid": "0x1fac21900",
+    "textSubcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033"
+  },
+  "calendar": {
+    "basis": "The rejected two-factory route reached SBLeafIcon without an application bundle identifier because Calendar overrides applicationBundleIdentifierForImage to return nil. The new transaction first restores SBLeafIcon's inherited bundle-ID lookup, then redirects both factories to the exact methods inherited by ordinary SBHApplicationIcon.",
+    "confidence": "low-until-appearance-tested",
+    "negativeEvidence": {
+      "differenceFromNewCandidate": "The new static candidate uses SBLeafIcon's direct IconServices layer factory instead of SBIcon's image-backed layer factory.",
+      "imageRedirect": {
+        "replacement": {
+          "abiExact": true,
+          "appleSharedCacheCode": true,
+          "class": "SBLeafIcon",
+          "entryUnslid": "0x1be2095c4",
+          "fileOffset": "0x43fc0d8",
+          "first16BytesHex": "7f2303d5ff4302d1eb2b016de923026d",
+          "impUnslid": "0x1be0540d8",
+          "selector": "makeIconImageWithInfo:traitCollection:context:options:",
+          "selectorOffset": "0xa41180",
+          "subcache": "dyld_shared_cache_arm64e.19",
+          "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+          "types": "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64"
+        },
+        "sameAsCandidate": "calendarImage"
+      },
+      "layerRedirect": {
+        "redirectedWord": "0x079f90800be3e8f0",
+        "replacement": {
+          "class": "SBIcon",
+          "entryUnslid": "0x1be1fe820",
+          "fileOffset": "0x44b01a8",
+          "first16BytesHex": "7f2303d5f44fbea9fd7b01a9fd430091",
+          "impUnslid": "0x1be1081a8",
+          "selector": "makeIconLayerFromImageWithInfo:traitCollection:context:options:",
+          "selectorOffset": "0x1ca7165",
+          "subcache": "dyld_shared_cache_arm64e.19",
+          "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+          "types": "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64"
+        },
+        "target": {
+          "class": "SBHCalendarApplicationIcon",
+          "classUnslid": "0x1eda02568",
+          "entryUnslid": "0x1be1e6b58",
+          "impUnslid": "0x1be044dd4",
+          "selector": "makeIconLayerWithInfo:traitCollection:context:options:",
+          "selectorOffset": "0x1e7e42",
+          "types": "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64"
+        }
+      },
+      "reason": "The earlier process-local class-wide pair bypassed the exact Calendar provider path and rendered a grey generic plate.",
+      "status": "rejected-by-retained-runtime-evidence"
+    },
+    "notProved": [
+      "that the Calendar load context is sufficient for both inherited factories",
+      "that Calendar's active data source returns its stock bundle identifier",
+      "that the result is the themed static Calendar rather than a grey plate",
+      "that Home and Spotlight exercise both redirected entries after restart"
+    ],
+    "redirects": [
+      {
+        "dispatch": {
+          "cacheHeaderUnslid": "0x1ffc18468",
+          "entryFileOffset": "0x78c4618",
+          "entryUnslid": "0x1ffc18618",
+          "fallbackClassUnslid": "0x1ffc17dd8",
+          "frameOffset": "0x618",
+          "frameUnslid": "0x1ffc18000",
+          "hash": {
+            "hasInlines": false,
+            "mask": 63,
+            "occupied": 45,
+            "shift": 7,
+            "unusedHighBit": true
+          },
+          "mapping": {
+            "initProt": 1,
+            "maxProt": 1,
+            "subcache": "dyld_shared_cache_arm64e.34.dyldreadonly",
+            "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58"
+          },
+          "original": {
+            "decodedIMPUnslid": "0x1be044d28",
+            "guardHex": "10f6e60b408a4605fa63ec0b00a0e611926be80b00c73615b56ae80b40e9ae2d",
+            "guardSHA256": "f9d88d8897b4b50e729cfccd88908de6d2c1b0a97a3811fabf101fa8993589d8",
+            "packedWord": "0x05468a400be6f610"
+          },
+          "redirected": {
+            "decodedIMPUnslid": "0x1bdebbf58",
+            "guardHex": "8419ed0b408a4605fa63ec0b00a0e611926be80b00c73615b56ae80b40e9ae2d",
+            "guardSHA256": "2eb72e7faab673214ca2e9fb3bc0cb09b270cff6bf00798d60bb10e32fa87b4b",
+            "packedWord": "0x05468a400bed1984"
+          },
+          "slot": 52,
+          "writeShape": {
+            "kind": "one 32-bit low-word store",
+            "originalLowWord": "0x0be6f610",
+            "redirectedLowWord": "0x0bed1984",
+            "upperWordPreserved": "0x05468a40"
+          }
+        },
+        "name": "calendarBundleIdentifier",
+        "replacement": {
+          "abiExact": true,
+          "appleSharedCacheCode": true,
+          "class": "SBLeafIcon",
+          "entryUnslid": "0x1be2094d4",
+          "fileOffset": "0x4263f58",
+          "first16BytesHex": "7f2303d5f44fbea9fd7b01a9fd430091",
+          "impUnslid": "0x1bdebbf58",
+          "selector": "applicationBundleIdentifierForImage",
+          "selectorOffset": "0x151a29",
+          "subcache": "dyld_shared_cache_arm64e.19",
+          "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+          "types": "@16@0:8"
+        },
+        "target": {
+          "class": "SBHCalendarApplicationIcon",
+          "classUnslid": "0x1eda02568",
+          "entryUnslid": "0x1be1e6b4c",
+          "impUnslid": "0x1be044d28",
+          "selector": "applicationBundleIdentifierForImage",
+          "selectorOffset": "0x151a29",
+          "types": "@16@0:8"
+        }
+      },
+      {
+        "dispatch": {
+          "cacheHeaderUnslid": "0x1ffc18468",
+          "entryFileOffset": "0x78c4590",
+          "entryUnslid": "0x1ffc18590",
+          "fallbackClassUnslid": "0x1ffc17dd8",
+          "frameOffset": "0x590",
+          "frameUnslid": "0x1ffc18000",
+          "hash": {
+            "hasInlines": false,
+            "mask": 63,
+            "occupied": 45,
+            "shift": 7,
+            "unusedHighBit": true
+          },
+          "mapping": {
+            "initProt": 1,
+            "maxProt": 1,
+            "subcache": "dyld_shared_cache_arm64e.34.dyldreadonly",
+            "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58"
+          },
+          "original": {
+            "decodedIMPUnslid": "0x1be044d30",
+            "guardHex": "0ef6e60b0060042900000000c0ffffff3ef6e60b00a0543a2e6ce80b00c56401",
+            "guardSHA256": "3c44c70146f2ae845fffe3b77e06fbf34557fb44f213921f933463ae95c2cbca",
+            "packedWord": "0x290460000be6f60e"
+          },
+          "redirected": {
+            "decodedIMPUnslid": "0x1be0540d8",
+            "guardHex": "24b9e60b0060042900000000c0ffffff3ef6e60b00a0543a2e6ce80b00c56401",
+            "guardSHA256": "1d175423b0d1e336b958b8967a1fbead2abd38945141c7297c7a06967da1edf2",
+            "packedWord": "0x290460000be6b924"
+          },
+          "slot": 35,
+          "writeShape": {
+            "kind": "one 32-bit low-word store",
+            "originalLowWord": "0x0be6f60e",
+            "redirectedLowWord": "0x0be6b924",
+            "upperWordPreserved": "0x29046000"
+          }
+        },
+        "name": "calendarImage",
+        "replacement": {
+          "abiExact": true,
+          "appleSharedCacheCode": true,
+          "class": "SBLeafIcon",
+          "entryUnslid": "0x1be2095c4",
+          "fileOffset": "0x43fc0d8",
+          "first16BytesHex": "7f2303d5ff4302d1eb2b016de923026d",
+          "impUnslid": "0x1be0540d8",
+          "selector": "makeIconImageWithInfo:traitCollection:context:options:",
+          "selectorOffset": "0xa41180",
+          "subcache": "dyld_shared_cache_arm64e.19",
+          "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+          "types": "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64"
+        },
+        "target": {
+          "class": "SBHCalendarApplicationIcon",
+          "classUnslid": "0x1eda02568",
+          "entryUnslid": "0x1be1e6ba0",
+          "impUnslid": "0x1be044d30",
+          "selector": "makeIconImageWithInfo:traitCollection:context:options:",
+          "selectorOffset": "0xa41180",
+          "types": "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64"
+        }
+      },
+      {
+        "dispatch": {
+          "cacheHeaderUnslid": "0x1ffc18468",
+          "entryFileOffset": "0x78c4658",
+          "entryUnslid": "0x1ffc18658",
+          "fallbackClassUnslid": "0x1ffc17dd8",
+          "frameOffset": "0x658",
+          "frameUnslid": "0x1ffc18000",
+          "hash": {
+            "hasInlines": false,
+            "mask": 63,
+            "occupied": 45,
+            "shift": 7,
+            "unusedHighBit": true
+          },
+          "mapping": {
+            "initProt": 1,
+            "maxProt": 1,
+            "subcache": "dyld_shared_cache_arm64e.34.dyldreadonly",
+            "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58"
+          },
+          "original": {
+            "decodedIMPUnslid": "0x1be044dd4",
+            "guardHex": "e5f5e60b80909f07936be80b00a06724ba6ae80b80cf0720666be80bc0e9d710",
+            "guardSHA256": "95bfe0d8d497b10d73fb1fd56ed7f3a9d3fa20fb17c0e3417963ad71bf4b1f9a",
+            "packedWord": "0x079f90800be6f5e5"
+          },
+          "redirected": {
+            "decodedIMPUnslid": "0x1be054558",
+            "guardHex": "04b8e60b80909f07936be80b00a06724ba6ae80b80cf0720666be80bc0e9d710",
+            "guardSHA256": "f42f6ac3f0bad7146a43e9dadc8a1e7e04d07568a866129bbfeb413e71e38770",
+            "packedWord": "0x079f90800be6b804"
+          },
+          "slot": 60,
+          "writeShape": {
+            "kind": "one 32-bit low-word store",
+            "originalLowWord": "0x0be6f5e5",
+            "redirectedLowWord": "0x0be6b804",
+            "upperWordPreserved": "0x079f9080"
+          }
+        },
+        "name": "calendarLayer",
+        "replacement": {
+          "abiExact": true,
+          "appleSharedCacheCode": true,
+          "class": "SBLeafIcon",
+          "entryUnslid": "0x1be2094e0",
+          "fileOffset": "0x43fc558",
+          "first16BytesHex": "7f2303d5eb2bb86de923016dfc6f02a9",
+          "impUnslid": "0x1be054558",
+          "selector": "makeIconLayerWithInfo:traitCollection:context:options:",
+          "selectorOffset": "0x1e7e42",
+          "subcache": "dyld_shared_cache_arm64e.19",
+          "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+          "types": "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64"
+        },
+        "target": {
+          "class": "SBHCalendarApplicationIcon",
+          "classUnslid": "0x1eda02568",
+          "entryUnslid": "0x1be1e6b58",
+          "impUnslid": "0x1be044dd4",
+          "selector": "makeIconLayerWithInfo:traitCollection:context:options:",
+          "selectorOffset": "0x1e7e42",
+          "types": "@72@0:8{SBIconImageInfo={CGSize=dd}dd}16@48@56Q64"
+        }
+      }
+    ],
+    "retainedTwoFactoryGreyEvidence": {
+      "artifactRetainedByThisDerivation": false,
+      "bundleIdentifierRedirectIncluded": false,
+      "claimBoundary": "This rejects only the two-factory route. It does not establish the new bundle-source candidate.",
+      "observation": "grey generic plate",
+      "route": [
+        "calendarImage",
+        "calendarLayer"
+      ],
+      "status": "rejected-by-user-observed-physical-appearance"
+    },
+    "status": "candidate-for-bounded-runtime-probe-only"
+  },
+  "classEvidence": {
+    "SBHApplicationIcon": {
+      "classROUnslid": "0x1f3fb6868",
+      "classUnslid": "0x1eda021a8",
+      "methodListHeader": {
+        "count": 35,
+        "entrySize": 12,
+        "entsizeAndFlags": "0xc000000f"
+      },
+      "methodListUnslid": "0x1be1e6550",
+      "preoptimizedCacheUnslid": "0x1ffc0f840",
+      "superclassUnslid": "0x1eda01ed8"
+    },
+    "SBHCalendarApplicationIcon": {
+      "classROUnslid": "0x1f3fbe7b8",
+      "classUnslid": "0x1eda02568",
+      "methodListHeader": {
+        "count": 10,
+        "entrySize": 12,
+        "entsizeAndFlags": "0xc000000f"
+      },
+      "methodListUnslid": "0x1be1e6b38",
+      "preoptimizedCacheUnslid": "0x1ffc18468",
+      "superclassUnslid": "0x1eda021a8"
+    },
+    "SBHClockApplicationIcon": {
+      "classROUnslid": "0x1f3f95d70",
+      "classUnslid": "0x1eda02180",
+      "methodListHeader": {
+        "count": 1,
+        "entrySize": 12,
+        "entsizeAndFlags": "0xc000000f"
+      },
+      "methodListUnslid": "0x1be1e6d70",
+      "preoptimizedCacheUnslid": "0x1ffbffff8",
+      "superclassUnslid": "0x1eda021a8"
+    },
+    "SBIcon": {
+      "classROUnslid": "0x1f3fd4628",
+      "classUnslid": "0x1eda01fc8",
+      "methodListHeader": {
+        "count": 150,
+        "entrySize": 12,
+        "entsizeAndFlags": "0xc000000f"
+      },
+      "methodListUnslid": "0x1be1fe4a0",
+      "preoptimizedCacheUnslid": "0x0",
+      "superclassUnslid": "0x1ed609a98"
+    },
+    "SBLeafIcon": {
+      "classROUnslid": "0x1f3fc0738",
+      "classUnslid": "0x1eda01ed8",
+      "methodListHeader": {
+        "count": 96,
+        "entrySize": 12,
+        "entsizeAndFlags": "0xc000000f"
+      },
+      "methodListUnslid": "0x1be2094a8",
+      "preoptimizedCacheUnslid": "0x0",
+      "superclassUnslid": "0x1eda01fc8"
+    }
+  },
+  "clock": {
+    "basis": "The ABI-identical SBIcon view-class factory was already observed to produce ordinary static Clock presentation in the process-local route; this derivation only changes where that dispatch decision is stored.",
+    "confidence": "high-static-low-runtime-until-tested",
+    "redirects": [
+      {
+        "dispatch": {
+          "cacheHeaderUnslid": "0x1ffbffff8",
+          "entryFileOffset": "0x78ac120",
+          "entryUnslid": "0x1ffc00120",
+          "fallbackClassUnslid": "0x1ffbffd50",
+          "frameOffset": "0x120",
+          "frameUnslid": "0x1ffc00000",
+          "hash": {
+            "hasInlines": false,
+            "mask": 63,
+            "occupied": 36,
+            "shift": 7,
+            "unusedHighBit": true
+          },
+          "mapping": {
+            "initProt": 1,
+            "maxProt": 1,
+            "subcache": "dyld_shared_cache_arm64e.34.dyldreadonly",
+            "uuid": "CEEB0D68-9BA9-3CC8-AEB1-8F23BAC92B58"
+          },
+          "original": {
+            "decodedIMPUnslid": "0x1bdf15698",
+            "guardHex": "bab2eb0b0060043900000000c0ffffff00000000c0ffffff346be80b00c56401",
+            "guardSHA256": "3a948236ccbdb1dc82f1aba8542e212d8c0019f5a50412a6555487bdcccad22a",
+            "packedWord": "0x390460000bebb2ba"
+          },
+          "redirected": {
+            "decodedIMPUnslid": "0x1be088c18",
+            "guardHex": "5ae5e50b0060043900000000c0ffffff00000000c0ffffff346be80b00c56401",
+            "guardSHA256": "74180a54852793bcf60119cc50c55a7352569f1d154df9e220eceab697fc9b5a",
+            "packedWord": "0x390460000be5e55a"
+          },
+          "slot": 35,
+          "writeShape": {
+            "kind": "one 32-bit low-word store",
+            "originalLowWord": "0x0bebb2ba",
+            "redirectedLowWord": "0x0be5e55a",
+            "upperWordPreserved": "0x39046000"
+          }
+        },
+        "name": "clockViewClass",
+        "replacement": {
+          "abiExact": true,
+          "appleSharedCacheCode": true,
+          "class": "SBIcon",
+          "entryUnslid": "0x1be1fe760",
+          "fileOffset": "0x4430c18",
+          "first16BytesHex": "880f159000f945f92cbe9614880f1590",
+          "impUnslid": "0x1be088c18",
+          "selector": "iconImageViewClassForLocation:",
+          "selectorOffset": "0xe41180",
+          "subcache": "dyld_shared_cache_arm64e.19",
+          "subcacheUUID": "E5139123-79ED-3CC2-8E2F-40C980D82033",
+          "types": "#24@0:8@16"
+        },
+        "target": {
+          "class": "SBHClockApplicationIcon",
+          "classUnslid": "0x1eda02180",
+          "entryUnslid": "0x1be1e6d78",
+          "impUnslid": "0x1bdf15698",
+          "selector": "iconImageViewClassForLocation:",
+          "selectorOffset": "0xe41180",
+          "types": "#24@0:8@16"
+        }
+      }
+    ],
+    "status": "static-candidate"
+  },
+  "evidenceClass": "static-derived",
+  "kind": "static-special-icon-presentation-dispatch-derivation",
+  "nextRuntimeGate": "Run identical-bytes-only aperture probes for both exact frames, then test Clock alone before a separately reversible three-entry Calendar appearance trial.",
+  "ordinaryApplicationIconEvidence": {
+    "class": "SBHApplicationIcon",
+    "directImageFactoryOverride": false,
+    "directLayerFactoryOverride": false,
+    "meaning": "The ordinary application-icon route inherits the two SBLeafIcon factories used by the Calendar candidate.",
+    "superclass": "SBLeafIcon"
+  },
+  "product": "iPhone17,2",
+  "runtimeBoundary": {
+    "canonicalObjectMigrationRequiredByDesign": false,
+    "deviceOperationPerformed": false,
+    "homeVisibilityPreconditionByDesign": false,
+    "perBootNotRebootPersistent": true,
+    "processInjectionRequiredByDesign": false,
+    "processRestartAfterApplyRequired": true,
+    "reason": "The entries occupy two previously unproved 16 KiB read-only frames; mapping-level success elsewhere in .34 is not a same-page aperture result.",
+    "remoteCallRequiredByDesign": false,
+    "sameBootIdenticalWriteTicketRequiredPerFrame": true,
+    "targetFrames": [
+      "0x1ffc00000",
+      "0x1ffc18000"
+    ],
+    "writerIncluded": false
+  },
+  "runtimeVerified": false,
+  "schemaVersion": 1
+}

@@ -15,7 +15,7 @@
 #import "../kexploit/kutils.h"
 #import "../kexploit/vnode.h"
 #import "../kexploit/offsets.h"
-#import "../research/sandbox_research.h"
+#import "../kernel_helpers/sandbox_research.h"
 #import "../kexploit/kexploit_opa334.h"
 
 

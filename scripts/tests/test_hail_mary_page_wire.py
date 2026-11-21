@@ -4,12 +4,12 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "Cyanide" / "CNDHailMaryPageWire.m"
-HEADER = ROOT / "Cyanide" / "CNDHailMaryPageWire.h"
-PATCH = ROOT / "Cyanide" / "CNDHailMaryPatch.m"
-PATCH_HEADER = ROOT / "Cyanide" / "CNDHailMaryPatch.h"
-PROBE = ROOT / "Cyanide" / "CNDHailMaryProbe.m"
-PROBE_HEADER = ROOT / "Cyanide" / "CNDHailMaryProbe.h"
+SOURCE = ROOT / "Cyanide" / "probes" / "CNDHailMaryPageWire.m"
+HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryPageWire.h"
+PATCH = ROOT / "Cyanide" / "probes" / "CNDHailMaryPatch.m"
+PATCH_HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryPatch.h"
+PROBE = ROOT / "Cyanide" / "probes" / "CNDHailMaryProbe.m"
+PROBE_HEADER = ROOT / "Cyanide" / "probes" / "CNDHailMaryProbe.h"
 APP_DELEGATE = ROOT / "Cyanide" / "AppDelegate.m"
 SETTINGS = ROOT / "Cyanide" / "SettingsViewController.m"
 SETTINGS_HEADER = ROOT / "Cyanide" / "SettingsViewController.h"
@@ -222,7 +222,7 @@ class HailMaryPageWireTests(unittest.TestCase):
         self.assertIn(
             "void settings_run_hail_mary_page_wire_action(void)\n{", settings
         )
-        self.assertIn('#import "CNDHailMaryPageWire.h"', settings)
+        self.assertIn('#import "probes/CNDHailMaryPageWire.h"', settings)
         self.assertIn("CNDHailMaryPageWireRun(", settings)
         # The diagnostics stay hidden: the root action row count is pinned.
         self.assertIn("case RootSectionActions:        return 6;", settings)

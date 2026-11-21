@@ -195,6 +195,7 @@ static RemoteCallState g_RC_defaultState = {
     .success = true,
     .stableExceptionTimeoutFloorMS = 10000,
 };
+static uint64_t g_RC_stableCallsTotal;
 static __thread RemoteCallState *g_RC_currentState;
 
 @interface RemoteCallSession ()
@@ -332,6 +333,7 @@ static void remote_call_copy_cstring(char *dst, size_t dstSize, const char *src)
 static void remote_call_note_stable_call(const char *name)
 {
     g_RC_stableCalls++;
+    g_RC_stableCallsTotal++;
     remote_call_copy_cstring(g_RC_lastStableCall,
                              sizeof(remote_call_current_state()->lastStableCall),
                              name);
@@ -1091,6 +1093,23 @@ uint64_t remote_call_current_io_failure_count(void)
     uint64_t count = g_RC_ioFailures;
     pthread_mutex_unlock(&g_universal_ipc_mutex);
     return count;
+}
+
+uint64_t remote_call_total_stable_call_count(void)
+{
+    pthread_once(&g_universal_ipc_mutex_once, init_universal_mutex);
+    pthread_mutex_lock(&g_universal_ipc_mutex);
+    uint64_t count = g_RC_stableCallsTotal;
+    pthread_mutex_unlock(&g_universal_ipc_mutex);
+    return count;
+}
+
+uint64_t remote_call_session_stable_call_count(RemoteCallSession *session)
+{
+    if (!session) return 0;
+    /* _state is embedded in the session and only made current while pushed, so
+     * the count stays readable after the pop that ends a session window. */
+    return [session remoteCallStatePointer]->stableCalls;
 }
 
 int remote_call_current_pid(void)

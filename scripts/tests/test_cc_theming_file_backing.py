@@ -98,6 +98,7 @@ class CCFileBackingTests(unittest.TestCase):
             tested = subprocess.run([str(binary), str(ROOT), directory], capture_output=True, text=True, timeout=60)
             self.assertEqual(tested.returncode, 0, tested.stdout + tested.stderr)
             self.assertIn("partial rollback", tested.stdout)
+            self.assertIn("live-state stock/applied/partial probe", tested.stdout)
 
     def test_production_apply_only_changes_native_resource_files(self):
         settings = (ROOT / "Cyanide/SettingsViewController.m").read_text()

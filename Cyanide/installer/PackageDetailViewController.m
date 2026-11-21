@@ -128,7 +128,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     if (self.package.kind == PackageInstallKindCallRecordingSound) return @"Silence/Restore";
     if (self.package.kind == PackageInstallKindHideHomeBar) return @"Hide/Restore";
     if (self.package.kind == PackageInstallKindFontChanger) return @"Apply";
-    if (self.package.kind == PackageInstallKindControlCenterTheming) return @"Apply/Restore";
+    if (self.package.kind == PackageInstallKindControlCenterTheming)
+        return CNDCCThemingFileBackingLiveStateNow() == CNDCCThemingFileBackingLiveStateApplied
+            ? @"Restore" : @"Apply";
     if (self.package.kind == PackageInstallKindLockscreenGlyphs)
         return self.glyphOperationInProgress ? @"Working…" : @"Apply/Restore";
     return @"Disable/Enable";
@@ -161,8 +163,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     if (self.package.kind == PackageInstallKindControlCenterTheming) {
         if (intent == PackageQueueIntentInstall) return @"Apply Pending";
         if (intent == PackageQueueIntentUninstall) return @"Restore Pending";
-        return CNDCCThemingFileBackingHasJournaledState()
-            ? @"Active" : @"Stock";
+        CNDCCThemingFileBackingLiveState live = CNDCCThemingFileBackingLiveStateNow();
+        if (live == CNDCCThemingFileBackingLiveStateApplied) return @"Active";
+        return (live == CNDCCThemingFileBackingLiveStatePartial) ? @"Partial" : @"Stock";
     }
     if (self.package.kind == PackageInstallKindLockscreenGlyphs) {
         if (self.glyphOperationInProgress) return @"Updating live glyphs…";
@@ -224,13 +227,25 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     PackageQueueIntent intent = [[PackageQueue sharedQueue] intentForPackage:self.package];
     if (intent != PackageQueueIntentNone) return self.view.tintColor;
     if (self.package.kind == PackageInstallKindControlCenterTheming &&
-        CNDCCThemingFileBackingHasJournaledState()) {
+        CNDCCThemingFileBackingLiveStateNow() == CNDCCThemingFileBackingLiveStateApplied) {
         return UIColor.systemGreenColor;
     }
     if (self.package.isAppliedForCurrentSystemEpoch) {
         return UIColor.systemGreenColor;
     }
     return UIColor.secondaryLabelColor;
+}
+
+- (void)presentQueueFailure:(NSString *)reason
+{
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"Could Not Queue Change"
+                                            message:reason ?: @"The queued change could not be saved."
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                              style:UIAlertActionStyleDefault
+                                            handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (BOOL)presentQueueConflictIfNeededForIntent:(PackageQueueIntent)intent
@@ -241,15 +256,7 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
                                            reason:&reason]) {
         return NO;
     }
-
-    UIAlertController *alert =
-        [UIAlertController alertControllerWithTitle:@"Could Not Queue Change"
-                                            message:reason ?: @"The queued change could not be saved."
-                                     preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
-                                              style:UIAlertActionStyleDefault
-                                            handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [self presentQueueFailure:reason];
     return YES;
 }
 
@@ -286,7 +293,12 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         log_user("[INSTALLER] Pending OTA %s\n",
                  intent == PackageQueueIntentInstall ? "disable" : "enable");
     }
-    [[PackageQueue sharedQueue] queueIntent:intent forPackage:self.package];
+    NSString *reason = nil;
+    if (![[PackageQueue sharedQueue] queueIntent:intent
+                                      forPackage:self.package
+                                          reason:&reason]) {
+        [self presentQueueFailure:reason];
+    }
 }
 
 - (void)presentActivityLogWithCompletion:(dispatch_block_t)completion
@@ -406,23 +418,8 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
         return [UIMenu menuWithTitle:@"Watch Pairing Override" children:@[apply, remove]];
     }
 
-    if (self.package.kind == PackageInstallKindControlCenterTheming) {
-        UIAction *apply = [UIAction actionWithTitle:@"Apply Pulsar Resources"
-                                              image:[UIImage systemImageNamed:@"sparkles"]
-                                         identifier:nil
-                                            handler:^(__kindof UIAction *_) {
-            [self queueManualIntent:PackageQueueIntentInstall];
-        }];
-        UIAction *restore = [UIAction actionWithTitle:@"Restore Stock Resources"
-                                                image:[UIImage systemImageNamed:@"arrow.clockwise"]
-                                           identifier:nil
-                                              handler:^(__kindof UIAction *_) {
-            [self queueManualIntent:PackageQueueIntentUninstall];
-        }];
-        restore.attributes = UIMenuElementAttributesDestructive;
-        return [UIMenu menuWithTitle:@"Control Center Resources"
-            children:@[apply, restore]];
-    }
+    // Control Center theming has no menu: updateActionButton wires a single
+    // Apply/Restore button to didTapAction instead.
 
     if (self.package.kind == PackageInstallKindCallRecordingSound) {
         UIAction *silence = [UIAction actionWithTitle:@"Silence Disclosure Sounds"
@@ -792,7 +789,9 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     }
 
     BOOL directFontApply = self.package.kind == PackageInstallKindFontChanger;
-    BOOL useMenu = manual && !directFontApply &&
+    // Control Center theming carries one state-dependent action instead of a menu.
+    BOOL ccTheming = self.package.kind == PackageInstallKindControlCenterTheming;
+    BOOL useMenu = manual && !directFontApply && !ccTheming &&
         intent == PackageQueueIntentNone;
     UIBarButtonItem *item = [[UIBarButtonItem alloc] initWithTitle:title
                                                              style:style
@@ -876,6 +875,12 @@ typedef NS_ENUM(NSInteger, PackageDetailSection) {
     }
     if (self.package.kind == PackageInstallKindFontChanger) {
         [self queueManualIntent:PackageQueueIntentInstall];
+        return;
+    }
+    if (self.package.kind == PackageInstallKindControlCenterTheming) {
+        [self queueManualIntent:
+            CNDCCThemingFileBackingLiveStateNow() == CNDCCThemingFileBackingLiveStateApplied
+                ? PackageQueueIntentUninstall : PackageQueueIntentInstall];
         return;
     }
     // Other manual packages dispatch via menu — didTapAction should never run

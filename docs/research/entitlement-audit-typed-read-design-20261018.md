@@ -1,6 +1,6 @@
 # Entitlement audit: typed windowless read (design, 2026-10-18)
 
-Replacement for the DFS graph walk in `Cyanide/CNDPhysicalEntitlementAuditProbe.m`.
+Replacement for the DFS graph walk in `Cyanide/probes/CNDPhysicalEntitlementAuditProbe.m`.
 The walk is retired: both of its captured device panics are now symbolized from
 the device's own kernelcache (`docs/research/entitlement-audit-panic-20261018-iphone17,2.md`)
 as the walk's own reads — a zone-metadata VA seen by copyio's bounds validation,
@@ -100,7 +100,7 @@ Keep `schema`; bump `schemaVersion` to `2`. Per candidate:
 - schema v2 field set; hygiene tests (no writes / no kcall / no provider) stay;
 - read cap enforced (hops + DER + budget).
 
-## As built (2026-10-18, `Cyanide/CNDPhysicalEntitlementAuditProbe.m`)
+## As built (2026-10-18, `Cyanide/probes/CNDPhysicalEntitlementAuditProbe.m`)
 
 Two things the design above got *better* once the app's own code was read, and one
 that got stricter:
@@ -368,7 +368,7 @@ statement about the gate, not about the ranges: whether each range is actually
 readable is what the re-run tests, and `entitlementFound` stays `false` /
 `derBytesRead` stays `0` for them until it does.
 
-**Fix applied** (`Cyanide/CNDPhysicalEntitlementAuditProbe.m`): the object-window
+**Fix applied** (`Cyanide/probes/CNDPhysicalEntitlementAuditProbe.m`): the object-window
 test is split into `CNDPhysicalEntitlementAuditObjectBand` (band only) and
 `CNDPhysicalEntitlementAuditKernelObject` (band + alignment, still used for the
 object hops). Hop 6's gate now band-tests **both** ends, requires

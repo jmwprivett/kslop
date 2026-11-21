@@ -105,11 +105,11 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
             "Pseudo-bundles are not part of the installed-app debug count."
         )
         publication = apply.index(
-            "CNDIconServicesPublisherPublishVariantInBatch(", admission
+            "CNDIconServicesPublisherPublishVariantsInBatch(", admission
         )
         bounded = apply[admission:publication]
         self.assertIn("CNDRemixSupportedPseudoBundleIdentifiers()", bounded)
-        self.assertIn("if (!repairLivePersistentRecords && themeLookup[folded]", bounded)
+        self.assertIn("if (!updateRepairMode && themeLookup[folded]", bounded)
         self.assertIn("[matched addObject:pseudoBundleIdentifier]", bounded)
         self.assertNotIn("CNDIconServicesPublisherBeginBatch(", bounded)
 
@@ -125,7 +125,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         installed_end = apply.index("BOOL debugApplicationLimit", installed_start)
         self.assertIn(
             "CNDRemixIsSupportedPseudoBundleIdentifier(bundleIdentifier) &&\n"
-            "                    (repairLivePersistentRecords ||\n"
+            "                    (updateRepairMode ||\n"
             "                     ![foldedBundleFilter containsObject:folded])) continue;",
             apply[installed_start:installed_end],
         )
@@ -168,7 +168,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         )
         self.assertIn(
             "CNDRemixApplyIconServicesTheme(\n"
-            "            target, NO, YES, NO, nil, nil);", isolated_apply
+            "            target, NO, YES, NO, NO, nil, nil);", isolated_apply
         )
         start = self.remix.index(
             "+ (NSDictionary<NSString *, id> *)restoreIsolatedAirDropTest"
@@ -192,7 +192,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         apply = self.remix[apply_start:apply_end]
         admission = apply.index("[SBR_SHARE] airdrop asset=")
         publication = apply.index(
-            "CNDIconServicesPublisherPublishVariantInBatch(", admission
+            "CNDIconServicesPublisherPublishVariantsInBatch(", admission
         )
         final = apply.index("[SBR_SHARE] airdrop active=", publication)
         self.assertLess(admission, publication)
@@ -226,7 +226,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         self.assertIn("BOOL targetAvailable =", restore)
         self.assertIn("CNDRemixIsSupportedPseudoBundleIdentifier(", restore)
         self.assertIn("if (!targetAvailable)", restore)
-        self.assertIn("CNDIconServicesPublisherRestoreStockVariantInBatch(", restore)
+        self.assertIn("CNDIconServicesPublisherRestoreStockVariantsInBatch(", restore)
 
     def test_exact_airdrop_filename_is_accepted_by_theme_importer(self) -> None:
         self.assertIn("CNDMappedIOSBundleIDsForIconName(fileURL.lastPathComponent", self.snowboard)
@@ -499,7 +499,7 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         isolated_apply = self.remix[apply_start:apply_end]
         self.assertIn("NSSet<NSString *> *target = [NSSet setWithObject:", isolated_apply)
         self.assertIn("CNDRemixAirDropPseudoBundleIdentifier];", isolated_apply)
-        self.assertIn("NO, YES, NO, nil, nil", isolated_apply)
+        self.assertIn("NO, YES, NO, NO, nil, nil", isolated_apply)
         self.assertIn('@"ordinaryApplicationTargets"] = @0', isolated_apply)
         self.assertIn('@"expectedDescriptorCount"] = @2', isolated_apply)
         self.assertIn('@"airDropVerifiedSourceVariants"', isolated_apply)
@@ -823,8 +823,8 @@ class ShareSheetIconServicesTargetTests(unittest.TestCase):
         )
         restore_end = self.remix.index("\n@implementation CNDSnowBoardRemix", restore_start)
         restore = self.remix[restore_start:restore_end]
-        audit = restore.index("CNDIconServicesPublisherAuditVariantInBatch(")
-        mutate = restore.index("CNDIconServicesPublisherRestoreStockVariantInBatch(")
+        audit = restore.index("CNDIconServicesPublisherAuditVariantsInBatch(")
+        mutate = restore.index("CNDIconServicesPublisherRestoreStockVariantsInBatch(")
         self.assertLess(audit, mutate)
         self.assertIn('@"stage": @"already-stock-readback"', restore)
         self.assertIn('@"alreadyStockVariants"', restore)

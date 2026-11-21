@@ -22,15 +22,19 @@ void log_set_verbose(BOOL enabled);
 BOOL log_verbose_enabled(void);
 void log_user(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
-// Persistent session logs. When a chain run begins, call log_session_begin()
-// to open a timestamped file at <Documents>/chain-YYYYMMDD-HHMMSS.log.
-// Every subsequent line emitted via the printf macro / log_user / log_write
-// is tee'd into that file with an [HH:MM:SS.mmm] prefix. Call log_session_end()
-// when the chain run finishes (typically in @finally) to flush + close.
+// Persistent session logs. Session references are counted so nested or
+// overlapping chain runs share one file. When the outermost chain run begins,
+// log_session_begin() opens a timestamped file at
+// <Documents>/chain-YYYYMMDD-HHMMSS.log and prunes older logs to the retention
+// cap. While a session is open, every completed line emitted via the printf
+// macro / log_user / log_write is tee'd into that file with an
+// [HH:MM:SS.mmm] prefix. Call log_session_end() when each chain run finishes
+// (typically in @finally); the outermost end flushes + closes the shared file.
 // Info.plist's UIFileSharingEnabled surfaces these files in Files.app under
 // On My iPhone → Cyanide.
 void log_session_begin(void);
 void log_session_end(void);
+int log_session_depth(void);
 
 // Absolute path of the most recent session log file, or nil if none exist.
 NSString * _Nullable log_most_recent_session_path(void);

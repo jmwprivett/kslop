@@ -20,9 +20,9 @@
 #import "utils/sandbox.h"
 #import "TaskRop/RemoteCall.h"
 #import "TaskRop/PAC.h"
-#import "research/amfi_research.h"
-#import "research/vnode_research.h"
-#import "research/sandbox_research.h"
+#import "kernel_helpers/amfi_research.h"
+#import "kernel_helpers/vnode_research.h"
+#import "kernel_helpers/sandbox_research.h"
 
 
 #import <sys/mount.h>

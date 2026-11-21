@@ -1,126 +1,65 @@
-# SnowBoard Remix and iOS 26 research
+# Research index
 
-Current status, 2026-09-25: SnowBoard Remix publishes structured `IFImage`
-records through a pinned `iconservicesagent` session. The iOS 26.0 (`23A341`,
-`iPhone17,3`) descriptor profile comes from VM traces and physical-device
-checks. Apply and Restore use recovery journals that retain exact original
-stock records; Restore and application-update rebasing have been verified.
-**Update Repair** remains manually available and is also driven by the
-SnowBoard **Automatic Repair** mode. The mode coalesces application and
-LaunchServices notifications, runs periodic integrity audits, reuses only an
-already validated KRW session, and keeps the per-boot Transparency Fix active.
-SpringBoard cache invalidation is temporarily disabled while the consumer
-refresh path remains under investigation. The persistent index-token repair
-has host-build and static-test coverage; its full physical
-Apply/audit/reinstall/audit acceptance sequence remains outstanding.
+Start here. Each topic lists its **source of truth** first; other files in the
+topic are supporting evidence or history. Evidence labels follow
+[`probe-capability-contract.md`](probe-capability-contract.md):
+**implemented ≠ VM-proved ≠ physical-proved**. Never upgrade a claim when
+quoting a doc.
 
-## Descriptor profile
+Targets: physical iPhone17,2 (iPhone 16 Pro Max) and the iPhone17,3 research
+VM, both iOS 26.0 `23A341`, unless a doc says otherwise.
 
-The per-app core profile uses 3× scale throughout:
+## Rules and runbooks (read before probe work)
 
-| Points | Appearances | Notes |
+| Doc | Use it for |
+| --- | --- |
+| [`probe-capability-contract.md`](probe-capability-contract.md) | Canonical claim boundary for kernel / physical / VM probes |
+| [`vm-guide.md`](vm-guide.md) | Copy/paste VM lab kernel-call runbook and hard safety rules |
+| [`../frida-vm-testing.md`](../frida-vm-testing.md) | Version-locked Frida setup and Frida/KRW bridge |
+| [`../physical-device-logs.md`](../physical-device-logs.md) | Pulling logs, reports and panics from the phone |
+| [`../direct-device-updates.md`](../direct-device-updates.md) | Build, sign and install to the phone |
+| [`rea-secure-execution-interface.md`](rea-secure-execution-interface.md) | REA kernel/TXM/SPTM bundle tool |
+
+## Production features (shipping behavior contracts)
+
+| Topic | Source of truth | Supporting |
 | --- | --- | --- |
-| 13×13 | 0 | Core |
-| 27×27 | 0, 1 | Core; its appearance-0 store unit can alias 28-point |
-| 28×28 | 0 | Core launch/return consumer (`variantOptions=0`) and Share-sheet Apps-list consumer (`variantOptions=0x4`, `drawBorder=YES`) |
-| 38×38 | 0, 1 | Core |
-| 48×48 | 0 | Core |
-| 64×64 | 0 | Core for every app's Spotlight Apps-list result |
-| 68×68 | 0, 1 | Core |
-| 68×68 | 0 | Core launch/return record with `variantOptions=0x20000` |
-| 20×20 | 0 | Safari-only SnippetUI badge, outside the per-app core |
+| SnowBoard Remix / IconServices icon theming | [`vphone-ios26-iconservices-persistence-and-consumer-mappings.md`](vphone-ios26-iconservices-persistence-and-consumer-mappings.md), [`../snowboard-remix.md`](../snowboard-remix.md) | `vphone-ios26-icon-descriptor-matrix.md` (per-app descriptor profile), `vphone-ios26-icon-control-flow.md`, `vphone-ios26-applied-state-audit.md`, `vphone-ios26-springboard-cache-invalidation-matrix.md` (SpringBoard invalidation is currently **disabled** in production) |
+| Control Center (Pulsar) theming | [`cc-theming-file-backing.md`](cc-theming-file-backing.md) | [`cc-theming-research.md`](cc-theming-research.md) — route research, what was removed from production, rejected canaries |
+| Installer queue / pre-post-respring coordinator | [`queued-system-change-coordinator.md`](queued-system-change-coordinator.md) | [`../implicit-state-machines.md`](../implicit-state-machines.md) |
+| Calendar (and Clock) icons | [`vphone-ios26-calendar-provider-repair.md`](vphone-ios26-calendar-provider-repair.md) | Rejected routes: `vphone-ios26-clock-calendar-without-process-injection.md`, `vphone-ios26-clock-base-persistence-result.md` (+ `.log`), `vphone-ios26-clock-background-dedicated-route-result.md`, `vphone-ios26-calendar-order-experiment.md` |
+| Pulsar artwork assets | [`../pulsar-artwork.md`](../pulsar-artwork.md) | |
 
-Exact descriptors, including variant options, factory options, and observed
-pixel dimensions, are constructed in `CNDIconServicesDescriptorSpec`.
-Existing active journals expand safely by publishing only missing records.
-AirDrop is the one bounded non-application identity: when a theme supplies
-`com.apple.Sharing.AirDrop.png`, Cyanide publishes its 64-point activity-strip
-record and its bordered 28-point Apps-list record under
-`com.apple.Sharing.AirDrop`.
+## Research topics
 
-## Persistence and audit
+| Topic | Source of truth | Supporting / history |
+| --- | --- | --- |
+| Kernel CVE triage (26.7.2 / 27.2 advisories vs 23A341) | [`kernel-cve-triage-2026-11.md`](kernel-cve-triage-2026-11.md) — ranked KRW candidates; §13 = 27.3b2 / 27.2.1 / 26.7.3 check and diff order; §14 = 26.x same-major campaign, kc_match method, ipc_kobject lead, verdict | |
+| CVE-2026-86969 (IOAudioCodecs) | [`cve-2026-86969.md`](cve-2026-86969.md) | |
+| CVE-2026-112705 (AppleAVE2) | [`ave2-cve-2026-112705.md`](ave2-cve-2026-112705.md) — closed/negative for KRW on 26.0 | |
+| Physical-phone KRW: what works vs VM-only vs refused | [`physical-krw-findings.md`](physical-krw-findings.md) | `entitlement-audit-panic-20261018-iphone17,2.md`, `entitlement-audit-typed-read-design-20261018.md`, `kcall1-phone-derivation-20261016/` (probe derivation only — no kcall capability) |
+| IOSurface notification race (VM) | [`iosurface-race-root-cause-23A341-20261102.md`](iosurface-race-root-cause-23A341-20261102.md) | Not yet consolidated. Read in order: `iosurface-race-probe-plan-20261101.md` → root cause → `-v7` … `-v12` → `iosurface-race-krw-derivation-plan-20261103.md` (superseded by V10–V12 verdicts) → `cve-2026-112477-iosurface-race-link-20261103.md` |
+| Hail Mary shared-page probe/patch | [`hail-mary-data-page-experiment.md`](hail-mary-data-page-experiment.md) | Not yet consolidated: `hail-mary-probe.md`, `hail-mary-patch.md`, `hail-mary-page-wire-probe.md` (negative), `hail-mary-special-icon-class-redirect.md`, `vphone-ios26-special-icon-class-redirect.md` (see its 2026-10-21 correction), `hail-mary-switcher-library-followup.md`, plus the `*.json` evidence files here |
+| Spectrum / Accent colors | [`spectrum-color-file-ram-backing.md`](spectrum-color-file-ram-backing.md) (extends the feasibility note) | `spectrum-accent-dylib-port-feasibility.md` |
+| Spotlight experiments | | `vphone-ios26-phase6.md`, `vphone-ios26-spotlight-breakpoint-phase1.md`, `vphone-ios26-spotlight-pdf-reachability.md` |
+| SpringBoard resident repair supervisor | | `springboard-resident-repair-supervisor-feasibility.md` |
 
-Publication renders a structured `IFImage` and writes records through one
-pinned daemon session. The recovery journal keeps original stock UUIDs, store
-hashes, validation tokens, and LaunchServices source identities so Restore can
-prove the original state. Update Repair and rebase checks handle replacement
-application records without silently overwriting unknown drift.
+## Frida / KRW evidence files
 
-An unrelated app installation can trigger IconServices garbage collection.
-The identified durability defect was a stock LaunchServices validation token
-remaining in the on-disk index for a themed record. The current publisher
-corrects that persistent token and verifies a fresh lookup; the physical
-reinstall sequence still needs to confirm the fix end to end. Alias-aware
-audits accept the observed shared 27/28-point store unit only when its indexed
-UUID, source identity, and journaled hash prove the peer relationship.
+Live `23A341` evidence is split so a userland attach, VM kcall, PAC signer
+observation, and validator-consumption proof are not conflated:
+[`frida-vm-23A341.json`](frida-vm-23A341.json),
+[`frida-krw-bridge-23A341.json`](frida-krw-bridge-23A341.json) (read-only checkpoint),
+[`frida-krw-kcall-23A341.json`](frida-krw-kcall-23A341.json) (VM-only safe-return stub test — not a kcall capability),
+[`frida-krw-pac-signer-23A341.json`](frida-krw-pac-signer-23A341.json) (thread-state signer canary),
+[`thread-state-validator-resume-23A341.json`](thread-state-validator-resume-23A341.json) (validator/resume trace),
+[`frida-krw-validator-resume-23A341.json`](frida-krw-validator-resume-23A341.json) (Frida-correlated run),
+[`rea-secure-execution-runtime-23A341.json`](rea-secure-execution-runtime-23A341.json).
 
-Bounded VM and physical-device audits compare indexed UUIDs, store and pixel
-hashes, validation tokens, and LaunchServices source identities. They also
-inventory materialized SpringBoard consumers for Home icons, folders, App
-Library, notifications, switcher titles, and launch/return transitions. The
-tools cover lab KRW, injected inspection dylibs, RemoteCall tracing, local
-notification probes, app-install invalidation tracing, and resident consumer
-inventories. Spotlight transparency and Clock/Calendar icon sources remain
-active research topics. The screen-recording invalidation observation was
-isolated and unproven; failed Clock experiments are negative evidence, not
-production behavior. The one-second RemoteCall bootstrap wait remains.
+## Conventions for new docs
 
-The detailed notes below preserve chronology and occasionally say “still needs
-validation” about work completed later. Use this status page and the top of
-`snowboard-remix-current-handoff.md` for the current position, then the dated
-sections for evidence. Static dyld-cache and disassembly work uses the exact
-iOS 26.0 `23A341` / `iPhone17,3` VM profile.
-
-Pulsar Control Center port research is documented separately. See
-`vphone-ios26-pulsar-controlcenter-tracing.md` for the canonical Misaka v2
-target inventory, the bounded iOS 26 runtime trace, and the capture acceptance
-gates.
-
-The durable pre/post-respring installer architecture, recovery invariants,
-durable SnowBoard and epoch-bound presentation ACTIVE-state semantics, and the
-final device-validation checklist are recorded in
-`queued-system-change-coordinator.md`.
-
-The authoritative Calendar implementation contract—including the distinct
-SpringBoard and Spotlight model graphs, provider/source-cache ordering,
-bounded consumer update, Restore sequence, and the physical false-success
-proof—is recorded in `vphone-ios26-calendar-provider-repair.md`.
-
-The repeatable VM-only kernel-call setup, live debugger-address capture,
-verification gates, signature recovery, and physical-aperture safety boundary
-are recorded in
-[`vm-guide.md`](vm-guide.md).
-
-The version-locked Frida setup and the bounded Frida/KRW correlation bridge are
-recorded in [`../frida-vm-testing.md`](../frida-vm-testing.md). Live `23A341`
-evidence is split into the read-only checkpoint
-([`frida-krw-bridge-23A341.json`](frida-krw-bridge-23A341.json)), safe kcall
-([`frida-krw-kcall-23A341.json`](frida-krw-kcall-23A341.json)), deterministic
-thread-state signer canary
-([`frida-krw-pac-signer-23A341.json`](frida-krw-pac-signer-23A341.json)),
-detailed validator/resume trace
-([`thread-state-validator-resume-23A341.json`](thread-state-validator-resume-23A341.json)),
-and its Frida-correlated run
-([`frida-krw-validator-resume-23A341.json`](frida-krw-validator-resume-23A341.json))
-so a userland attach, VM kcall, PAC signer observation, and validator-consumption
-proof are not conflated.
-
-The October 7 2026 panic evidence that closed the text-page mutation route
-(esr `0x9600004f`, write permission fault in the physical aperture, seven
-identical panics) and the follow-up identical-bytes data-page aperture
-experiment are recorded in
-[`hail-mary-data-page-experiment.md`](hail-mary-data-page-experiment.md).
-
-The source-level behavior of the injected Spectrum and Accent jailbreak
-tweaks, the boundary between launch-time dylib hooks and Cyanide's bounded
-RemoteCall model, and the recommended staged Notes/Clock accent implementation
-are recorded in
-[`spectrum-accent-dylib-port-feasibility.md`](spectrum-accent-dylib-port-feasibility.md).
-
-The file-backed and aperture data-page alternatives to per-PID accent
-tinting — named-color CAR grafts through the existing `overwrite_system_file`
-transaction, and guarded shared-cache data-page recolors through the proved
-Hail Mary aperture primitive — with the target provenance matrix for system
-blue/green and the Calculator, Notes, and Clock orange accents, are recorded
-in
-[`spectrum-color-file-ram-backing.md`](spectrum-color-file-ram-backing.md).
+- One topic, one source-of-truth file. Append dated sections or fold results
+  into it instead of creating a new file per experiment run.
+- Put the current verdict and evidence level at the top; mark superseded
+  claims as corrected rather than leaving two "current" positions.
+- Add the file to this index.

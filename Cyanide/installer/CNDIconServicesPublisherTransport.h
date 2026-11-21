@@ -21,6 +21,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSDictionary<NSString *, id> *)restoreStockForBundleIdentifier:(NSString *)bundleIdentifier;
 - (NSDictionary<NSString *, id> *)restoreStockForBundleIdentifier:(NSString *)bundleIdentifier
                                            descriptorSpecification:(NSDictionary<NSString *, NSNumber *> *)descriptorSpecification;
+- (NSDictionary<NSString *, id> *)restoreStockForBundleIdentifier:(NSString *)bundleIdentifier
+                                          descriptorSpecifications:(NSArray<NSDictionary<NSString *, NSNumber *> *> *)descriptorSpecifications;
 - (NSDictionary<NSString *, id> *)auditBundleIdentifier:(NSString *)bundleIdentifier
                                   descriptorSpecification:(NSDictionary<NSString *, NSNumber *> *)descriptorSpecification;
 - (NSDictionary<NSString *, id> *)auditBundleIdentifier:(NSString *)bundleIdentifier

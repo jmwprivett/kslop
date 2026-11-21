@@ -211,8 +211,7 @@ Ported from [`kolbicz/DarkSword-Tweaks`](https://github.com/kolbicz/DarkSword-Tw
 
 ## SnowBoard Remix and iOS 26 research
 
-The [current research status](docs/research/README.md) and
-[chronological handoff](docs/research/snowboard-remix-current-handoff.md)
+The [research index](docs/research/README.md) and the documents it links
 record physical-device and VM evidence, plus the exact iOS 26.0 `23A341`,
 `iPhone17,2` dyld-cache and disassembly work. Publication uses structured
 `IFImage` objects, exact descriptors, one pinned daemon session, and recovery

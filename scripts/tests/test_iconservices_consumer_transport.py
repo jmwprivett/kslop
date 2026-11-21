@@ -1180,7 +1180,8 @@ class IconServicesConsumerTransportTests(unittest.TestCase):
 
     def test_restore_separates_persistent_cleanliness_from_final_result(self) -> None:
         remix = (INSTALLER / "CNDSnowBoardRemix.m").read_text(encoding="utf-8")
-        self.assertIn('journal[@"state"] = allVerified &&', remix)
+        self.assertIn("BOOL appVerified = allVerified &&", remix)
+        self.assertIn('journal[@"state"] = appVerified', remix)
         self.assertIn('@"persistent-stock-verified"', remix)
         self.assertIn("if (appVerified) persistentClean++;", remix)
         self.assertIn('@"persistentDataClean"', remix)

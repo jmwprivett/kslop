@@ -200,7 +200,7 @@ Attaching after launch also differs from injected startup behavior:
 
 The in-app porting guide already states the core translation problem directly:
 `%hook UIView` is not portable as a hook; an explicit RemoteCall message to a
-known view is portable. See `Cyanide/docs/DocsViewController.m`.
+known view is portable. See `Cyanide/DocsViewController.m`.
 
 ## Candidate implementation routes
 

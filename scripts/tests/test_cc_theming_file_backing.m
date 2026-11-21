@@ -335,6 +335,51 @@ static void CheckLegacyCatalogRetirement(NSDictionary *fixture, NSURL *productio
     }
 }
 
+static void CheckLiveState(NSURL *sourceRoot, NSURL *sourceJournal, NSURL *temporary)
+{
+    NSURL *empty = [temporary URLByAppendingPathComponent:@"live-state-empty" isDirectory:YES];
+    Check([[NSFileManager defaultManager] createDirectoryAtURL:empty
+        withIntermediateDirectories:YES attributes:nil error:NULL], @"create an empty journal directory");
+    Check(CNDCCThemingFileBackingLiveStateInDirectory(empty, sourceRoot) ==
+          CNDCCThemingFileBackingLiveStateStock, @"an absent journal reports stock");
+
+    NSURL *root = [temporary URLByAppendingPathComponent:@"live-state-system" isDirectory:YES];
+    NSURL *journal = [temporary URLByAppendingPathComponent:@"live-state-journal" isDirectory:YES];
+    Check([[NSFileManager defaultManager] copyItemAtURL:sourceRoot toURL:root error:NULL] &&
+          [[NSFileManager defaultManager] copyItemAtURL:sourceJournal toURL:journal error:NULL],
+          @"clone applied resources and their journal for the live-state probes");
+    NSURL *journalURL = [journal URLByAppendingPathComponent:@"journal.json"];
+    NSData *journalBefore = [NSData dataWithContentsOfURL:journalURL];
+    Check(CNDCCThemingFileBackingLiveStateInDirectory(journal, root) ==
+          CNDCCThemingFileBackingLiveStateApplied, @"applied payload bytes report applied");
+    Check([[NSData dataWithContentsOfURL:journalURL] isEqualToData:journalBefore],
+          @"the applied probe never writes the journal");
+
+    NSArray *entries = JSON(journalURL)[@"entries"];
+    NSDictionary *smallest = nil;
+    for (NSDictionary *entry in entries) {
+        if ([@[@"restored", @"prepared"] containsObject:entry[@"state"]]) continue;
+        if (!smallest || [entry[@"length"] unsignedIntegerValue] < [smallest[@"length"] unsignedIntegerValue])
+            smallest = entry;
+    }
+    Check(smallest != nil && entries.count > 4, @"the live-state fixture has enough probeable journal entries");
+    Save([NSData dataWithContentsOfURL:[journal URLByAppendingPathComponent:smallest[@"backupName"]]],
+         Target(root, smallest[@"path"]));
+    Check(CNDCCThemingFileBackingLiveStateInDirectory(journal, root) ==
+          CNDCCThemingFileBackingLiveStatePartial,
+          @"one reverted resource beside applied ones reports partial, never applied");
+    // Simulate the post-respring/reboot revert: every target is back to stock
+    // while the journal still claims the theme is applied.
+    for (NSDictionary *entry in entries)
+        if (![@[@"restored", @"prepared"] containsObject:entry[@"state"]])
+            Save([NSData dataWithContentsOfURL:[journal URLByAppendingPathComponent:entry[@"backupName"]]],
+                 Target(root, entry[@"path"]));
+    Check(CNDCCThemingFileBackingLiveStateInDirectory(journal, root) ==
+          CNDCCThemingFileBackingLiveStateStock, @"reverted target bytes report stock despite the applied journal");
+    Check([[NSData dataWithContentsOfURL:journalURL] isEqualToData:journalBefore],
+          @"the reverted probe leaves the journal untouched");
+}
+
 int main(int argc, const char *argv[])
 {
     @autoreleasepool {
@@ -579,6 +624,7 @@ int main(int argc, const char *argv[])
         Check([stored[@"entries"] count] == resourceCount, @"all originals retained in durable journal");
         CheckLegacyCatalogRetirement(fixture, productionArtwork, targetRoot, journal, temporary,
             catalogs, originals.count);
+        CheckLiveState(targetRoot, journal, temporary);
         for (NSDictionary *entry in stored[@"entries"]) {
             NSData *current = [NSData dataWithContentsOfURL:Target(targetRoot, entry[@"path"])];
             Check([SHA(current) isEqualToString:entry[@"payloadSHA256"]], @"written readback equals staged resource digest");
@@ -668,7 +714,7 @@ int main(int argc, const char *argv[])
         NSDictionary *unapproved = CNDCCThemingFileBackingRunFixture(YES, fixture, artwork,
             targetRoot, [temporary URLByAppendingPathComponent:@"new-journal"], @"23A341", writer);
         Check(![unapproved[@"success"] boolValue] && writeCalls == beforeUnapproved, @"unapproved system paths fail closed");
-        printf("CC file backing: %lu native geometry/state contracts, all four CoreUI 970 catalogs, transaction/readback, durable restore, idempotency, partial rollback, build and conflict assertions passed.\n", (unsigned long)verified);
+        printf("CC file backing: %lu native geometry/state contracts, all four CoreUI 970 catalogs, transaction/readback, durable restore, idempotency, partial rollback, build and conflict assertions, live-state stock/applied/partial probe passed.\n", (unsigned long)verified);
     }
     return 0;
 }

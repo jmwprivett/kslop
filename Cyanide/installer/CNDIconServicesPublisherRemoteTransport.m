@@ -159,6 +159,39 @@ _Static_assert(offsetof(CNDIconServicesStoreIndexValue23A341,
 @property (nonatomic, assign) BOOL payloadReady;
 @end
 
+typedef struct {
+    BOOL closed;
+    BOOL deferred;
+} CNDPublisherSessionTeardown;
+
+/* A timed-out stable call is still executing in the target and will return
+ * through the synthetic exception port. Destroying or abandoning that port
+ * underneath it turns the sentinel LR into a target crash. Let RemoteCall's
+ * retained deferred drainer own that case; otherwise teardown synchronously. */
+static CNDPublisherSessionTeardown
+cnd_publisher_teardown_session_safely(RemoteCallSession *session)
+{
+    CNDPublisherSessionTeardown result = {0};
+    if (!session || ![session hasLocalState]) {
+        result.closed = YES;
+        return result;
+    }
+
+    if ([session hasInFlightSyntheticCall]) {
+        result.deferred =
+            [session deferTeardownForInFlightSyntheticCall];
+        return result;
+    }
+
+    (void)[session destroyRemoteCall];
+    result.closed = ![session hasLocalState];
+    if (!result.closed && [session hasInFlightSyntheticCall]) {
+        result.deferred =
+            [session deferTeardownForInFlightSyntheticCall];
+    }
+    return result;
+}
+
 @implementation CNDIconServicesPublisherBatchState
 @end
 
@@ -2976,20 +3009,21 @@ cnd_publisher_run_stock_store(NSString *bundleIdentifier,
         session.pid == batch.pid;
     BOOL closed = NO;
     BOOL abandoned = NO;
+    BOOL teardownDeferred = NO;
     if (borrowedBatchSession) {
         batch.healthy = batch.healthy && sessionRetained;
         if (!sessionRetained && [session hasLocalState]) {
-            [session abandonRemoteCall];
-            abandoned = YES;
+            CNDPublisherSessionTeardown teardown =
+                cnd_publisher_teardown_session_safely(session);
+            closed = teardown.closed;
+            teardownDeferred = teardown.deferred;
         }
     } else {
-        if ([session hasLocalState] && remoteOK && transactionCleaned) {
-            (void)[session destroyRemoteCall];
-            closed = ![session hasLocalState];
-        }
         if ([session hasLocalState]) {
-            [session abandonRemoteCall];
-            abandoned = YES;
+            CNDPublisherSessionTeardown teardown =
+                cnd_publisher_teardown_session_safely(session);
+            closed = teardown.closed;
+            teardownDeferred = teardown.deferred;
         } else {
             closed = YES;
         }
@@ -3071,6 +3105,7 @@ cnd_publisher_run_stock_store(NSString *bundleIdentifier,
     report[@"remoteOK"] = @(remoteOK);
     report[@"closed"] = @(closed);
     report[@"abandoned"] = @(abandoned);
+    report[@"teardownDeferred"] = @(teardownDeferred);
     report[@"sessionRetained"] = @(sessionRetained);
     report[@"sessionLifecycleVerified"] = @(lifecycleVerified);
     report[@"sessionLocalStateRemaining"] = @([session hasLocalState]);
@@ -4095,22 +4130,23 @@ cnd_publisher_run(NSString *bundleIdentifier,
 
     BOOL closed = NO;
     BOOL abandoned = NO;
+    BOOL teardownDeferred = NO;
     BOOL sessionRetained = borrowedBatchSession && remoteOK && cleaned &&
         [session hasLocalState] && session.pid == batch.pid;
     if (borrowedBatchSession) {
         batch.healthy = batch.healthy && sessionRetained;
         if (!sessionRetained && [session hasLocalState]) {
-            [session abandonRemoteCall];
-            abandoned = YES;
+            CNDPublisherSessionTeardown teardown =
+                cnd_publisher_teardown_session_safely(session);
+            closed = teardown.closed;
+            teardownDeferred = teardown.deferred;
         }
     } else {
-        if ([session hasLocalState] && remoteOK && cleaned) {
-            (void)[session destroyRemoteCall];
-            closed = ![session hasLocalState];
-        }
         if ([session hasLocalState]) {
-            [session abandonRemoteCall];
-            abandoned = YES;
+            CNDPublisherSessionTeardown teardown =
+                cnd_publisher_teardown_session_safely(session);
+            closed = teardown.closed;
+            teardownDeferred = teardown.deferred;
         } else {
             closed = YES;
         }
@@ -4258,6 +4294,7 @@ cnd_publisher_run(NSString *bundleIdentifier,
     report[@"remoteOK"] = @(remoteOK);
     report[@"closed"] = @(closed);
     report[@"abandoned"] = @(abandoned);
+    report[@"teardownDeferred"] = @(teardownDeferred);
     report[@"sessionRetained"] = @(sessionRetained);
     report[@"sessionLifecycleVerified"] = @(lifecycleVerified);
     report[@"sessionLocalStateRemaining"] = @([session hasLocalState]);
@@ -5689,6 +5726,8 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
     __block BOOL cacheStoreIdentifierEqual = NO;
     __block BOOL cacheStoreValidationTokenEqual = NO;
     __block BOOL storeIndexUnitIdentifierEqual = NO;
+    __block BOOL cacheThemeMarkerPresent = NO;
+    __block BOOL storeThemeMarkerPresent = NO;
     __block BOOL sourceIdentityAuditReady = NO;
     __block BOOL sourceRegistryDataPresent = NO;
     __block BOOL currentSourceIdentifierPresent = NO;
@@ -6115,6 +6154,18 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
                 storeUnitPresent = storeUnit && storeData.length > 0;
                 storeUnitValid = storeUnit &&
                     (r_msg2(storeUnit, "isValid", 0, 0, 0, 0) & 1U);
+                NSData *themeMarker = [CNDIconServicesThemeMarker
+                    dataUsingEncoding:NSUTF8StringEncoding];
+                cacheThemeMarkerPresent = cacheData.length >=
+                        themeMarker.length &&
+                    [cacheData rangeOfData:themeMarker options:0
+                                     range:NSMakeRange(0, cacheData.length)]
+                        .location != NSNotFound;
+                storeThemeMarkerPresent = storeData.length >=
+                        themeMarker.length &&
+                    [storeData rangeOfData:themeMarker options:0
+                                     range:NSMakeRange(0, storeData.length)]
+                        .location != NSNotFound;
                 cacheStoreEqual = cacheResponsePresent && storeUnitPresent &&
                     [cacheData isEqualToData:storeData];
                 cacheStoreIdentifierEqual = responseUUID && storeUnitUUID &&
@@ -6246,6 +6297,8 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
         @"storeDataLength": @(storeData.length),
         @"storeDataSHA256": storeHash ?: @"",
         @"storeIdentifier": storeIdentifier ?: @"",
+        @"cacheThemeMarkerPresent": @(cacheThemeMarkerPresent),
+        @"storeThemeMarkerPresent": @(storeThemeMarkerPresent),
         @"cacheStoreEqual": @(cacheStoreEqual),
         @"cacheStoreIdentifierEqual": @(cacheStoreIdentifierEqual),
         @"cacheStoreValidationTokenEqual":
@@ -6305,6 +6358,115 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_variant(
         @"generationIssued": @NO,
         @"cachePurgeIssued": @NO,
         @"storeWriteIssued": @NO,
+    };
+}
+
+static const NSUInteger CNDIconServicesPublisherMaximumMutationMatrixCount = 64;
+
+/* One public transport invocation owns the complete app restore. The signed
+ * IconServices path remains descriptor-scoped, so the matrix deliberately
+ * calls the exact existing transaction once per descriptor while retaining
+ * the pinned session, application context, and ABI caches between calls. */
+static NSDictionary<NSString *, id> *cnd_publisher_restore_matrix(
+    NSString *bundleIdentifier,
+    NSArray<NSDictionary<NSString *, NSNumber *> *> *descriptorSpecifications)
+{
+    NSUInteger requestedCount = [descriptorSpecifications isKindOfClass:
+        NSArray.class] ? descriptorSpecifications.count : 0;
+    if (!cnd_publisher_valid_bundle_identifier(bundleIdentifier) ||
+        ![descriptorSpecifications isKindOfClass:NSArray.class] ||
+        requestedCount == 0 ||
+        requestedCount > CNDIconServicesPublisherMaximumMutationMatrixCount) {
+        return @{
+            @"ok": @NO,
+            @"stage": @"restore-matrix-input",
+            @"message": @"The stock restore matrix requires one valid bundle and a bounded non-empty descriptor array.",
+            @"mode": @"stock-matrix",
+            @"requestedCount": @(requestedCount),
+            @"attemptedCount": @0,
+            @"completedCount": @0,
+            @"variants": @[],
+        };
+    }
+
+    NSMutableArray<NSDictionary<NSString *, NSNumber *> *> *specifications =
+        [NSMutableArray arrayWithCapacity:requestedCount];
+    for (NSDictionary *candidate in descriptorSpecifications) {
+        NSDictionary *specification =
+            cnd_publisher_normalized_descriptor_specification(candidate);
+        if (!specification) {
+            return @{
+                @"ok": @NO,
+                @"stage": @"restore-matrix-input",
+                @"message": @"The stock restore matrix contains an invalid descriptor specification.",
+                @"mode": @"stock-matrix",
+                @"requestedCount": @(requestedCount),
+                @"attemptedCount": @0,
+                @"completedCount": @0,
+                @"variants": @[],
+            };
+        }
+        [specifications addObject:specification];
+    }
+
+    NSMutableArray<NSDictionary *> *reports =
+        [NSMutableArray arrayWithCapacity:requestedCount];
+    CNDIconServicesPublisherBatchState *batch = cnd_publisher_batch_state();
+    RemoteCallSession *session = batch.session;
+    NSUInteger completedCount = 0;
+    NSInteger stoppedAtIndex = -1;
+    double operationSeconds = 0;
+    double setupSeconds = 0;
+    double triggerSeconds = 0;
+    double verificationSeconds = 0;
+    for (NSUInteger index = 0; index < specifications.count; index++) {
+        if (!batch || !batch.healthy || !session ||
+            ![session hasLocalState] || session.pid != batch.pid) {
+            stoppedAtIndex = (NSInteger)index;
+            break;
+        }
+        NSDictionary *report = cnd_publisher_run(
+            bundleIdentifier, nil, specifications[index]);
+        [reports addObject:report ?: @{}];
+        operationSeconds += [report[@"durationSeconds"] doubleValue];
+        setupSeconds += [report[@"setupSeconds"] doubleValue];
+        triggerSeconds += [report[@"triggerSeconds"] doubleValue];
+        verificationSeconds += [report[@"verificationSeconds"] doubleValue];
+        if ([report[@"ok"] boolValue]) completedCount++;
+        if (!batch.healthy || ![session hasLocalState] ||
+            session.pid != batch.pid) {
+            if (index + 1 < specifications.count) {
+                stoppedAtIndex = (NSInteger)index + 1;
+            }
+            break;
+        }
+    }
+
+    BOOL transportHealthy = batch && batch.healthy && session &&
+        [session hasLocalState] && session.pid == batch.pid;
+    BOOL complete = transportHealthy && reports.count == requestedCount &&
+        completedCount == requestedCount;
+    return @{
+        @"ok": @(complete),
+        @"stage": complete ? @"restore-matrix-complete"
+                            : @"restore-matrix-partial",
+        @"message": complete
+            ? @"IconServices regenerated and verified the complete stock descriptor matrix."
+            : @"The stock descriptor matrix stopped or failed before every descriptor verified.",
+        @"mode": @"stock-matrix",
+        @"bundleIdentifier": bundleIdentifier,
+        @"variants": reports,
+        @"requestedCount": @(requestedCount),
+        @"attemptedCount": @(reports.count),
+        @"completedCount": @(completedCount),
+        @"stoppedAtIndex": @(stoppedAtIndex),
+        @"durationSeconds": @(operationSeconds),
+        @"setupSeconds": @(setupSeconds),
+        @"triggerSeconds": @(triggerSeconds),
+        @"verificationSeconds": @(verificationSeconds),
+        @"applicationContextScope": @"application-matrix",
+        @"descriptorRemoteOperationCount": @(reports.count),
+        @"transportHealthy": @(transportHealthy),
     };
 }
 
@@ -6441,7 +6603,8 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_matrix(
         RemoteCallSession *session = cnd_publisher_open_agent_session(
             wakeIdentifier, &sessionError);
         if (!session || ![session hasLocalState] || session.pid <= 1) {
-            if ([session hasLocalState]) [session abandonRemoteCall];
+            if ([session hasLocalState])
+                (void)cnd_publisher_teardown_session_safely(session);
             return @{
             @"ok": @NO,
             @"stage": @"remote-session",
@@ -6800,6 +6963,15 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_matrix(
     });
 }
 
+- (NSDictionary<NSString *, id> *)restoreStockForBundleIdentifier:(NSString *)bundleIdentifier
+                                          descriptorSpecifications:(NSArray<NSDictionary<NSString *,NSNumber *> *> *)descriptorSpecifications
+{
+    return cnd_remote_transport_call(self, ^{
+        return cnd_publisher_restore_matrix(
+            bundleIdentifier, descriptorSpecifications);
+    });
+}
+
 - (NSDictionary<NSString *, id> *)auditBundleIdentifier:(NSString *)bundleIdentifier
                                   descriptorSpecification:(NSDictionary<NSString *,NSNumber *> *)descriptorSpecification
 {
@@ -6950,13 +7122,12 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_matrix(
     }
     BOOL closed = NO;
     BOOL abandoned = NO;
-    if (healthyBeforeClose) {
-        (void)[session destroyRemoteCall];
-        closed = ![session hasLocalState];
-    }
+    BOOL teardownDeferred = NO;
     if ([session hasLocalState]) {
-        [session abandonRemoteCall];
-        abandoned = YES;
+        CNDPublisherSessionTeardown teardown =
+            cnd_publisher_teardown_session_safely(session);
+        closed = teardown.closed;
+        teardownDeferred = teardown.deferred;
     } else {
         closed = YES;
     }
@@ -6984,9 +7155,10 @@ static NSDictionary<NSString *, id> *cnd_publisher_audit_matrix(
             @(auditApplicationContextCleaned),
         @"closed": @(closed),
         @"abandoned": @(abandoned),
+        @"teardownDeferred": @(teardownDeferred),
         @"localStateRemaining": @([session hasLocalState]),
         };
-        if (closed || abandoned || ![session hasLocalState]) {
+        if (closed || teardownDeferred || ![session hasLocalState]) {
             self.batchState = nil;
         }
         return result;

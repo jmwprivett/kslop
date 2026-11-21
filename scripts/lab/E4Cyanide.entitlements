@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>application-identifier</key>
+    <string>ZTGMY9FA3V.com.zeroxjf.cyanide.e4observer.ztgmy9fa3v</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>ZTGMY9FA3V</string>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.zeroxjf.cyanide.e4.ztgmy9fa3v</string>
+    </array>
+    <key>get-task-allow</key>
+    <true/>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>ZTGMY9FA3V.*</string>
+        <string>com.apple.token</string>
+    </array>
+</dict>
+</plist>

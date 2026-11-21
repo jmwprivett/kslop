@@ -181,6 +181,9 @@ bool remote_call_lab_copy_target_bundle_path(char *path, size_t pathSize);
 // transport. Kernel proc/task identity is intentionally unavailable there.
 bool remote_call_uses_lab_backend(void);
 uint64_t remote_call_current_io_failure_count(void);
+// Process-wide stable-call total across the default and all session-pushed
+// states. The debug snapshot remains scoped to the caller's current state.
+uint64_t remote_call_total_stable_call_count(void);
 int remote_call_current_pid(void);
 uint64_t remote_call_current_proc(void);
 uint64_t remote_call_current_task(void);
@@ -316,6 +319,13 @@ void remote_call_with_session(RemoteCallSession *session, void (^block)(void));
 // block runs. Diagnostic failures and explicit RC_VERBOSE output remain visible.
 void remote_call_with_session_suppressing_result_logs(
     RemoteCallSession *session, void (^block)(void));
+// Stable calls recorded by this session so far, read from the session's own
+// embedded state. Unlike remote_call_total_stable_call_count(), this is
+// unaffected by concurrent sessions on other threads, so a before/after delta
+// isolates one operation's round trips. The value is cumulative for the
+// session's lifetime and deliberately is not reset by the push/pop that
+// remote_call_with_session performs. Returns 0 for a nil session.
+uint64_t remote_call_session_stable_call_count(RemoteCallSession *session);
 #endif
 
 #endif /* RemoteCall_h */

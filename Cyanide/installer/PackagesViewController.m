@@ -515,7 +515,7 @@ static NSString * const kNewCCThemingIdentifier = @"com.darksword.cc-theming";
                            background:[color colorWithAlphaComponent:0.18]
                             textColor:color];
         }
-        if (CNDCCThemingFileBackingHasJournaledState()) {
+        if (CNDCCThemingFileBackingLiveStateNow() == CNDCCThemingFileBackingLiveStateApplied) {
             return [self pillWithText:@"ACTIVE"
                            background:[UIColor.systemGreenColor
                                colorWithAlphaComponent:0.18]

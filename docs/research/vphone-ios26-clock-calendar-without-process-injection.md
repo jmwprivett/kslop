@@ -245,4 +245,3 @@ case, but it cannot by itself control these two special generators.
 - [`vphone-ios26-clock-base-persistence-result.md`](vphone-ios26-clock-base-persistence-result.md)
 - [`vphone-ios26-calendar-order-experiment.md`](vphone-ios26-calendar-order-experiment.md)
 - [`vphone-ios26-iconservices-persistence-and-consumer-mappings.md`](vphone-ios26-iconservices-persistence-and-consumer-mappings.md)
-- [`snowboard-remix-current-handoff.md`](snowboard-remix-current-handoff.md)
